@@ -17,7 +17,38 @@
     L2 norm of u_: 18.82162635436917
     L2 norm of p_: 36.19313531267534
     ```
-4. `a-2.py`: 
+4. `a-2.py`, 计算结果和a-1.py 几乎一样，除了p的二范数的最后四位有效数字(多核多次重复运行程序，结果并不相同)。
+    ```
+    L2 norm of u_: 18.82175173246589
+    L2 norm of p_: 36.194736103535114
+    ```
+    `mpirun -np 4 python3 a-2.py` 
+    ```
+    L2 norm of u_: 18.82162635436917
+    L2 norm of p_: 36.19313531267171
+    ```
+5. 
+
+
+L2 norm of u_: 18.821626354369172
+L2 norm of p_: 36.19313531267075
 
 
 
+
+
+## 通过 Nanobind 使用C++代码
+Installation
+------------
+
+1. Clone this repository
+2. Run `pip install .`
+
+Afterwards, you should be able to issue the following commands (shown in an
+interactive Python session):
+
+```pycon
+>>> import afsic
+>>> afsic.add(1, 2)
+3
+```

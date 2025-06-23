@@ -1,4 +1,4 @@
-export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890
+# export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890
 export PYVISTA_VERSION=0.45.2
 export PYTHON_VERSION=3.12
 export ADIOS2_VERSION=2.10.2
