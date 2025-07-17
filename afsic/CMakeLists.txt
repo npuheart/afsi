@@ -59,6 +59,5 @@ nanobind_add_module(
 add_subdirectory(src/mail)
 target_link_libraries(afsic_ext PRIVATE smtp_mail_sender)
 
-
 # Install directive for scikit-build-core
 install(TARGETS afsic_ext LIBRARY DESTINATION afsic)

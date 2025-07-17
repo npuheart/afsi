@@ -1,10 +1,10 @@
 {
   "python.analysis.extraPaths": [
-    "/home/kokkos_4/software/dolfinx-real/lib/python3.12/dist-packages",
-    "/home/kokkos_4/software/lib"
+    "/home/dolfinx/software/dolfinx-real/lib/python3.12/dist-packages",
+    "/home/dolfinx/software/lib"
   ],
   "python.autoComplete.extraPaths": [
-    "/home/kokkos_4/software/dolfinx-real/lib/python3.12/dist-packages",
-    "/home/kokkos_4/software/lib"
+    "/home/dolfinx/software/dolfinx-real/lib/python3.12/dist-packages",
+    "/home/dolfinx/software/lib"
   ],
 }

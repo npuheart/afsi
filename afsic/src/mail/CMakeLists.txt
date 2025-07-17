@@ -11,6 +11,7 @@ find_package(CURL REQUIRED)
 # 生成 smtp_mail_sender 静态库
 add_library(smtp_mail_sender STATIC smtp_mail_sender.cpp)
 target_link_libraries(smtp_mail_sender PRIVATE OpenSSL::SSL OpenSSL::Crypto CURL::libcurl)
+target_compile_options(smtp_mail_sender PRIVATE -fPIC)
 
 # 可执行文件只包含 main.cpp，并链接 smtp_mail_sender 库
 add_executable(${PROJECT_NAME} main.cpp)
