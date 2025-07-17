@@ -1,5 +1,12 @@
 
+## 安装
 
+执行 install 文件夹下的代码安装dolfinx，然后进入afsic文件夹，执行命令
+```
+pip install .
+```
+
+enjoy it!
 
 
 ## 通过 Nanobind 使用C++代码
