@@ -1,0 +1,17 @@
+{
+    "configurations": [
+        {
+            "name": "gfem",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/home/dolfinx/software/dolfinx-real/include"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/g++",
+            "cStandard": "c11",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}
