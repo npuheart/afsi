@@ -38,3 +38,10 @@ swanlab_init(project_name,experiment_name,config)
 
 swanlab_upload(0.1, data_log, capacity=10, pressure_left=20)
 
+# 添加流固耦合模块
+
+
+
+from afsic import coupling
+
+coupling()
