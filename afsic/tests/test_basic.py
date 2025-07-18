@@ -16,3 +16,7 @@ info.subject = "Test"
 info.body = "Hello from Python"
 info.is_html = False
 send_email(info)
+
+
+# 流体求解器
+from afsic import IPCSSolver

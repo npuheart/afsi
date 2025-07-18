@@ -6,7 +6,7 @@ import dolfinx
 from dolfinx.fem import (Function, functionspace,
                          dirichletbc, locate_dofs_topological)
 
-from IPCSSolver import IPCSSolver
+from afsic import IPCSSolver
 
 
 with dolfinx.io.XDMFFile(MPI.COMM_WORLD, 'DFG-2D-3-benchmark.xdmf', "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
