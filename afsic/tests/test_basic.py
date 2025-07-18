@@ -20,3 +20,21 @@ send_email(info)
 
 # 流体求解器
 from afsic import IPCSSolver
+
+
+
+# 时间步长管理
+from afsic import TimeManager, swanlab_init, swanlab_upload
+from mpi4py import MPI
+import requests
+import time
+
+project_name = "afsic"
+config = {"key": "value"}
+data_log = {"time" : time.time()}
+experiment_name = requests.get(f"http://counter.pengfeima.cn/{project_name}").text if MPI.COMM_WORLD.rank == 0 else None
+experiment_name = MPI.COMM_WORLD.bcast(experiment_name, root=0)
+swanlab_init(project_name,experiment_name,config)
+
+swanlab_upload(0.1, data_log, capacity=10, pressure_left=20)
+
