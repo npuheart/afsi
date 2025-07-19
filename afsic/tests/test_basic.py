@@ -42,6 +42,8 @@ swanlab_upload(0.1, data_log, capacity=10, pressure_left=20)
 
 
 
-from afsic import coupling
+from afsic import coupling, IBMesh
+
 
 coupling()
+mesh = IBMesh(0.0,1.0, 0.0,1.0, 32,32,2)

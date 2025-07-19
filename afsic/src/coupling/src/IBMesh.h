@@ -164,7 +164,7 @@ public:
 
 		printf("order : %ld\n", order);
 		printf("mesh size : %ld, %ld\n", nx, ny);
-		printf("mesh size : %f, %f\n", dx, dy);
+		printf("cell size : %f, %f\n", dx, dy);
 	}
 	void distribution(
 		std::vector<double2> &data_to,
