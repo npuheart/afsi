@@ -5,7 +5,8 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "/home/dolfinx/software/dolfinx-real/include",
-                "/home/dolfinx/dolfinx-env/lib/python3.12/site-packages/nanobind/include"
+                "/home/dolfinx/dolfinx-env/lib/python3.12/site-packages/nanobind/include",
+                "/usr/lib/x86_64-linux-gnu/openmpi/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/g++",

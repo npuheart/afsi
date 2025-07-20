@@ -31,37 +31,23 @@ struct IBMesh {
   }
 
   // void build_map(){
-  void build_map(const dolfinx::fem::Function<T, U> &coords) {
-    
-    // // processor owned data
-    // auto x = coords.x();
-    // std::int32_t size_local = x->bs() * x->index_map()->size_local();
-    // std::span<const T> data = x->array().subspan(0, size_local);
-    
-    // // create a vector to put global data
-    // std::int32_t size_global(0);
-    // MPI_Allreduce(&size_local, &size_global, 1,  dolfinx::MPI::mpi_t<std::int32_t>, MPI_SUM,
-    //               x->index_map()->comm());
-    // std::vector<int> global_data(size_global);
-    
-    // // 看看对了没
-    // int mpi_rank;
-    // MPI_Comm_rank(x->index_map()->comm(), &mpi_rank);
-    // printf("%d %d %d", mpi_rank,size_local, size_global);
+  void build_map(const std::vector<double>& coords) {
+    size_t num_dofs = coords.size()/top_dim;
 
-//   int MPI_Gather(
-//     const void* sendbuf,  // 发送数据的指针（如 `vector.data()` 或 `span.data()`）
-//     int sendcount,        // 每个进程发送的数据量
-//     MPI_Datatype sendtype,// 数据类型（如 `MPI_INT`, `MPI_DOUBLE`）
-//     void* recvbuf,        // 接收缓冲区（仅根进程有效）
-//     int recvcount,        // 每个进程接收的数据量（通常等于 `sendcount`）
-//     MPI_Datatype recvtype,// 数据类型（与 `sendtype` 相同）
-//     int root,            // 根进程的 rank
-//     MPI_Comm comm        // 通信域（如 `MPI_COMM_WORLD`）
-// );
+    // for (size_t i = 0; i < num_dofs; ++i) {
+    //   double x = coords[i * top_dim];
+    //   double y = coords[i * top_dim + 1];
 
-//  coords.x()->array();
-// global_map[hash] = cell_dofmap[k];
+    //   // Calculate the index in the global map
+    //   size_t index_i = static_cast<size_t>(std::round((x - x0) / dx));
+    //   size_t index_j = static_cast<size_t>(std::round((y - y0) / dy));
+
+    //   // Ensure indices are within bounds
+    //   if (index_i < nx && index_j < ny) {
+    //     global_map.push_back(index_j * nx + index_i);
+    //   }
+    // }
+
   }
 
   const std::shared_ptr<mesh::Mesh<U>> &mesh() { return mesh_ptr; }

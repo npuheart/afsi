@@ -73,6 +73,6 @@ v_cg2 = element("Lagrange", mesh.topology.cell_name(),
                 2, shape=(mesh.geometry.dim, ))
 V = functionspace(mesh, v_cg2)
 coords = Function(V)
-coords.interpolate(lambda x: np.array([x[0], x[1]])) 
+coords.interpolate(lambda x: np.array([x[0], x[0]*0.000000001])) 
 
 ibmesh.build_map(coords._cpp_object)
