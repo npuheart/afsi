@@ -2,7 +2,7 @@
 #include "mail/smtp_mail_sender.h"
 
 #include <nanobind/nanobind.h>
-// #include <nanobind/ndarray.h>
+#include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -34,36 +34,41 @@ NB_MODULE(afsic_ext, m) {
       .def(
           "build_map",
           [](coupling::IBMesh &self, nb::object py_coords) {
-            // nb::object x_attr = py_coords.attr("x");
-            // nb::object array_attr = x_attr.attr("array");
-            // auto data = nb::cast<nb::ndarray<T, nb::numpy>>(array_attr);
+            nb::object x_attr = py_coords.attr("x");
+            nb::object array_attr = x_attr.attr("array");
+            auto data = nb::cast<nb::ndarray<T, nb::numpy>>(array_attr);
 
-            // printf("Array data pointer : %p\n", data.data());
-            // printf("Array dimension : %zu\n", data.ndim());
-            // for (size_t i = 0; i < data.ndim(); ++i) {
-            //   printf("Array dimension [%zu] : %zu\n", i, data.shape(i));
-            //   printf("Array stride    [%zu] : %zd\n", i, data.stride(i));
-            // }
-            // printf("Device ID = %u (cpu=%i, cuda=%i)\n", data.device_id(),
-            //        int(data.device_type() == nb::device::cpu::value),
-            //        int(data.device_type() == nb::device::cuda::value));
-            // printf("Array dtype: int16=%i, uint32=%i, float32=%i, float64=%i\n",
-            //        data.dtype() == nb::dtype<int16_t>(),
-            //        data.dtype() == nb::dtype<uint32_t>(),
-            //        data.dtype() == nb::dtype<float>(),
-            //        data.dtype() == nb::dtype<double>());
-            
-            //        std::cout << "MPI Comm: " << self.mesh()->comm() << std::endl;
-            // // create a vector to put global data
-            // size_t size_local = data.shape(0); // NOTE: 我不知道用 data.shape(0); 表示数组总长是否合适。
-            // size_t size_global(0);
-            // MPI_Allreduce(&size_local, &size_global, 1, dolfinx::MPI::mpi_t<size_t>, MPI_SUM, self.mesh()->comm());
-            // std::vector<double> global_data(size_global);
+            printf("Array data pointer : %p\n", data.data());
+            printf("Array dimension : %zu\n", data.ndim());
+            for (size_t i = 0; i < data.ndim(); ++i) {
+              printf("Array dimension [%zu] : %zu\n", i, data.shape(i));
+              printf("Array stride    [%zu] : %zd\n", i, data.stride(i));
+            }
+            printf("Device ID = %u (cpu=%i, cuda=%i)\n", data.device_id(),
+                   int(data.device_type() == nb::device::cpu::value),
+                   int(data.device_type() == nb::device::cuda::value));
+            printf("Array dtype: int16=%i, uint32=%i, float32=%i, float64=%i\n",
+                   data.dtype() == nb::dtype<int16_t>(),
+                   data.dtype() == nb::dtype<uint32_t>(),
+                   data.dtype() == nb::dtype<float>(),
+                   data.dtype() == nb::dtype<double>());
 
-            // // 看看对了没
-            // int mpi_rank;
-            // MPI_Comm_rank(self.mesh()->comm(), &mpi_rank);
-            // printf("%d %d %d", mpi_rank,size_local, size_global);
+            // std::cout << "MPI Comm: " << MPI_COMM_WORLD << std::endl;
+            std::cout << "MPI Comm: " << self.mesh()->comm() << std::endl;
+
+            // create a vector to put global data
+            // NOTE: 我不知道用 data.shape(0); 表示数组总长是否合适。
+            std::int32_t size_local = data.shape(0);
+            std::int32_t size_global(0);
+            MPI_Allreduce(&size_local, &size_global, 1,
+                          dolfinx::MPI::mpi_t<std::int32_t>, MPI_SUM,
+                          self.mesh()->comm());
+            std::vector<double> global_data(size_global);
+
+            // 看看对了没
+            int mpi_rank;
+            MPI_Comm_rank(self.mesh()->comm(), &mpi_rank);
+            printf("%d %d %d", mpi_rank, size_local, size_global);
           },
           nb::arg("coords"), "build a map");
   // ,

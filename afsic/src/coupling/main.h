@@ -22,10 +22,10 @@ struct IBMesh {
 
     printf("order : %d\n", order);
     printf("mesh size : %ld, %ld\n", nx, ny);
-    printf("mesh size : %f, %f\n", dx, dy);
+    printf("cell size : %f, %f\n", dx, dy);
 
     auto part = mesh::create_cell_partitioner(mesh::GhostMode::shared_facet);
-    auto mesh = std::make_shared<mesh::Mesh<U>>(mesh::create_rectangle<U>(
+    mesh_ptr = std::make_shared<mesh::Mesh<U>>(mesh::create_rectangle<U>(
         MPI_COMM_WORLD, {{{x0, y0}, {x1, y1}}}, {nx, ny},
         mesh::CellType::quadrilateral, part));
   }
