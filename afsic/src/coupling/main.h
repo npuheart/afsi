@@ -10,77 +10,57 @@ using U = typename dolfinx::scalar_value_t<T>;
 
 namespace coupling {
 struct IBMesh {
-  IBMesh(double x0, double x1, double y0, double y1, std::int64_t dim_x,
-         std::int64_t dim_y, uint order)
-      : x0(x0), x1(x1), y0(y0), y1(y1), order(order) {
+    IBMesh(double x0, double x1, double y0, double y1, std::int64_t dim_x, std::int64_t dim_y, uint order) : x0(x0), x1(x1), y0(y0), y1(y1), order(order) {
 
-    nx = order * dim_x + 1;
-    ny = order * dim_y + 1;
+        nx = order * dim_x + 1;
+        ny = order * dim_y + 1;
 
-    dx = (x1 - x0) / (nx - 1);
-    dy = (y1 - y0) / (ny - 1);
+        dx = (x1 - x0) / (nx - 1);
+        dy = (y1 - y0) / (ny - 1);
 
-    printf("order : %d\n", order);
-    printf("mesh size : %ld, %ld\n", nx, ny);
-    printf("cell size : %f, %f\n", dx, dy);
+        printf("order : %d\n", order);
+        printf("mesh size : %ld, %ld\n", nx, ny);
+        printf("cell size : %f, %f\n", dx, dy);
 
-    auto part = mesh::create_cell_partitioner(mesh::GhostMode::shared_facet);
-    mesh_ptr = std::make_shared<mesh::Mesh<U>>(mesh::create_rectangle<U>(
-        MPI_COMM_WORLD, {{{x0, y0}, {x1, y1}}}, {nx, ny},
-        mesh::CellType::quadrilateral, part));
-  }
+        auto part = mesh::create_cell_partitioner(mesh::GhostMode::shared_facet);
+        mesh_ptr =
+            std::make_shared<mesh::Mesh<U>>(mesh::create_rectangle<U>(MPI_COMM_WORLD, {{{x0, y0}, {x1, y1}}}, {nx, ny}, mesh::CellType::quadrilateral, part));
+    }
 
-  // void build_map(){
-  void build_map(const std::vector<double>& coords) {
-    size_t num_dofs = coords.size()/top_dim;
+    // void build_map(){
+    void build_map(const std::vector<double> &coords) {
+        size_t num_dofs = coords.size() / top_dim;
+        global_map.resize(num_dofs);
+        for (size_t i = 0; i < num_dofs; ++i) {
+            size_t hash = get_hash(coords[i * top_dim], coords[i * top_dim + 1]);
+            global_map[hash] = i;
+        }
+    }
 
-    // for (size_t i = 0; i < num_dofs; ++i) {
-    //   double x = coords[i * top_dim];
-    //   double y = coords[i * top_dim + 1];
+    const std::shared_ptr<mesh::Mesh<U>> &mesh() { return mesh_ptr; }
 
-    //   // Calculate the index in the global map
-    //   size_t index_i = static_cast<size_t>(std::round((x - x0) / dx));
-    //   size_t index_j = static_cast<size_t>(std::round((y - y0) / dy));
+    struct Index {
+        size_t i, j;
+    };
+    Index get_index(const double &x, const double &y) const {
+        return Index{static_cast<size_t>(std::round((x - x0) / dx)), static_cast<size_t>(std::round((y - y0) / dy))};
+    }
 
-    //   // Ensure indices are within bounds
-    //   if (index_i < nx && index_j < ny) {
-    //     global_map.push_back(index_j * nx + index_i);
-    //   }
-    // }
+    size_t get_hash(const double &x, const double &y) const {
+        auto index = get_index(x, y);
+        return index.j * nx + index.i;
+    }
 
-  }
+  private:
+    double x0, x1, y0, y1;
+    double dx, dy;
+    std::int64_t nx, ny;
+    uint top_dim = 2;
+    uint order;
 
-  const std::shared_ptr<mesh::Mesh<U>> &mesh() { return mesh_ptr; }
-
-  // struct Index {
-  //   size_t i, j;
-  // };
-  // Index get_index(const double &x, const double &y) const {
-  //   Index index{};
-  //   index.i = static_cast<size_t>(std::round((x - x0) / dx));
-  //   index.j = static_cast<size_t>(std::round((y - y0) / dy));
-  //   return index;
-  // }
-
-  // Index get_index(const dolfin::Point &point) const {
-  //   return get_index(point.x(), point.y());
-  // }
-
-  // size_t get_hash(const dolfin::Point &point) const {
-  //   auto index = get_index(point);
-  //   return index.j * nx + index.i;
-  // }
-
-private:
-  double x0, x1, y0, y1;
-  double dx, dy;
-  std::int64_t nx, ny;
-  uint top_dim = 2;
-  uint order;
-
-  // The map of global index to hash index for cells.
-  std::vector<size_t> global_map;
-  std::shared_ptr<mesh::Mesh<U>> mesh_ptr;
+    // The map of global index to hash index for cells.
+    std::vector<size_t> global_map;
+    std::shared_ptr<mesh::Mesh<U>> mesh_ptr;
 };
 
 int coupling();
