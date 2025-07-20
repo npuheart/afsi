@@ -20,7 +20,7 @@ struct IBMesh {
     dx = (x1 - x0) / (nx - 1);
     dy = (y1 - y0) / (ny - 1);
 
-    printf("order : %ld\n", order);
+    printf("order : %d\n", order);
     printf("mesh size : %ld, %ld\n", nx, ny);
     printf("mesh size : %f, %f\n", dx, dy);
 
@@ -30,36 +30,60 @@ struct IBMesh {
         mesh::CellType::quadrilateral, part));
   }
 
-	void build_map(const Function &coordinates)
-	{}
+  // void build_map(){
+  void build_map(const dolfinx::fem::Function<T, U> &coords) {
+    
+    // // processor owned data
+    // auto x = coords.x();
+    // std::int32_t size_local = x->bs() * x->index_map()->size_local();
+    // std::span<const T> data = x->array().subspan(0, size_local);
+    
+    // // create a vector to put global data
+    // std::int32_t size_global(0);
+    // MPI_Allreduce(&size_local, &size_global, 1,  dolfinx::MPI::mpi_t<std::int32_t>, MPI_SUM,
+    //               x->index_map()->comm());
+    // std::vector<int> global_data(size_global);
+    
+    // // 看看对了没
+    // int mpi_rank;
+    // MPI_Comm_rank(x->index_map()->comm(), &mpi_rank);
+    // printf("%d %d %d", mpi_rank,size_local, size_global);
 
-  const std::shared_ptr<mesh::Mesh<U>>& mesh()
-	{
-		return mesh_ptr;
-	}
+//   int MPI_Gather(
+//     const void* sendbuf,  // 发送数据的指针（如 `vector.data()` 或 `span.data()`）
+//     int sendcount,        // 每个进程发送的数据量
+//     MPI_Datatype sendtype,// 数据类型（如 `MPI_INT`, `MPI_DOUBLE`）
+//     void* recvbuf,        // 接收缓冲区（仅根进程有效）
+//     int recvcount,        // 每个进程接收的数据量（通常等于 `sendcount`）
+//     MPI_Datatype recvtype,// 数据类型（与 `sendtype` 相同）
+//     int root,            // 根进程的 rank
+//     MPI_Comm comm        // 通信域（如 `MPI_COMM_WORLD`）
+// );
 
-  	struct Index
-	{
-		size_t i, j;
-	};
-	Index get_index(const double &x, const double &y) const
-	{
-		Index index{};
-		index.i = static_cast<size_t>(std::round((x - x0) / dx));
-		index.j = static_cast<size_t>(std::round((y - y0) / dy));
-		return index;
-	}
+//  coords.x()->array();
+// global_map[hash] = cell_dofmap[k];
+  }
 
-	Index get_index(const dolfin::Point &point) const
-	{
-		return get_index(point.x(), point.y());
-	}
+  const std::shared_ptr<mesh::Mesh<U>> &mesh() { return mesh_ptr; }
 
-	size_t get_hash(const dolfin::Point &point) const
-	{
-		auto index = get_index(point);
-		return index.j * nx + index.i;
-	}
+  // struct Index {
+  //   size_t i, j;
+  // };
+  // Index get_index(const double &x, const double &y) const {
+  //   Index index{};
+  //   index.i = static_cast<size_t>(std::round((x - x0) / dx));
+  //   index.j = static_cast<size_t>(std::round((y - y0) / dy));
+  //   return index;
+  // }
+
+  // Index get_index(const dolfin::Point &point) const {
+  //   return get_index(point.x(), point.y());
+  // }
+
+  // size_t get_hash(const dolfin::Point &point) const {
+  //   auto index = get_index(point);
+  //   return index.j * nx + index.i;
+  // }
 
 private:
   double x0, x1, y0, y1;
