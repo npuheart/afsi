@@ -45,7 +45,7 @@ facet_tag = meshtags(
 # 下面时 `a-4.py` 的代码
 
 t = 0
-T = 0.5                       # Final time
+T = 10.5                       # Final time
 dt = 1 / 1600                 # Time step size
 num_steps = int(T / dt)
 rho = 1.0

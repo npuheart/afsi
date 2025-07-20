@@ -10,14 +10,9 @@ using U = typename dolfinx::scalar_value_t<T>;
 
 namespace coupling {
 struct IBMesh {
-  IBMesh(double x0, double  x1, double y0, double y1,
-         std::int64_t dim_x, std::int64_t dim_y, uint order)
+  IBMesh(double x0, double x1, double y0, double y1, std::int64_t dim_x,
+         std::int64_t dim_y, uint order)
       : x0(x0), x1(x1), y0(y0), y1(y1), order(order) {
-
-    // x0 = points[0][0];
-    // y0 = points[0][1];
-    // x1 = points[1][0];
-    // y1 = points[1][1];
 
     nx = order * dim_x + 1;
     ny = order * dim_y + 1;
@@ -35,6 +30,37 @@ struct IBMesh {
         mesh::CellType::quadrilateral, part));
   }
 
+	void build_map(const Function &coordinates)
+	{}
+
+  const std::shared_ptr<mesh::Mesh<U>>& mesh()
+	{
+		return mesh_ptr;
+	}
+
+  	struct Index
+	{
+		size_t i, j;
+	};
+	Index get_index(const double &x, const double &y) const
+	{
+		Index index{};
+		index.i = static_cast<size_t>(std::round((x - x0) / dx));
+		index.j = static_cast<size_t>(std::round((y - y0) / dy));
+		return index;
+	}
+
+	Index get_index(const dolfin::Point &point) const
+	{
+		return get_index(point.x(), point.y());
+	}
+
+	size_t get_hash(const dolfin::Point &point) const
+	{
+		auto index = get_index(point);
+		return index.j * nx + index.i;
+	}
+
 private:
   double x0, x1, y0, y1;
   double dx, dy;
@@ -46,22 +72,6 @@ private:
   std::vector<size_t> global_map;
   std::shared_ptr<mesh::Mesh<U>> mesh_ptr;
 };
-
-
-//   std::string create_rectangle("create_rectangle_" + type);
-//   m.def(
-//       create_rectangle.c_str(),
-//       [](MPICommWrapper comm, std::array<std::array<T, 2>, 2> p,
-//          std::array<std::int64_t, 2> n, dolfinx::mesh::CellType celltype,
-//          const part::impl::PythonCellPartitionFunction& part,
-//          dolfinx::mesh::DiagonalType diagonal)
-//       {
-//         return dolfinx::mesh::create_rectangle<T>(
-//             comm.get(), p, n, celltype,
-//             part::impl::create_cell_partitioner_cpp(part), diagonal);
-//       },
-//       nb::arg("comm"), nb::arg("p"), nb::arg("n"), nb::arg("celltype"),
-//       nb::arg("partitioner").none(), nb::arg("diagonal"));
 
 int coupling();
 

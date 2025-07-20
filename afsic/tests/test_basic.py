@@ -47,3 +47,32 @@ from afsic import coupling, IBMesh
 
 coupling()
 mesh = IBMesh(0.0,1.0, 0.0,1.0, 32,32,2)
+
+
+# IBMesh 
+from mpi4py import MPI
+import ufl
+import dolfinx
+from dolfinx.mesh import CellType, GhostMode
+from basix.ufl import element
+import numpy as np
+# Create mesh
+from dolfinx.fem import (Function, functionspace,
+                         dirichletbc, locate_dofs_topological)
+mesh = dolfinx.mesh.create_rectangle(
+    comm=MPI.COMM_WORLD,
+    points=((0.0, 0.0), (1.0, 1.0)),
+    n=(32, 32),
+    cell_type=CellType.triangle,
+    # cell_type=CellType.quadrilateral,
+    ghost_mode=GhostMode.shared_facet,
+)
+
+x = ufl.SpatialCoordinate(mesh)
+v_cg2 = element("Lagrange", mesh.topology.cell_name(),
+                2, shape=(mesh.geometry.dim, ))
+V = functionspace(mesh, v_cg2)
+coords = Function(V)
+coords.interpolate(lambda x: np.array([x[0], x[1]])) 
+
+
