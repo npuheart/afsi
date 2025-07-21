@@ -44,9 +44,10 @@
 
 from afsic import coupling, IBMesh
 
-
+Nx = 32
+Ny = 30
 coupling()
-ibmesh = IBMesh(0.0,1.0, 0.0,1.0, 32,32,2)
+ibmesh = IBMesh(0.0,1.0, 0.0,1.0, Nx,Ny,2)
 
 
 # IBMesh 
@@ -62,7 +63,7 @@ from dolfinx.fem import (Function, functionspace,
 mesh = dolfinx.mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
     points=((0.0, 0.0), (1.0, 1.0)),
-    n=(2, 3),
+    n=(Nx, Ny),
     cell_type=CellType.triangle,
     # cell_type=CellType.quadrilateral,
     ghost_mode=GhostMode.shared_facet,
@@ -73,6 +74,8 @@ v_cg2 = element("Lagrange", mesh.topology.cell_name(),
                 2, shape=(mesh.geometry.dim, ))
 V = functionspace(mesh, v_cg2)
 coords = Function(V)
-coords.interpolate(lambda x: np.array([x[0], x[0]*0.000000001])) 
+coords.interpolate(lambda x: np.array([x[0], x[1]])) 
 
 ibmesh.build_map(coords._cpp_object)
+ibmesh.evaluate(0.5,0.5, coords._cpp_object)
+
