@@ -224,7 +224,10 @@ class IBInterpolation {
 
     IBInterpolation(IBMesh &fluid_mesh) : fluid_mesh(fluid_mesh) {}
 
-    void evaluate_current_points(const std::vector<double> &position) { assign(current_coordinates, position); }
+    void evaluate_current_points(const std::vector<double> &position) {
+        // 只修改 Particle 的x y 而不是 u1 u2
+        assign_positions(current_coordinates, position);
+    }
 
     void assign(std::vector<double> &position, const std::vector<Particle<double>> &data) {
         size_t value_size = fluid_mesh.top_dim;
@@ -250,15 +253,27 @@ class IBInterpolation {
         }
     }
 
-    // void fluid_to_solid(const Function &fluid, Function &solid)
-    // {
+    void assign_positions(std::vector<Particle<double>> &data, const std::vector<double> &position) {
 
-    // 	std::vector<Particle<double>> array_solid;
-    // 	std::vector<double2> array_fluid;
-    // 	fluid_mesh->extract_dofs(array_fluid, fluid);
-    // 	fluid_mesh->interpolation(array_solid, array_fluid, current_coordinates);
-    // 	assign(solid, array_solid);
-    // }
+        size_t value_size = fluid_mesh.top_dim;
+        size_t dof_size = position.size();
+        data.resize(dof_size / value_size);
+        // TODO: assert(dof_size / value_size == data.size());
+
+        for (size_t i = 0; i < data.size(); i++) {
+            data[i].x = position[i * value_size];
+            data[i].y = position[i * value_size + 1];
+        }
+    }
+
+    void fluid_to_solid(const std::vector<double> &fluid, std::vector<double> &solid) {
+
+        std::vector<Particle<double>> array_solid;
+        std::vector<double2> array_fluid;
+        fluid_mesh.extract_dofs(array_fluid, fluid);
+        fluid_mesh.interpolation(array_solid, array_fluid, current_coordinates);
+        assign(solid, array_solid);
+    }
 
     // void solid_to_fluid(Function &fluid, const Function &solid)
     // {

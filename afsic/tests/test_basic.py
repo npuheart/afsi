@@ -86,7 +86,7 @@ ibmesh.evaluate(0.5,0.5, coords._cpp_object)
 # 固体
 structure = dolfinx.mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
-    points=((0.0, 0.0), (1.0, 1.0)),
+    points=((0.3, 0.3), (0.7, 0.7)),
     n=(Nx, Ny),
     cell_type=CellType.triangle,
     # cell_type=CellType.quadrilateral,
@@ -95,7 +95,7 @@ structure = dolfinx.mesh.create_rectangle(
 
 x = ufl.SpatialCoordinate(structure)
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
-                2, shape=(structure.geometry.dim, ))
+                1, shape=(structure.geometry.dim, ))
 V = functionspace(structure, v_cg2)
 solid_coords = Function(V)
 solid_coords.interpolate(lambda x: np.array([x[0], x[1]])) 
@@ -104,3 +104,10 @@ solid_coords.interpolate(lambda x: np.array([x[0], x[1]]))
 ib_interpolation = IBInterpolation(ibmesh)
 ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 
+solid_fun = Function(V)
+
+ib_interpolation.fluid_to_solid(coords._cpp_object, solid_fun._cpp_object )
+
+xdmf_file = dolfinx.io.XDMFFile(structure.comm, "x.xdmf", "w")
+xdmf_file.write_mesh(structure)
+xdmf_file.write_function(solid_fun, 0.1)

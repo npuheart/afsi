@@ -55,6 +55,85 @@ std::vector<double> fun(MPI_Comm comm, std::int32_t size_local, const double *da
     return global_data;
 }
 
+
+std::int32_t reduce(MPI_Comm comm, std::int32_t size_local) {
+    int rank_root = 0;
+    int mpi_rank;
+    int mpi_size;
+    MPI_Comm_size(comm, &mpi_size);
+    MPI_Comm_rank(comm, &mpi_rank);
+
+    std::int32_t size_global(0);
+    MPI_Reduce(&size_local,                       // 发送缓冲区（每个进程的本地数据）
+               &size_global,                      // 接收缓冲区（仅 root 有效）
+               1,                                 // 数据数量
+               dolfinx::MPI::mpi_t<std::int32_t>, // MPI 数据类型
+               MPI_SUM,                           // 操作类型（求和）
+               rank_root,                         // root 进程（rank=0）
+               comm                               // MPI 通信子
+    );
+    return size_global;
+}
+
+std::vector<double> scatter(MPI_Comm comm, std::int32_t size_local, const double *data) {
+
+
+    // start of gather
+    int rank_root = 0;
+    int mpi_rank;
+    int mpi_size;
+    MPI_Comm_size(comm, &mpi_size);
+    MPI_Comm_rank(comm, &mpi_rank);
+
+    std::int32_t size_global(0);
+    MPI_Reduce(&size_local,                       // 发送缓冲区（每个进程的本地数据）
+               &size_global,                      // 接收缓冲区（仅 root 有效）
+               1,                                 // 数据数量
+               dolfinx::MPI::mpi_t<std::int32_t>, // MPI 数据类型
+               MPI_SUM,                           // 操作类型（求和）
+               rank_root,                         // root 进程（rank=0）
+               comm                               // MPI 通信子
+    );
+
+    std::vector<double> local_data(size_local);
+    std::int32_t *size_local_s = nullptr;
+    std::int32_t *displacement_s = nullptr;
+    if (mpi_rank == rank_root) {
+        size_local_s = (std::int32_t *)malloc(sizeof(std::int32_t) * mpi_size);
+        displacement_s = (std::int32_t *)malloc(sizeof(std::int32_t) * mpi_size);
+    }
+
+    // 在收集变长数组之前，先计算偏移量
+    MPI_Gather(&size_local, 1, dolfinx::MPI::mpi_t<std::int32_t>, size_local_s, 1, dolfinx::MPI::mpi_t<std::int32_t>, rank_root, comm);
+    if (mpi_rank == rank_root) {
+        displacement_s[0] = 0;
+        for (int i = 1; i < mpi_size; i++) {
+            displacement_s[i] = displacement_s[i - 1] + size_local_s[i - 1];
+        }
+        // total_data = displs[size-1] + recv_counts[size-1];
+    }
+
+    // Gather the data from all processes
+    MPI_Scatterv(
+        data, size_local_s, displacement_s, 
+        dolfinx::MPI::mpi_t<double>, local_data.data(), size_local, 
+        dolfinx::MPI::mpi_t<double>, rank_root, comm);
+
+    if (mpi_rank == rank_root) {
+        free(size_local_s);
+        free(displacement_s);
+    }
+    return local_data;
+}
+
+// int MPI_Gatherv(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
+//     void *recvbuf, const int recvcounts[], const int displs[], MPI_Datatype recvtype,
+//     int root, MPI_Comm comm)
+
+// int MPI_Scatterv(const void *sendbuf, const int sendcounts[], const int displs[],
+//     MPI_Datatype sendtype, void *recvbuf, int recvcount,
+//     MPI_Datatype recvtype, int root, MPI_Comm comm)
+
 NB_MODULE(afsic_ext, m) {
     m.doc() = "This is a \"hello world\" example with nanobind";
     m.def("add", [](int a, int b) { return a + b; }, "a"_a, "b"_a);
@@ -164,6 +243,44 @@ NB_MODULE(afsic_ext, m) {
                     self.evaluate_current_points(global_data);
                 }
                 printf("Global data size: %zu\n", global_data.size());
-            }, nb::arg("position"));
+            }, nb::arg("position"))
+        .def(
+            "fluid_to_solid",
+            [](coupling::IBInterpolation &self, nb::object py_fluid, nb::object py_solid) {
+
+                auto comm = self.fluid_mesh.mesh()->comm();
+                int rank_root = 0;
+                int mpi_rank;
+                int mpi_size;
+                MPI_Comm_size(comm, &mpi_size);
+                MPI_Comm_rank(comm, &mpi_rank);
+
+                // Collect fluid data
+                nb::object x_attr_f = py_fluid.attr("x");
+                nb::object array_attr_f = x_attr_f.attr("array");
+                auto data_f = nb::cast<nb::ndarray<T, nb::numpy>>(array_attr_f);
+                std::int32_t size_local_f = nb::cast<std::int32_t>(x_attr_f.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr_f.attr("bs"));
+                std::vector<double> global_data_f = fun(comm, size_local_f, data_f.data());
+                
+                // Collect solid data
+                nb::object x_attr_s = py_solid.attr("x");
+                std::int32_t size_local_s = nb::cast<std::int32_t>(x_attr_s.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr_s.attr("bs"));
+
+                // Fluid to solid
+                auto size_global_s = reduce(comm, size_local_s);
+                std::vector<double> global_data_s(size_global_s);
+                if (mpi_rank == rank_root) {
+                    self.fluid_to_solid(global_data_f, global_data_s);
+                }
+
+                // Scatter the solid data back to all processes
+                auto local_data_s = scatter(comm, size_local_s, global_data_s.data());
+
+                // Assign the solid data to the py_solid object
+                auto data_s = nb::cast<nb::ndarray<T, nb::numpy>>(x_attr_s.attr("array"));
+                std::memcpy(data_s.data(), local_data_s.data(), local_data_s.size() * sizeof(double));
+
+
+            }, nb::arg("fluid"), nb::arg("solid"));
     // void evaluate_current_points(const std::vector<double> &position) { assign_coordinates(current_coordinates, position); }
 }
