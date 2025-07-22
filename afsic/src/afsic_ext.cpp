@@ -55,7 +55,6 @@ std::vector<double> fun(MPI_Comm comm, std::int32_t size_local, const double *da
     return global_data;
 }
 
-
 std::int32_t reduce(MPI_Comm comm, std::int32_t size_local) {
     int rank_root = 0;
     int mpi_rank;
@@ -76,7 +75,6 @@ std::int32_t reduce(MPI_Comm comm, std::int32_t size_local) {
 }
 
 std::vector<double> scatter(MPI_Comm comm, std::int32_t size_local, const double *data) {
-
 
     // start of gather
     int rank_root = 0;
@@ -114,10 +112,7 @@ std::vector<double> scatter(MPI_Comm comm, std::int32_t size_local, const double
     }
 
     // Gather the data from all processes
-    MPI_Scatterv(
-        data, size_local_s, displacement_s, 
-        dolfinx::MPI::mpi_t<double>, local_data.data(), size_local, 
-        dolfinx::MPI::mpi_t<double>, rank_root, comm);
+    MPI_Scatterv(data, size_local_s, displacement_s, dolfinx::MPI::mpi_t<double>, local_data.data(), size_local, dolfinx::MPI::mpi_t<double>, rank_root, comm);
 
     if (mpi_rank == rank_root) {
         free(size_local_s);
@@ -243,11 +238,11 @@ NB_MODULE(afsic_ext, m) {
                     self.evaluate_current_points(global_data);
                 }
                 printf("Global data size: %zu\n", global_data.size());
-            }, nb::arg("position"))
+            },
+            nb::arg("position"))
         .def(
             "fluid_to_solid",
             [](coupling::IBInterpolation &self, nb::object py_fluid, nb::object py_solid) {
-
                 auto comm = self.fluid_mesh.mesh()->comm();
                 int rank_root = 0;
                 int mpi_rank;
@@ -261,7 +256,7 @@ NB_MODULE(afsic_ext, m) {
                 auto data_f = nb::cast<nb::ndarray<T, nb::numpy>>(array_attr_f);
                 std::int32_t size_local_f = nb::cast<std::int32_t>(x_attr_f.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr_f.attr("bs"));
                 std::vector<double> global_data_f = fun(comm, size_local_f, data_f.data());
-                
+
                 // Collect solid data
                 nb::object x_attr_s = py_solid.attr("x");
                 std::int32_t size_local_s = nb::cast<std::int32_t>(x_attr_s.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr_s.attr("bs"));
@@ -279,8 +274,42 @@ NB_MODULE(afsic_ext, m) {
                 // Assign the solid data to the py_solid object
                 auto data_s = nb::cast<nb::ndarray<T, nb::numpy>>(x_attr_s.attr("array"));
                 std::memcpy(data_s.data(), local_data_s.data(), local_data_s.size() * sizeof(double));
+            },
+            nb::arg("fluid"), nb::arg("solid"))
+        .def(
+            "solid_to_fluid",
+            [](coupling::IBInterpolation &self, nb::object py_fluid, nb::object py_solid) {
+                auto comm = self.fluid_mesh.mesh()->comm();
+                int rank_root = 0;
+                int mpi_rank;
+                int mpi_size;
+                MPI_Comm_size(comm, &mpi_size);
+                MPI_Comm_rank(comm, &mpi_rank);
 
+                // Collect fluid data
+                nb::object x_attr_f = py_fluid.attr("x");
+                std::int32_t size_local_f = nb::cast<std::int32_t>(x_attr_f.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr_f.attr("bs"));
 
-            }, nb::arg("fluid"), nb::arg("solid"));
-    // void evaluate_current_points(const std::vector<double> &position) { assign_coordinates(current_coordinates, position); }
+                // Collect solid data
+                nb::object x_attr_s = py_solid.attr("x");
+                std::int32_t size_local_s = nb::cast<std::int32_t>(x_attr_s.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr_s.attr("bs"));
+                nb::object array_attr_s = x_attr_s.attr("array");
+                auto data_s = nb::cast<nb::ndarray<T, nb::numpy>>(array_attr_s);
+                std::vector<double> global_data_s = fun(comm, size_local_s, data_s.data());
+
+                // Solid to fluid
+                auto size_global_f = reduce(comm, size_local_f);
+                std::vector<double> global_data_f(size_global_f);
+                if (mpi_rank == rank_root) {
+                    self.solid_to_fluid(global_data_f, global_data_s);
+                }
+
+                // Scatter the fluid data back to all processes
+                auto local_data_f = scatter(comm, size_local_f, global_data_f.data());
+
+                // Assign the solid data to the py_solid object
+                auto data_f = nb::cast<nb::ndarray<T, nb::numpy>>(x_attr_f.attr("array"));
+                std::memcpy(data_f.data(), local_data_f.data(), local_data_f.size() * sizeof(double));
+            },
+            nb::arg("fluid"), nb::arg("solid"));
 }

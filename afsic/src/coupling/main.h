@@ -156,6 +156,7 @@ struct IBMesh {
     }
 
     void assign_dofs(const std::vector<double2> &data, std::vector<double> &function) const {
+        
         for (size_t i = 0; i < nx; i++) {
             for (size_t j = 0; j < ny; j++) {
                 size_t hash = i + j * nx;
@@ -176,6 +177,35 @@ struct IBMesh {
         auto p = data_to[0];
         return {p.u1, p.u2};
     }
+
+    void distribution(std::vector<double2> &data_to, const std::vector<Particle<double>> &data_from, const std::vector<Particle<double>> &coordinates) const {
+        // assert(data_from.size() == coordinates.size());
+        constexpr size_t dim = 2;
+        constexpr size_t kernel_width_x = 4;
+        constexpr size_t kernel_width_y = 4;
+
+        using MyGrid = Grid<double2>;
+        using PV = PlaceValue<octal_to_decimal<kernel_width_x, kernel_width_y>()>;
+        using LKernel = IBKernel<PV, double, dim, std::array>;
+        using Spread = FunctorSpread<MyGrid::state_type, MyGrid::index_type, Particle<double>, double>;
+
+        MyGrid grid({nx, ny});
+        size_t num_lagrangian = coordinates.size();
+        for (size_t idx = 0; idx < num_lagrangian; idx++) {
+            Particle<MyGrid::value_type> particle;
+            particle.x = coordinates[idx].x;
+            particle.y = coordinates[idx].y;
+            particle.u1 = data_from[idx].u1;
+            particle.u2 = data_from[idx].u2;
+            particle.w = data_from[idx].w;
+            LKernel kernel({particle.x, particle.y}, {dx, dy});
+            iterate_grid_2D(grid, particle, kernel, Spread(dx, dy));
+        }
+
+        // 将 grid 复制到 data_to 中
+        grid.copy_to(data_to);
+    }
+
     void interpolation(std::vector<Particle<double>> &data_to, const std::vector<double2> &data_from, const std::vector<Particle<double>> &coordinates) const {
         // assert(data_to.size() == coordinates.size());
         constexpr size_t dim = 2;
@@ -275,18 +305,16 @@ class IBInterpolation {
         assign(solid, array_solid);
     }
 
-    // void solid_to_fluid(Function &fluid, const Function &solid)
-    // {
-    // 	std::vector<Particle<double>> array_solid;
-    // 	std::vector<double2> array_fluid;
-    // 	assign(array_solid, solid);
-    // 	for (size_t i = 0; i < array_solid.size(); i++)
-    // 	{
-    // 		array_solid[i].w = 1.0;
-    // 	}
-    // 	fluid_mesh->distribution(array_fluid, array_solid, current_coordinates);
-    // 	fluid_mesh->assign_dofs(array_fluid, fluid);
-    // }
+    void solid_to_fluid(std::vector<double> &fluid, const std::vector<double> &solid) {
+        std::vector<Particle<double>> array_solid;
+        std::vector<double2> array_fluid;
+        assign(array_solid, solid);
+        for (size_t i = 0; i < array_solid.size(); i++) {
+            array_solid[i].w = 1.0;
+        }
+        fluid_mesh.distribution(array_fluid, array_solid, current_coordinates);
+        fluid_mesh.assign_dofs(array_fluid, fluid);
+    }
 };
 
 } // namespace coupling

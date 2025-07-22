@@ -74,8 +74,11 @@ mesh = dolfinx.mesh.create_rectangle(
 x = ufl.SpatialCoordinate(mesh)
 v_cg2 = element("Lagrange", mesh.topology.cell_name(),
                 2, shape=(mesh.geometry.dim, ))
+v_cg1 = element("Lagrange", mesh.topology.cell_name(),
+                1, shape=(mesh.geometry.dim, ))
 V = functionspace(mesh, v_cg2)
 coords = Function(V)
+fluid_empty = Function(V)
 coords.interpolate(lambda x: np.array([x[0], x[1]])) 
 
 ibmesh.build_map(coords._cpp_object)
@@ -95,7 +98,7 @@ structure = dolfinx.mesh.create_rectangle(
 
 x = ufl.SpatialCoordinate(structure)
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
-                1, shape=(structure.geometry.dim, ))
+                2, shape=(structure.geometry.dim, ))
 V = functionspace(structure, v_cg2)
 solid_coords = Function(V)
 solid_coords.interpolate(lambda x: np.array([x[0], x[1]])) 
@@ -107,7 +110,30 @@ ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 solid_fun = Function(V)
 
 ib_interpolation.fluid_to_solid(coords._cpp_object, solid_fun._cpp_object )
+solid_fun.x.scatter_forward()
 
-xdmf_file = dolfinx.io.XDMFFile(structure.comm, "x.xdmf", "w")
-xdmf_file.write_mesh(structure)
-xdmf_file.write_function(solid_fun, 0.1)
+# xdmf_file = dolfinx.io.XDMFFile(structure.comm, "x.xdmf", "w")
+# xdmf_file.write_mesh(structure)
+# xdmf_file.write_function(solid_fun, 0.1)
+
+
+
+
+
+
+
+
+
+
+ib_interpolation.solid_to_fluid(fluid_empty._cpp_object, solid_fun._cpp_object )
+fluid_empty.x.scatter_forward()
+
+
+V1 = functionspace(mesh, v_cg1)
+fluid_empty_out = Function(V1)
+fluid_empty_out.interpolate(fluid_empty)
+
+
+xdmf_file = dolfinx.io.XDMFFile(mesh.comm, "y.xdmf", "w")
+xdmf_file.write_mesh(mesh)
+xdmf_file.write_function(fluid_empty_out, 0.1)
