@@ -38,3 +38,4 @@ export CMAKE_PREFIX_PATH=$INSTALL_DIR/lib/cmake:$CMAKE_PREFIX_PATH
 export CMAKE_PREFIX_PATH=$HOME/software/dolfinx-real/lib/cmake:$CMAKE_PREFIX_PATH
 export PYTHONPATH=$HOME/software/dolfinx-real/lib/python${PYTHON_VERSION}/dist-packages:$PYTHONPATH
 export LD_LIBRARY_PATH=$HOME/software/dolfinx-real/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/home/dolfinx/software/petsc/linux-gnu-real64-32/lib:$LD_LIBRARY_PATH

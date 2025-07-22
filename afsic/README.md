@@ -1,6 +1,7 @@
 
 sudo apt-get install libssl-dev
 sudo apt-get install libcurl4-openssl-dev 
+sudo apt-get install libtbb-dev # 并行库
 cd /path/to/afsic
 pip install .
 pytest tests
