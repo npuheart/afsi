@@ -42,12 +42,14 @@
 
 
 
-from afsic import coupling, IBMesh
+from afsic import coupling, IBMesh, IBInterpolation
 
 Nx = 32
 Ny = 30
 coupling()
 ibmesh = IBMesh(0.0,1.0, 0.0,1.0, Nx,Ny,2)
+
+
 
 
 # IBMesh 
@@ -78,4 +80,27 @@ coords.interpolate(lambda x: np.array([x[0], x[1]]))
 
 ibmesh.build_map(coords._cpp_object)
 ibmesh.evaluate(0.5,0.5, coords._cpp_object)
+
+
+
+# 固体
+structure = dolfinx.mesh.create_rectangle(
+    comm=MPI.COMM_WORLD,
+    points=((0.0, 0.0), (1.0, 1.0)),
+    n=(Nx, Ny),
+    cell_type=CellType.triangle,
+    # cell_type=CellType.quadrilateral,
+    ghost_mode=GhostMode.shared_facet,
+)
+
+x = ufl.SpatialCoordinate(structure)
+v_cg2 = element("Lagrange", structure.topology.cell_name(),
+                2, shape=(structure.geometry.dim, ))
+V = functionspace(structure, v_cg2)
+solid_coords = Function(V)
+solid_coords.interpolate(lambda x: np.array([x[0], x[1]])) 
+
+
+ib_interpolation = IBInterpolation(ibmesh)
+ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 

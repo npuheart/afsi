@@ -13,6 +13,7 @@
 #pragma once
 #include <iostream>
 #include <dolfin.h>
+#include <numeric>
 
 #include "spatial/kernel_helper.h"
 #include "spatial/kernel_expression.h"
@@ -356,3 +357,4 @@ private:
 	std::vector<size_t> global_map;
 	std::shared_ptr<Mesh> mesh_ptr;
 };
+

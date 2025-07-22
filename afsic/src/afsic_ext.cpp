@@ -24,7 +24,7 @@ std::vector<double> fun(MPI_Comm comm, std::int32_t size_local, const double *da
                dolfinx::MPI::mpi_t<std::int32_t>, // MPI 数据类型
                MPI_SUM,                           // 操作类型（求和）
                rank_root,                         // root 进程（rank=0）
-               comm                // MPI 通信子
+               comm                               // MPI 通信子
     );
 
     std::vector<double> global_data(size_global);
@@ -46,8 +46,7 @@ std::vector<double> fun(MPI_Comm comm, std::int32_t size_local, const double *da
     }
 
     // Gather the data from all processes
-    MPI_Gatherv(data, size_local, dolfinx::MPI::mpi_t<double>, global_data.data(), size_local_s, displacement_s, dolfinx::MPI::mpi_t<double>, rank_root,
-                comm);
+    MPI_Gatherv(data, size_local, dolfinx::MPI::mpi_t<double>, global_data.data(), size_local_s, displacement_s, dolfinx::MPI::mpi_t<double>, rank_root, comm);
 
     if (mpi_rank == rank_root) {
         free(size_local_s);
@@ -104,7 +103,7 @@ NB_MODULE(afsic_ext, m) {
                 // Create a vector to store global data
                 std::int32_t size_local = nb::cast<std::int32_t>(x_attr.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr.attr("bs"));
 
-                auto global_data = fun(self.mesh()->comm(),size_local, data.data());
+                auto global_data = fun(self.mesh()->comm(), size_local, data.data());
 
                 int rank_root = 0;
                 int mpi_rank;
@@ -142,5 +141,29 @@ NB_MODULE(afsic_ext, m) {
                 }
                 // return nb::cast<std::vector<double>>(result);
             },
-            "evaluate a function at a point", nb::arg("x"), nb::arg("y"),nb::arg("function"));
+            "evaluate a function at a point", nb::arg("x"), nb::arg("y"), nb::arg("function"));
+
+    nb::class_<coupling::IBInterpolation>(m, "IBInterpolation")
+        .def(nb::init<coupling::IBMesh &>(), nb::arg("ibmesh"))
+        .def(
+            "evaluate_current_points",
+            [](coupling::IBInterpolation &self, nb::object py_coords) {
+                nb::object x_attr = py_coords.attr("x");
+                nb::object array_attr = x_attr.attr("array");
+                auto data = nb::cast<nb::ndarray<T, nb::numpy>>(array_attr);
+                std::int32_t size_local = nb::cast<std::int32_t>(x_attr.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr.attr("bs"));
+                const auto global_data = fun(self.fluid_mesh.mesh()->comm(), size_local, data.data());
+
+                int rank_root = 0;
+                int mpi_rank;
+                int mpi_size;
+                MPI_Comm_size(self.fluid_mesh.mesh()->comm(), &mpi_size);
+                MPI_Comm_rank(self.fluid_mesh.mesh()->comm(), &mpi_rank);
+
+                if (mpi_rank == rank_root) {
+                    self.evaluate_current_points(global_data);
+                }
+                printf("Global data size: %zu\n", global_data.size());
+            }, nb::arg("position"));
+    // void evaluate_current_points(const std::vector<double> &position) { assign_coordinates(current_coordinates, position); }
 }
