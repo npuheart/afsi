@@ -99,21 +99,4 @@ xdmf_file = dolfinx.io.XDMFFile(mesh.comm, "x.xdmf", "w")
 xdmf_file.write_mesh(mesh)
 
 
-for i in range(num_steps):
-    # Update current time step
-    t += dt
-    # Update inlet velocity
-    up_velocity.t = t
-    u_up.interpolate(up_velocity)
-    ns_solver.solve_one_step()
-    u_io = Function(V_io)
-    u_io.interpolate(ns_solver.u_)
-    xdmf_file.write_function(u_io, t)
-    # xdmf_file.write_function(ns_solver.p_, t)
-    print(f"Step {i+1}/{num_steps}, Time: {t:.4f}")
 
-u_norm = dolfinx.la.norm(ns_solver.u_.x, dolfinx.la.Norm.l2)
-p_norm = dolfinx.la.norm(ns_solver.p_.x, dolfinx.la.Norm.l2)
-if mesh.comm.rank == 0:
-    print(f"L2 norm of u_: {u_norm}")
-    print(f"L2 norm of p_: {p_norm}")
