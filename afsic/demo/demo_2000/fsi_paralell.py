@@ -19,11 +19,16 @@ from afsic import swanlab_init, swanlab_upload
 config = {"nssolver": "ipcssolver",
           "project_name": "demo-2000", 
           "tag": "parallel",
-          "T": 10.5,
-          "dt": 1/1600,
+          "velocity_order": 2,
+          "force_order": 2,
+          "pressure_order": 1,
+          "T": 1.0,
+          "dt": 1/200,
           "rho": 1.0,
-          "Nx": 64,
-          "Ny": 64,
+          "Lx": 1.0,
+          "Ly": 1.0,
+          "Nx": 32,
+          "Ny": 32,
           "Nl": 20,
           "mu": 0.001,
           }
@@ -36,11 +41,13 @@ config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root
 swanlab_init(config['project_name'], config['experiment_name'], config)
 
 
-# 流体求解器
+###########################################################################################################
+##########################################  Fluid #########################################################
+###########################################################################################################
 # Create mesh
 mesh = dolfinx.mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
-    points=((0.0, 0.0), (1.0, 1.0)),
+    points=((0.0, 0.0), (config["Lx"], config["Ly"])),
     n=(config["Nx"], config["Ny"]),
     cell_type=CellType.quadrilateral,
     ghost_mode=GhostMode.shared_facet,
@@ -50,9 +57,9 @@ mesh = dolfinx.mesh.create_rectangle(
 mesh.topology.create_connectivity(1, 2) 
 marker_left, marker_right, marker_down, marker_up = 1, 2, 3, 4
 boundaries = [(1, lambda x: np.isclose(x[0], 0)),
-              (2, lambda x: np.isclose(x[0], 1)),
+              (2, lambda x: np.isclose(x[0], config["Lx"])),
               (3, lambda x: np.isclose(x[1], 0)),
-              (4, lambda x: np.isclose(x[1], 1))]
+              (4, lambda x: np.isclose(x[1], config["Ly"]))]
 
 
 facet_indices, facet_markers = [], []
@@ -66,9 +73,6 @@ facet_markers = np.hstack(facet_markers).astype(np.int32)
 sorted_facets = np.argsort(facet_indices)
 facet_tag = meshtags(
     mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
-
-
-
 
 v_cg2 = element("Lagrange", mesh.topology.cell_name(),
                 2, shape=(mesh.geometry.dim, ))
@@ -115,11 +119,60 @@ bcp = []
 # Define Solver
 ns_solver = IPCSSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'])
 
+###########################################################################################################
+##########################################  Structure  ####################################################
+###########################################################################################################
+structure = dolfinx.mesh.create_rectangle(
+    comm=MPI.COMM_WORLD,
+    points=((0.3, 0.3), (0.7, 0.7)),
+    n=(config["Nx"], config["Ny"]),
+    cell_type=CellType.triangle,
+    ghost_mode=GhostMode.shared_facet,
+)
+
+v_cg2 = element("Lagrange", structure.topology.cell_name(),
+                 config["force_order"], shape=(structure.geometry.dim, ))
+v_cg1 = element("Lagrange", structure.topology.cell_name(),
+                 1, shape=(structure.geometry.dim, ))
+Vs = functionspace(structure, v_cg2)
+Vs_io = functionspace(structure, v_cg1)
+
+coords_ref = Function(Vs)
+coords_ref_io = Function(Vs_io)
+solid_force = Function(Vs)
+solid_force_io = Function(Vs_io)
+
+
+
+
+###########################################################################################################
+##########################################  Interaction  ##################################################
+###########################################################################################################
+from afsic import IBMesh, IBInterpolation
+ibmesh = IBMesh(0.0, config["Lx"],0.0, config["Ly"], config["Nx"], config["Ny"], config["velocity_order"])
+ib_interpolation = IBInterpolation(ibmesh)
+coords_bg = Function(V)
+coords_bg.interpolate(lambda x: np.array([x[0], x[1]])) 
+coords_ref.interpolate(lambda x: np.array([x[0], x[1]]))
+ibmesh.build_map(coords_bg._cpp_object)
+ib_interpolation.evaluate_current_points(coords_ref._cpp_object)
+
+
+
+
+###########################################################################################################
+##########################################  Output  #######################################################
+###########################################################################################################
+
+
+
 
 u_io = Function(V_io)
-xdmf_file = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"velocity.xdmf", "w")
-xdmf_file.write_mesh(mesh)
-    
+file_velocity = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"velocity.xdmf", "w")
+file_solid_force = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"solid_force.xdmf", "w")
+file_velocity.write_mesh(mesh)
+file_solid_force.write_mesh(structure)
+
 time_manager = TimeManager(config['T'], config['num_steps'], fps=20)
 
 for step in range(  config['num_steps']):
@@ -127,12 +180,16 @@ for step in range(  config['num_steps']):
     up_velocity.t = current_time
     u_up.interpolate(up_velocity)
     ns_solver.solve_one_step()
+    ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_force._cpp_object)
+    solid_force.x.scatter_forward()
     data_log = {}
     if time_manager.should_output(step):
         u_norm = dolfinx.la.norm(ns_solver.u_.x, dolfinx.la.Norm.l2)
         p_norm = dolfinx.la.norm(ns_solver.p_.x, dolfinx.la.Norm.l2)
         u_io.interpolate(ns_solver.u_)
-        xdmf_file.write_function(u_io, current_time)
+        file_velocity.write_function(u_io, current_time)
+        solid_force_io.interpolate(solid_force)
+        file_solid_force.write_function(solid_force_io, current_time)
         if MPI.COMM_WORLD.rank == 0:
             data_log["u_norm"] = u_norm
             data_log["p_norm"] = p_norm
