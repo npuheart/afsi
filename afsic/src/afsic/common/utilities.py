@@ -1,5 +1,7 @@
 from mpi4py import MPI
 import swanlab, time
+from datetime import datetime
+import os
 
 start_time = time.time()
 dt_minimum = 1e-7
@@ -50,3 +52,26 @@ def swanlab_upload(current_time, data_log_1, **params):
         swanlab.log(
             data_log, step = int(1+current_time/dt_minimum)
         )
+
+
+
+output_path = "/home/dolfinx/afsi/data/"
+
+
+def check_path(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+        print(f"{path} 文件夹已创建。")
+    else:
+        print(f"{path} 文件夹已存在。")
+
+def unique_filename(current_file_name, tag="normal"):
+    check_path(output_path)
+    note = os.path.splitext(current_file_name)[0]
+    file_id = (
+        f"{output_path}{note}/{tag}/"
+        + datetime.now().strftime("%Y%m%d-%H%M%S") 
+        + "/"
+    )
+    check_path(f"{output_path}{note}/{tag}/" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    return file_id

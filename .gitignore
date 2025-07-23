@@ -3,3 +3,10 @@ figures
 results
 
 mail/build
+
+
+
+*nohup.out
+
+*.xdmf
+*.h5

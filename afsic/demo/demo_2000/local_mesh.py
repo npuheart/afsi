@@ -6,13 +6,7 @@ import numpy as np
 import os
 
 # Parameters
-nv = 0.01
-T = 10.0
-dt = 2e-4
-num_steps = int(T/dt)
-rho = 1.0
-Nl = 20
-Ne = 32
+
 dt_minimum = 1e-5
 
 # Mesh
@@ -21,7 +15,7 @@ order_pressure = 1
 order_displacement = 2
 
 
-ib_mesh = IBMesh([Point(0, 0), Point(1, 1)], [Ne, Ne], order_velocity)
+
 fluid_mesh = ib_mesh.mesh()
 home_dir = os.path.expanduser("~")
 solid_mesh = Mesh()

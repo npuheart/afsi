@@ -4,4 +4,4 @@ from .afsic_ext import coupling, IBMesh, IBInterpolation
 
 from .euler.IPCSSolver import IPCSSolver
 
-from .common.utilities import TimeManager, swanlab_init, swanlab_upload
+from .common.utilities import TimeManager, swanlab_init, swanlab_upload, unique_filename

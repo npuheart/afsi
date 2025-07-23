@@ -1,29 +1,4 @@
-import os
-import swanlab
-import time
-from loguru import logger
-from fenics import *
-from local_mesh import *
-from ibfenics1.nssolver import IPCSSolver
-from ibfenics1.nssolver import ChorinSolver
-from ibfenics1.io import (
-    unique_filename,
-    create_xdmf_file,
-    TimeManager,
-    write_paramters,
-    write_excel,
-    write_excel_sheets,
-)
 
-nssolver = "projection"
-
-swanlab.login(api_key="VBxEp1UBe2606KHDM9264", save=True)
-swanlab.init(
-    project=os.path.splitext(os.path.basename(__file__))[0],
-    experiment_name=f"dt_{dt}_Ne_{Ne}_Nl_{Nl}_{nssolver}",
-    description="二维方腔驱动圆球流动",
-    config={'dt': dt, 'Ne': Ne, 'Nl': Nl},
-)
 
 u0 = Function(Vf, name="velocity")
 p0 = Function(Qf, name="pressure")

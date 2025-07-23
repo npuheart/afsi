@@ -15,8 +15,8 @@ mesh = dolfinx.mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
     points=((0.0, 0.0), (1.0, 1.0)),
     n=(32, 32),
-    cell_type=CellType.triangle,
-    # cell_type=CellType.quadrilateral,
+    # cell_type=CellType.triangle,
+    cell_type=CellType.quadrilateral,
     ghost_mode=GhostMode.shared_facet,
 )
 
@@ -94,8 +94,11 @@ bcp = []
 
 # Define Solver
 ns_solver = IPCSSolver(V, Q, bcu, bcp, dt, rho, mu)
+
 xdmf_file = dolfinx.io.XDMFFile(mesh.comm, "x.xdmf", "w")
 xdmf_file.write_mesh(mesh)
+
+
 for i in range(num_steps):
     # Update current time step
     t += dt
