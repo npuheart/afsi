@@ -49,7 +49,7 @@ class IPCSSolver:
         phi = Function(Q)
 
 
-        f = Constant(mesh, PETSc.ScalarType((0, 0)))
+        f = Function(V)
         F1 = rho / k * dot(u - u_n, v) * dx
         F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
         F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
@@ -115,6 +115,7 @@ class IPCSSolver:
         self.L3 = L3
         self.A3 = A3
         self.b3 = b3
+        self.f = f
 
     def solve_one_step(self):
         # Step 1: Tentative velocity step

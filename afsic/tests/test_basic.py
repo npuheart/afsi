@@ -125,7 +125,7 @@ solid_fun.x.scatter_forward()
 
 
 
-ib_interpolation.solid_to_fluid(fluid_empty._cpp_object, solid_fun._cpp_object )
+ib_interpolation.solid_to_fluid(fluid_empty._cpp_object, solid_fun._cpp_object)
 fluid_empty.x.scatter_forward()
 
 

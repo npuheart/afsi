@@ -190,7 +190,7 @@ NB_MODULE(afsic_ext, m) {
                     // 最后在 root 进程调用 build_map 函数，IBMesh 中不用考虑 MPI 进程。
                     self.build_map(global_data);
                 }
-                printf("Global data size: %zu\n", global_data.size());
+                // printf("Global data size: %zu\n", global_data.size());
             },
             nb::arg("coords"), "build a map")
         .def(
@@ -237,7 +237,7 @@ NB_MODULE(afsic_ext, m) {
                 if (mpi_rank == rank_root) {
                     self.evaluate_current_points(global_data);
                 }
-                printf("Global data size: %zu\n", global_data.size());
+                // printf("Global data size: %zu\n", global_data.size());
             },
             nb::arg("position"))
         .def(
