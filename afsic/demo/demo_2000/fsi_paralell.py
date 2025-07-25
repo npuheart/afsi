@@ -16,7 +16,7 @@ from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction, in
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from dolfinx.fem import form
 
-from afsic import IPCSSolver, TimeManager
+from afsic import IPCSSolver,ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 
@@ -122,18 +122,13 @@ bcp = []
 
 
 # Define Solver
-ns_solver = IPCSSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'])
+ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'])
 
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-structure = dolfinx.mesh.create_rectangle(
-    comm=MPI.COMM_WORLD,
-    points=((0.3, 0.3), (0.7, 0.7)),
-    n=(config["Nx"], config["Ny"]),
-    cell_type=CellType.triangle,
-    ghost_mode=GhostMode.shared_facet,
-)
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_20.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+    structure = file.read_mesh()
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
                  config["force_order"], shape=(structure.geometry.dim, ))
@@ -155,8 +150,27 @@ lambda_s = 100
 
 FF = grad(solid_coords)
 
-L_hat = form(- inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx)
+L_hat = form(inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
+L_hat = form(-inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx)
 b1 = create_vector(L_hat)
+
+
+
+
+
+
+
+
+
+
+# U0 = Function(Vs, name="velocity")
+# X0 = interpolate(Expression(("x[0]", "x[1]"), degree=2), Vs)
+# F0 = Function(Vs, name="force")
+
+# dVs = TestFunction(Vs)
+# FF = grad(X0)
+# L_hat = - inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx
+
 ###########################################################################################################
 ##########################################  Interaction  ##################################################
 ###########################################################################################################
@@ -196,6 +210,7 @@ for step in range(  config['num_steps']):
     solid_coords.x.scatter_forward()
     ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
     assemble_vector(b1, L_hat)
+    b1.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
     with b1.getBuffer() as arr:
         solid_force.x.array[:len(arr)] = arr[:]
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
@@ -220,6 +235,41 @@ for step in range(  config['num_steps']):
             print(data_log["solid_force_norm"])
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
+
+
+
+
+
+
+
+# t = 0
+# start_time = time.time()
+# for n in range(num_steps):
+#     t += dt
+#     un, pn = fluid_solver.solve(bcu, bcp)
+#     fluid_solver.update(un, pn)
+#     # Update the force
+#     inter.fluid_to_solid(un._cpp_object, U0._cpp_object)
+#     X0.vector()[:] = X0.vector()[:] + dt * U0.vector()[:]
+#     inter.evaluate_current_points(X0._cpp_object)
+#     b = assemble(L_hat)
+#     F0.vector()[:] = b[:]
+#     inter.solid_to_fluid(f0._cpp_object, F0._cpp_object)
+#     if time_manager.should_output(n):
+#         logger.info(f"t = {t}")
+#         # Write to xdmf
+#         file_fluid.write(u0, t)
+#         file_fluid.write(p0, t)
+#         file_solid.write(X0, t)
+#         # SwanLab log
+#         swanlab.log(
+#             {
+#                 "timecost": time.time() - start_time,
+#                 "time": t, 
+#                 "u_max": un.vector().max(), 
+#                 "u_norm_l2":  un.vector().norm("l2")
+#             }, step = int(1+t/dt_minimum)
+#         )
 
 
 

@@ -21,7 +21,8 @@ from dolfinx.mesh import create_mesh, meshtags_from_entities
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 
-class IPCSSolver:
+
+class ChorinSolver:
     def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw):
         self.bcu = bcu
         self.bcp = bcp
@@ -49,23 +50,24 @@ class IPCSSolver:
 
 
         f = Function(V)
-        F1 = rho / k * dot(u - u_n, v) * dx
-        F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
-        F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
-        F1 += dot(f, v) * dx
+        # Tentative velocity step
+        F1 = rho / k * inner(u - u_n, v) * dx
+        F1 += rho * inner(grad(u_n) * u_n, v) * dx
+        F1 += mu*inner(grad(u), grad(v))*dx
+        F1 -= inner(f, v)*dx
         a1 = form(lhs(F1))
         L1 = form(rhs(F1))
         A1 = create_matrix(a1)
         b1 = create_vector(L1)
         # Pressure update
-        a2 = form(dot(grad(p), grad(q)) * dx)
-        L2 = form(-rho / k * dot(div(u_s), q) * dx)
+        a2 = form(inner(grad(p), grad(q)) * dx)
+        L2 = form(-(1 / k) * div(u_s) * q * dx)
         A2 = assemble_matrix(a2, bcs=self.bcp)
         A2.assemble()
         b2 = create_vector(L2)
         # Velocity update
-        a3 = form(rho * dot(u, v) * dx)
-        L3 = form(rho * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
+        a3 = form(inner(u, v) * dx)
+        L3 = form(inner(u_s, v) * dx - k * inner(grad(p_), v) * dx)
         A3 = assemble_matrix(a3)
         A3.assemble()
         b3 = create_vector(L3)
@@ -136,10 +138,7 @@ class IPCSSolver:
         apply_lifting(self.b2, [self.a2], [self.bcp])
         self.b2.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
         set_bc(self.b2, self.bcp)
-        self.solver2.solve(self.b2, self.phi.x.petsc_vec)
-        self.phi.x.scatter_forward()
-
-        self.p_.x.petsc_vec.axpy(1, self.phi.x.petsc_vec)
+        self.solver2.solve(self.b2, self.p_.x.petsc_vec)
         self.p_.x.scatter_forward()
 
         # Step 3: Velocity correction step
