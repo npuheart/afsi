@@ -21,8 +21,8 @@ from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 
 # Define the configuration for the simulation
-config = {"nssolver": "ipcssolver",
-          "project_name": "demo-2000", 
+config = {"nssolver": "chorinsolver",
+          "project_name": "demo-336", 
           "tag": "parallel",
           "velocity_order": 2,
           "force_order": 2,
@@ -136,7 +136,7 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_20.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh()
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
@@ -209,10 +209,9 @@ file_solid.write_mesh(structure)
 
 time_manager = TimeManager(config['T'], config['num_steps'], fps=20)
 
-# res_1 = form(dot(ns_solver.u_, ns_solver.u_ ) * dx)
-# res_2 = form(dot(solid_coords, solid_coords ) * dx)
-# res_3 = form(dot(ns_solver.f, ns_solver.f ) * dx)
-# res_4 = form(dot(solid_force, solid_force ) * dx)
+form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_ ) * dx)
+form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_ ) * dx)
+form_F_L2 = form(dot(solid_coords, solid_coords ) * dx)
 
 for step in range(  config['num_steps']):
     current_time = step * config['dt']
@@ -222,8 +221,9 @@ for step in range(  config['num_steps']):
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
     solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']
     solid_coords.x.scatter_forward()
-    # print(mesh.comm.allreduce(assemble_scalar(res_1), op=MPI.SUM))
-    # print(mesh.comm.allreduce(assemble_scalar(res_2), op=MPI.SUM))
+    u_L2 = mesh.comm.allreduce(assemble_scalar(form_u_L2), op=MPI.SUM)
+    p_L2 = mesh.comm.allreduce(assemble_scalar(form_p_L2), op=MPI.SUM)
+    F_L2 = mesh.comm.allreduce(assemble_scalar(form_F_L2), op=MPI.SUM)
 
     ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
     with b1.localForm() as loc_2:
@@ -234,14 +234,9 @@ for step in range(  config['num_steps']):
         solid_force.x.array[:len(arr)] = arr[:]
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
-    # print(mesh.comm.allreduce(assemble_scalar(res_3), op=MPI.SUM))
-    # print(mesh.comm.allreduce(assemble_scalar(res_4), op=MPI.SUM))
 
     data_log = {}
     if time_manager.should_output(step):
-        u_norm = dolfinx.la.norm(ns_solver.u_.x, dolfinx.la.Norm.l2)
-        p_norm = dolfinx.la.norm(ns_solver.p_.x, dolfinx.la.Norm.l2)
-        solid_force_norm = dolfinx.la.norm(solid_force.x, dolfinx.la.Norm.l2)
         u_io.interpolate(ns_solver.u_)
         file_velocity.write_function(u_io, current_time)
         solid_force_io.interpolate(solid_force)
@@ -249,10 +244,9 @@ for step in range(  config['num_steps']):
         file_solid.write_function(solid_force_io, current_time)
         file_solid.write_function(solid_coords_io, current_time)
         if MPI.COMM_WORLD.rank == 0:
-            data_log["u_norm"] = u_norm
-            data_log["p_norm"] = p_norm
-            data_log["solid_force_norm"] = solid_force_norm
-            print(data_log["solid_force_norm"])
+            data_log["u_norm"] = u_L2
+            data_log["p_norm"] = p_L2
+            data_log["solid_force_norm"] = F_L2
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
 
