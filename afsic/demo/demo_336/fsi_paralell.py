@@ -27,13 +27,14 @@ config = {"nssolver": "chorinsolver",
           "velocity_order": 2,
           "force_order": 2,
           "pressure_order": 1,
+          "num_processors": MPI.COMM_WORLD.size,
           "T": 10.0,
           "dt": 1/200,
           "rho": 1.0,
           "Lx": 1.0,
           "Ly": 1.0,
-          "Nx": 32,
-          "Ny": 32,
+          "Nx": 64,
+          "Ny": 64,
           "Nl": 20,
           "mu": 0.01,
           "mu_s": 0.1,  # Solid elasticity
@@ -67,10 +68,10 @@ boundaries = [(1, lambda x: np.isclose(x[0], 0)),
               (3, lambda x: np.isclose(x[1], 0)),
               (4, lambda x: np.isclose(x[1], config["Ly"]))]
 
-def points(x):
+def fixed_points(x):
     return np.logical_and(np.isclose(x[0],0.0), np.isclose(x[1],0.0))
 
-point_loc = dolfinx.mesh.locate_entities_boundary(mesh, 0, points)
+point_loc = dolfinx.mesh.locate_entities_boundary(mesh, 0, fixed_points)
 
 facet_indices, facet_markers = [], []
 fdim = mesh.topology.dim - 1
@@ -155,30 +156,13 @@ solid_velocity = Function(Vs, name="solid_velocity")
 # 定义弱形式
 dVs = TestFunction(Vs)
 mu_s = config["mu_s"]
-lambda_s = 100
+lambda_s = 10
 
 FF = grad(solid_coords)
 
-L_hat = form(inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
+# L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
 L_hat = form(-inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx)
 b1 = create_vector(L_hat)
-
-
-
-
-
-
-
-
-
-
-# U0 = Function(Vs, name="velocity")
-# X0 = interpolate(Expression(("x[0]", "x[1]"), degree=2), Vs)
-# F0 = Function(Vs, name="force")
-
-# dVs = TestFunction(Vs)
-# FF = grad(X0)
-# L_hat = - inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx
 
 ###########################################################################################################
 ##########################################  Interaction  ##################################################
@@ -212,6 +196,7 @@ time_manager = TimeManager(config['T'], config['num_steps'], fps=20)
 form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_ ) * dx)
 form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_ ) * dx)
 form_F_L2 = form(dot(solid_coords, solid_coords ) * dx)
+form_volume = form(det(grad(solid_coords))* dx)
 
 for step in range(  config['num_steps']):
     current_time = step * config['dt']
@@ -224,6 +209,7 @@ for step in range(  config['num_steps']):
     u_L2 = mesh.comm.allreduce(assemble_scalar(form_u_L2), op=MPI.SUM)
     p_L2 = mesh.comm.allreduce(assemble_scalar(form_p_L2), op=MPI.SUM)
     F_L2 = mesh.comm.allreduce(assemble_scalar(form_F_L2), op=MPI.SUM)
+    volume = mesh.comm.allreduce(assemble_scalar(form_volume), op=MPI.SUM)
 
     ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
     with b1.localForm() as loc_2:
@@ -247,43 +233,9 @@ for step in range(  config['num_steps']):
             data_log["u_norm"] = u_L2
             data_log["p_norm"] = p_L2
             data_log["solid_force_norm"] = F_L2
+            data_log["volume"] = volume
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
-
-
-
-
-
-
-
-# t = 0
-# start_time = time.time()
-# for n in range(num_steps):
-#     t += dt
-#     un, pn = fluid_solver.solve(bcu, bcp)
-#     fluid_solver.update(un, pn)
-#     # Update the force
-#     inter.fluid_to_solid(un._cpp_object, U0._cpp_object)
-#     X0.vector()[:] = X0.vector()[:] + dt * U0.vector()[:]
-#     inter.evaluate_current_points(X0._cpp_object)
-#     b = assemble(L_hat)
-#     F0.vector()[:] = b[:]
-#     inter.solid_to_fluid(f0._cpp_object, F0._cpp_object)
-#     if time_manager.should_output(n):
-#         logger.info(f"t = {t}")
-#         # Write to xdmf
-#         file_fluid.write(u0, t)
-#         file_fluid.write(p0, t)
-#         file_solid.write(X0, t)
-#         # SwanLab log
-#         swanlab.log(
-#             {
-#                 "timecost": time.time() - start_time,
-#                 "time": t, 
-#                 "u_max": un.vector().max(), 
-#                 "u_norm_l2":  un.vector().norm("l2")
-#             }, step = int(1+t/dt_minimum)
-#         )
 
 
 
