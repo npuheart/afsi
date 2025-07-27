@@ -14,7 +14,7 @@ from basix.ufl import element
 
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction, inv, ln, det,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
-from dolfinx.fem import form
+from dolfinx.fem import form, assemble_scalar
 
 from afsic import IPCSSolver,ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
@@ -25,7 +25,7 @@ config = {"nssolver": "ipcssolver",
           "project_name": "demo-2000", 
           "tag": "parallel",
           "velocity_order": 2,
-          "force_order": 1,
+          "force_order": 2,
           "pressure_order": 1,
           "T": 10.0,
           "dt": 1/200,
@@ -35,7 +35,8 @@ config = {"nssolver": "ipcssolver",
           "Nx": 32,
           "Ny": 32,
           "Nl": 20,
-          "mu": 0.001,
+          "mu": 0.01,
+          "mu_s": 0.1,  # Solid elasticity
           }
 
 config["num_steps"] = int(config['T']/config['dt'])
@@ -66,6 +67,10 @@ boundaries = [(1, lambda x: np.isclose(x[0], 0)),
               (3, lambda x: np.isclose(x[1], 0)),
               (4, lambda x: np.isclose(x[1], config["Ly"]))]
 
+def points(x):
+    return np.logical_and(np.isclose(x[0],0.0), np.isclose(x[1],0.0))
+
+point_loc = dolfinx.mesh.locate_entities_boundary(mesh, 0, points)
 
 facet_indices, facet_markers = [], []
 fdim = mesh.topology.dim - 1
@@ -117,8 +122,12 @@ bcu_right = dirichletbc(u_nonslip, locate_dofs_topological(
     V, fdim, facet_tag.find(marker_right)), V)
 bcu_down = dirichletbc(u_nonslip, locate_dofs_topological(
     V, fdim, facet_tag.find(marker_down)), V)
+
+points_dofs = locate_dofs_topological(
+    Q, 0, point_loc)
+bcp_point = dirichletbc(0.0, points_dofs,Q)
 bcu = [bcu_up, bcu_left, bcu_right, bcu_down]
-bcp = []
+bcp = [bcp_point]
 
 
 # Define Solver
@@ -145,7 +154,7 @@ solid_velocity = Function(Vs, name="solid_velocity")
 
 # 定义弱形式
 dVs = TestFunction(Vs)
-mu_s = 0.1
+mu_s = config["mu_s"]
 lambda_s = 100
 
 FF = grad(solid_coords)
@@ -200,6 +209,11 @@ file_solid.write_mesh(structure)
 
 time_manager = TimeManager(config['T'], config['num_steps'], fps=20)
 
+# res_1 = form(dot(ns_solver.u_, ns_solver.u_ ) * dx)
+# res_2 = form(dot(solid_coords, solid_coords ) * dx)
+# res_3 = form(dot(ns_solver.f, ns_solver.f ) * dx)
+# res_4 = form(dot(solid_force, solid_force ) * dx)
+
 for step in range(  config['num_steps']):
     current_time = step * config['dt']
     up_velocity.t = current_time
@@ -208,20 +222,26 @@ for step in range(  config['num_steps']):
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
     solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']
     solid_coords.x.scatter_forward()
+    # print(mesh.comm.allreduce(assemble_scalar(res_1), op=MPI.SUM))
+    # print(mesh.comm.allreduce(assemble_scalar(res_2), op=MPI.SUM))
+
     ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
+    with b1.localForm() as loc_2:
+        loc_2.set(0)
     assemble_vector(b1, L_hat)
     b1.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
     with b1.getBuffer() as arr:
         solid_force.x.array[:len(arr)] = arr[:]
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
+    # print(mesh.comm.allreduce(assemble_scalar(res_3), op=MPI.SUM))
+    # print(mesh.comm.allreduce(assemble_scalar(res_4), op=MPI.SUM))
+
     data_log = {}
-    # if time_manager.should_output(step):
-    if True:
+    if time_manager.should_output(step):
         u_norm = dolfinx.la.norm(ns_solver.u_.x, dolfinx.la.Norm.l2)
         p_norm = dolfinx.la.norm(ns_solver.p_.x, dolfinx.la.Norm.l2)
         solid_force_norm = dolfinx.la.norm(solid_force.x, dolfinx.la.Norm.l2)
-
         u_io.interpolate(ns_solver.u_)
         file_velocity.write_function(u_io, current_time)
         solid_force_io.interpolate(solid_force)
