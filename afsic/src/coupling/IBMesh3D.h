@@ -222,4 +222,76 @@ struct IBMesh3D {
     std::shared_ptr<mesh::Mesh<U>> mesh_ptr;
 };
 
+class IBInterpolation3D {
+  public:
+    IBMesh3D &fluid_mesh;
+    std::vector<Particle<double>> current_coordinates;
+
+    IBInterpolation3D(IBMesh3D &fluid_mesh) : fluid_mesh(fluid_mesh) {}
+
+    void evaluate_current_points(const std::vector<double> &position) {
+        // 只修改 Particle 的x y 而不是 u1 u2
+        assign_positions(current_coordinates, position);
+    }
+
+    void assign(std::vector<double> &position, const std::vector<Particle<double>> &data) {
+        size_t value_size = fluid_mesh.top_dim;
+        size_t dof_size = position.size();
+        // TODO: assert(dof_size / value_size == data.size());
+
+        for (size_t i = 0; i < dof_size / value_size; i++) {
+            position[i * value_size] = data[i].u1;
+            position[i * value_size + 1] = data[i].u2;
+            position[i * value_size + 2] = data[i].u3;
+        }
+    }
+
+    void assign(std::vector<Particle<double>> &data, const std::vector<double> &position) {
+
+        size_t value_size = fluid_mesh.top_dim;
+        size_t dof_size = position.size();
+        data.resize(dof_size / value_size);
+        // TODO: assert(dof_size / value_size == data.size());
+
+        for (size_t i = 0; i < data.size(); i++) {
+            data[i].u1 = position[i * value_size];
+            data[i].u2 = position[i * value_size + 1];
+            data[i].u3 = position[i * value_size + 2];
+        }
+    }
+
+    void assign_positions(std::vector<Particle<double>> &data, const std::vector<double> &position) {
+
+        size_t value_size = fluid_mesh.top_dim;
+        size_t dof_size = position.size();
+        data.resize(dof_size / value_size);
+        // TODO: assert(dof_size / value_size == data.size());
+
+        for (size_t i = 0; i < data.size(); i++) {
+            data[i].x = position[i * value_size];
+            data[i].y = position[i * value_size + 1];
+            data[i].z = position[i * value_size + 2];
+        }
+    }
+
+    void fluid_to_solid(const std::vector<double> &fluid, std::vector<double> &solid) {
+
+        std::vector<Particle<double>> array_solid;
+        std::vector<double3> array_fluid;
+        fluid_mesh.extract_dofs(array_fluid, fluid);
+        fluid_mesh.interpolation(array_solid, array_fluid, current_coordinates);
+        assign(solid, array_solid);
+    }
+
+    void solid_to_fluid(std::vector<double> &fluid, const std::vector<double> &solid) {
+        std::vector<Particle<double>> array_solid;
+        std::vector<double3> array_fluid;
+        assign(array_solid, solid);
+        for (size_t i = 0; i < array_solid.size(); i++) {
+            array_solid[i].w = 1.0;
+        }
+        fluid_mesh.distribution(array_fluid, array_solid, current_coordinates);
+        fluid_mesh.assign_dofs(array_fluid, fluid);
+    }
+};
 } // namespace coupling

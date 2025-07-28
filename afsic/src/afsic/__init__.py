@@ -1,6 +1,6 @@
 from .afsic_ext import add, __doc__
 from .afsic_ext import send_email, EmailInfo
-from .afsic_ext import coupling, IBMesh, IBMesh3D,  IBInterpolation
+from .afsic_ext import coupling, IBMesh, IBMesh3D,  IBInterpolation,IBInterpolation3D
 
 from .euler.IPCSSolver import IPCSSolver
 from .euler.ChorinSolver import ChorinSolver
