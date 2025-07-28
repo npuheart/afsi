@@ -45,8 +45,6 @@ class ChorinSolver:
         # Define the variational problem for the first step
         F1 = rho * dot((u - u_n) / k, v) * dx
         F1 += rho * inner(grad(u_n)*u_n, v)*dx
-        # F1 += inner(sigma(U, p_n), epsilon(v)) * dx
-        # F1 += dot(p_n * n, v) * ds - dot(mu * nabla_grad(U) * n, v) * ds
         F1 += inner(mu * grad(u), grad(v)) * dx
         F1 -= inner(f, v) * dx
         a1 = form(lhs(F1))
@@ -126,9 +124,6 @@ class ChorinSolver:
         self.solver1.solve(self.b1, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()
 
-        # res_1 = form(dot(self.u_, self.u_) * dx)
-        # print(self.mesh.comm.allreduce(assemble_scalar(res_1), op=MPI.SUM))
-
         # Step 2: Pressure corrrection step
         with self.b2.localForm() as loc_2:
             loc_2.set(0)
@@ -151,10 +146,6 @@ class ChorinSolver:
         set_bc(self.b3, self.bcu)
         self.solver3.solve(self.b3, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()
-
-        # res_1 = form(dot(self.u_, self.u_) * dx)
-        # print(self.mesh.comm.allreduce(assemble_scalar(res_1), op=MPI.SUM))
-
 
         # Update variable with solution form this time step
         self.u_n.x.array[:] = self.u_.x.array[:]
