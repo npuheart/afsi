@@ -42,7 +42,8 @@ template <typename T> struct Particle {
         : x{}, y{}, z{}, w{}, u1{}, u2{}, u3{} // Initializes all members to their default values
     {}
 
-    Particle(T x_, T y_) : x(x_), y(y_), z{}, w{}, u1{}, u2{}, u3{} {}
+    Particle(T x_, T y_      ) : x(x_), y(y_), z{},   w{}, u1{}, u2{}, u3{} {}
+    Particle(T x_, T y_, T z_) : x(x_), y(y_), z(z_), w{}, u1{}, u2{}, u3{} {}
 };
 
 template <typename GridState, typename Index, typename Particle, typename T> class FunctorInterpolate {
@@ -189,7 +190,7 @@ struct IBMesh {
         using LKernel = IBKernel<PV, double, dim, std::array>;
         using Spread = FunctorSpread<MyGrid::state_type, MyGrid::index_type, Particle<double>, double>;
 
-        MyGrid grid({nx, ny});
+        MyGrid grid({static_cast<size_t>(nx), static_cast<size_t>(ny)});
         size_t num_lagrangian = coordinates.size();
         for (size_t idx = 0; idx < num_lagrangian; idx++) {
             Particle<MyGrid::value_type> particle;
@@ -217,7 +218,7 @@ struct IBMesh {
         using LKernel = IBKernel<PV, double, dim, std::array>;
         using Interpolate = FunctorInterpolate<MyGrid::state_type, MyGrid::index_type, Particle<MyGrid::value_type>, MyGrid::value_type>;
 
-        MyGrid grid({nx, ny});
+        MyGrid grid({static_cast<size_t>(nx), static_cast<size_t>(ny)});
         // 将 data_from 复制到 grid 中
         grid.copy_from(data_from);
         size_t num_lagrangian = coordinates.size();

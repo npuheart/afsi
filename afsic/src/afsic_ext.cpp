@@ -1,4 +1,4 @@
-#include "coupling/main.h"
+#include "coupling/IBMesh3D.h"
 #include "mail/smtp_mail_sender.h"
 
 #include <nanobind/nanobind.h>
@@ -216,6 +216,51 @@ NB_MODULE(afsic_ext, m) {
                 // return nb::cast<std::vector<double>>(result);
             },
             "evaluate a function at a point", nb::arg("x"), nb::arg("y"), nb::arg("function"));
+
+    nb::class_<coupling::IBMesh3D>(m, "IBMesh3D")
+        .def(nb::init<double, double, double, double, double, double, std::int64_t, std::int64_t, std::int64_t, uint>(), nb::arg("x0"), nb::arg("x1"),
+             nb::arg("y0"), nb::arg("y1"), nb::arg("z0"), nb::arg("z1"), nb::arg("dim_x"), nb::arg("dim_y"), nb::arg("dim_z"), nb::arg("order"))
+        .def(
+            "build_map",
+            [](coupling::IBMesh3D &self, nb::object py_coords) {
+                nb::object x_attr = py_coords.attr("x");
+                nb::object array_attr = x_attr.attr("array");
+                auto data = nb::cast<nb::ndarray<T, nb::numpy>>(array_attr);
+                std::int32_t size_local = nb::cast<std::int32_t>(x_attr.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr.attr("bs"));
+                auto global_data = fun(self.mesh()->comm(), size_local, data.data());
+                int rank_root = 0;
+                int mpi_rank;
+                int mpi_size;
+                MPI_Comm_size(self.mesh()->comm(), &mpi_size);
+                MPI_Comm_rank(self.mesh()->comm(), &mpi_rank);
+                if (mpi_rank == rank_root) {
+                    self.build_map(global_data);
+                }
+            },
+            nb::arg("coords"), "build a map")
+        .def(
+            "evaluate",
+            [](coupling::IBMesh3D &self, double x, double y, double z, nb::object py_function) {
+                nb::object x_attr = py_function.attr("x");
+                nb::object array_attr = x_attr.attr("array");
+                auto data = nb::cast<nb::ndarray<T, nb::numpy>>(array_attr);
+                std::int32_t size_local = nb::cast<std::int32_t>(x_attr.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr.attr("bs"));
+                auto function = fun(self.mesh()->comm(), size_local, data.data());
+
+                int rank_root = 0;
+                int mpi_rank;
+                int mpi_size;
+                MPI_Comm_size(self.mesh()->comm(), &mpi_size);
+                MPI_Comm_rank(self.mesh()->comm(), &mpi_rank);
+                if (mpi_rank == rank_root) {
+                    auto result = self.evaluate(x, y, z, function);
+                    for (const auto &val : result) {
+                        printf("Result: %f\n", val);
+                    }
+                }
+            },
+            "evaluate a function at a point", nb::arg("x"), nb::arg("y"), nb::arg("z"), nb::arg("function"));
+    ;
 
     nb::class_<coupling::IBInterpolation>(m, "IBInterpolation")
         .def(nb::init<coupling::IBMesh &>(), nb::arg("ibmesh"))
