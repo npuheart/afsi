@@ -86,8 +86,7 @@ if mesh_comm.rank == model_rank:
 
 # mesh, _, ft = gmshio.model_to_mesh(gmsh.model, mesh_comm, model_rank, gdim=gdim)
 # ft.name = "Facet markers"
-
-mesh_data = gmshio.model_to_mesh(gmsh.model, mesh_comm, model_rank, gdim=gdim)
+mesh_data = gmshio.model_to_mesh(gmsh.model, MPI.COMM_WORLD, model_rank, gdim=gdim)
 mesh = mesh_data[0]
 ct = mesh_data[1]
 ft = mesh_data[2]

@@ -23,7 +23,7 @@ from dolfinx.fem.petsc import create_vector, assemble_vector
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
-          "project_name": "demo-336", 
+          "project_name": "demo-341", 
           "tag": "parallel",
           "velocity_order": 2,
           "force_order": 2,
@@ -34,8 +34,10 @@ config = {"nssolver": "chorinsolver",
           "rho": 1.0,
           "Lx": 1.0,
           "Ly": 1.0,
-          "Nx": 64,
-          "Ny": 64,
+          "Lz": 1.0,
+          "Nx": 32,
+          "Ny": 32,
+          "Nz": 32,
           "Nl": 20,
           "mu": 0.01,
           "mu_s": 0.1,  # Solid elasticity
@@ -53,24 +55,27 @@ swanlab_init(config['project_name'], config['experiment_name'], config)
 ##########################################  Fluid #########################################################
 ###########################################################################################################
 # Create mesh
-mesh = dolfinx.mesh.create_rectangle(
+mesh = dolfinx.mesh.create_box(
     comm=MPI.COMM_WORLD,
-    points=((0.0, 0.0), (config["Lx"], config["Ly"])),
-    n=(config["Nx"], config["Ny"]),
-    cell_type=CellType.quadrilateral,
+    points=((0.0, 0.0, 0.0), (config["Lx"], config["Ly"], config["Lz"])),
+    n=(config["Nx"], config["Ny"], config["Nz"]),
+    cell_type=CellType.hexahedron,
     ghost_mode=GhostMode.shared_facet,
 )
 
 # Mark the boundaries
 mesh.topology.create_connectivity(1, 2) 
-marker_left, marker_right, marker_down, marker_up = 1, 2, 3, 4
+marker_left, marker_right, marker_down, marker_up, marker_front, marker_back = 1, 2, 3, 4, 5, 6
 boundaries = [(1, lambda x: np.isclose(x[0], 0)),
               (2, lambda x: np.isclose(x[0], config["Lx"])),
               (3, lambda x: np.isclose(x[1], 0)),
-              (4, lambda x: np.isclose(x[1], config["Ly"]))]
+              (4, lambda x: np.isclose(x[1], config["Ly"])),
+              (5, lambda x: np.isclose(x[2], 0)),
+              (6, lambda x: np.isclose(x[2], config["Lz"])),
+              ]
 
 def fixed_points(x):
-    return np.logical_and(np.isclose(x[0],0.0), np.isclose(x[1],0.0))
+    return np.logical_and.reduce((np.isclose(x[0], 0.0), np.isclose(x[1], 0.0), np.isclose(x[2], 0.0)))
 
 point_loc = dolfinx.mesh.locate_entities_boundary(mesh, 0, fixed_points)
 
@@ -106,6 +111,7 @@ class UpVelocity():
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
         values[0] = 1.0
         values[1] = 0.0
+        values[2] = 0.0
         return values
 
 
@@ -123,11 +129,14 @@ bcu_right = dirichletbc(u_nonslip, locate_dofs_topological(
     V, fdim, facet_tag.find(marker_right)), V)
 bcu_down = dirichletbc(u_nonslip, locate_dofs_topological(
     V, fdim, facet_tag.find(marker_down)), V)
-
+bcu_front = dirichletbc(u_nonslip, locate_dofs_topological(
+    V, fdim, facet_tag.find(marker_front)), V)
+bcu_back = dirichletbc(u_nonslip, locate_dofs_topological(
+    V, fdim, facet_tag.find(marker_back)), V)
 points_dofs = locate_dofs_topological(
     Q, 0, point_loc)
 bcp_point = dirichletbc(0.0, points_dofs,Q)
-bcu = [bcu_up, bcu_left, bcu_right, bcu_down]
+bcu = [bcu_up, bcu_left, bcu_right, bcu_down, bcu_front, bcu_back]
 bcp = [bcp_point]
 
 
@@ -137,9 +146,15 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/afsic/demo/demo_341/mesh-341.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh()
-
+# structure = dolfinx.mesh.create_box(
+#     comm=MPI.COMM_WORLD,
+#     points=((0.4, 0.4, 0.3), (0.8,0.8,0.7)),
+#     n=(config["Nx"], config["Ny"], config["Nz"]),
+#     cell_type=CellType.hexahedron,
+#     ghost_mode=GhostMode.shared_facet,
+# )
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
                  config["force_order"], shape=(structure.geometry.dim, ))
 v_cg1 = element("Lagrange", structure.topology.cell_name(),
@@ -167,12 +182,12 @@ b1 = create_vector(L_hat)
 ###########################################################################################################
 ##########################################  Interaction  ##################################################
 ###########################################################################################################
-from afsic import IBMesh, IBInterpolation
-ibmesh = IBMesh(0.0, config["Lx"],0.0, config["Ly"], config["Nx"], config["Ny"], config["velocity_order"])
-ib_interpolation = IBInterpolation(ibmesh)
+from afsic import IBMesh3D, IBInterpolation3D
+ibmesh = IBMesh3D(0.0, config["Lx"],0.0, config["Ly"],0.0, config["Lz"], config["Nx"], config["Ny"], config["Nz"],config["velocity_order"])
+ib_interpolation = IBInterpolation3D(ibmesh)
 coords_bg = Function(V)
-coords_bg.interpolate(lambda x: np.array([x[0], x[1]])) 
-solid_coords.interpolate(lambda x: np.array([x[0], x[1]]))
+coords_bg.interpolate(lambda x: np.array([x[0], x[1], x[2]]))
+solid_coords.interpolate(lambda x: np.array([x[0], x[1], x[2]]))
 ibmesh.build_map(coords_bg._cpp_object)
 ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 
