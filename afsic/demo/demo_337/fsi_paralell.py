@@ -7,6 +7,7 @@ import requests
 import numpy as np
 
 import dolfinx
+from dolfinx import fem, default_scalar_type
 from dolfinx import log
 from dolfinx.fem import (Function, functionspace,
                          dirichletbc, locate_dofs_topological)
@@ -17,20 +18,26 @@ from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction, in
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from dolfinx.fem import form, assemble_scalar
 
-from afsic import IPCSSolver,ChorinSolver, TimeManager
+from afsic import IPCSSolver, ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 
+# 定义本构关系
+from NeoHookean import NeoHookeanMaterial
+Material = NeoHookeanMaterial()
+
+from PressureEndo import  calculate_pressure_linear, mmHg
+
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
-          "project_name": "demo-337", 
+          "project_name": "demo-337",
           "tag": "parallel",
           "velocity_order": 2,
           "force_order": 2,
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
-          "T": 100.0,
-          "dt": 1/200,
+          "T": 0.1,
+          "dt": 1/1000,
           "rho": 1.0,
           "Lx": 5.0,
           "Ly": 5.0,
@@ -41,7 +48,11 @@ config = {"nssolver": "chorinsolver",
           "Nl": 20,
           "mu": 0.01,
           "mu_s": 0.1,  # Solid elasticity
+          "diastole_pressure": 8.0*mmHg,
+          "systole_pressure": 110.0*mmHg,
+          "beta": 1e4,
           }
+
 
 config["num_steps"] = int(config['T']/config['dt'])
 config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
@@ -64,7 +75,7 @@ mesh = dolfinx.mesh.create_box(
 )
 
 # Mark the boundaries
-mesh.topology.create_connectivity(1, 2) 
+mesh.topology.create_connectivity(1, 2)
 marker_left, marker_right, marker_down, marker_up, marker_front, marker_back = 1, 2, 3, 4, 5, 6
 boundaries = [(1, lambda x: np.isclose(x[0], 0)),
               (2, lambda x: np.isclose(x[0], config["Lx"])),
@@ -109,7 +120,7 @@ class UpVelocity():
         self.t = t
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-        values[0] = 1.0
+        values[0] = 0.0
         values[1] = 0.0
         values[2] = 0.0
         return values
@@ -135,7 +146,7 @@ bcu_back = dirichletbc(u_nonslip, locate_dofs_topological(
     V, fdim, facet_tag.find(marker_back)), V)
 points_dofs = locate_dofs_topological(
     Q, 0, point_loc)
-bcp_point = dirichletbc(0.0, points_dofs,Q)
+bcp_point = dirichletbc(0.0, points_dofs, Q)
 bcu = [bcu_up, bcu_left, bcu_right, bcu_down, bcu_front, bcu_back]
 bcp = [bcp_point]
 
@@ -187,20 +198,23 @@ solid_velocity = Function(Vs, name="solid_velocity")
 dVs = TestFunction(Vs)
 mu_s = config["mu_s"]
 lambda_s = 10
+endo_pressure = fem.Constant(structure, default_scalar_type(0.0))
+N = ufl.FacetNormal(structure)
 
 FF = grad(solid_coords)
 
 X0 = ufl.SpatialCoordinate(structure)
-x_constraint =  solid_coords[0] - X0[0]
-y_constraint =  solid_coords[1] - X0[1]
-z_constraint =  solid_coords[2] - X0[2]
+x_constraint = solid_coords[0] - X0[0]
+y_constraint = solid_coords[1] - X0[1]
+z_constraint = solid_coords[2] - X0[2]
 circum_constraint = ufl.as_vector((x_constraint, y_constraint, z_constraint))
 
-
-# L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
-beta = 1e3
-L_hat = -inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx
-L_hat -= beta*ufl.inner(circum_constraint,dVs)*ds(mesh_markers['BASE'][0])
+# First Piola-Kirchhoff stress
+PK1 = Material.first_piola_kirchhoff_stress_v1(structure, solid_coords)
+# L_hat = -inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx
+L_hat = -inner(PK1, grad(dVs))*dx
+L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*ds(mesh_markers['BASE'][0])
+L_hat -= ufl.inner(dVs, endo_pressure * ufl.cofac(FF)* N) * ds(mesh_markers['ENDO'][0])
 L_hat = form(L_hat)
 b1 = create_vector(L_hat)
 
@@ -208,7 +222,7 @@ b1 = create_vector(L_hat)
 ##########################################  Interaction  ##################################################
 ###########################################################################################################
 from afsic import IBMesh3D, IBInterpolation3D
-ibmesh = IBMesh3D(0.0, config["Lx"],0.0, config["Ly"],0.0, config["Lz"], config["Nx"], config["Ny"], config["Nz"],config["velocity_order"])
+ibmesh = IBMesh3D(0.0, config["Lx"], 0.0, config["Ly"], 0.0, config["Lz"], config["Nx"], config["Ny"], config["Nz"], config["velocity_order"])
 ib_interpolation = IBInterpolation3D(ibmesh)
 coords_bg = Function(V)
 coords_bg.interpolate(lambda x: np.array([x[0], x[1], x[2]]))
@@ -217,12 +231,9 @@ ibmesh.build_map(coords_bg._cpp_object)
 ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 
 
-
-
 ###########################################################################################################
 ##########################################  Output  #######################################################
 ###########################################################################################################
-
 
 
 u_io = Function(V_io)
@@ -233,15 +244,16 @@ file_solid.write_mesh(structure)
 
 time_manager = TimeManager(config['T'], config['num_steps'], fps=20)
 
-form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_ ) * dx)
-form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_ ) * dx)
-form_F_L2 = form(dot(solid_coords, solid_coords ) * dx)
-form_volume = form(det(grad(solid_coords))* dx)
+form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_) * dx)
+form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_) * dx)
+form_F_L2 = form(dot(solid_coords, solid_coords) * dx)
+form_volume = form(det(grad(solid_coords)) * dx)
 
 log.set_log_level(log.LogLevel.INFO)
-for step in range(  config['num_steps']):
+for step in range(config['num_steps']):
     current_time = step * config['dt']
     up_velocity.t = current_time
+    endo_pressure.value = calculate_pressure_linear(current_time, diastole_pressure=config["diastole_pressure"], systole_pressure=config["systole_pressure"])
     u_up.interpolate(up_velocity)
     ns_solver.solve_one_step()
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
@@ -275,8 +287,6 @@ for step in range(  config['num_steps']):
             data_log["p_norm"] = p_L2
             data_log["solid_force_norm"] = F_L2
             data_log["volume"] = volume
+            data_log["endo_pressure"] = endo_pressure.value
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
-
-
-
