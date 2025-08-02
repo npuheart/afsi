@@ -161,7 +161,7 @@ struct IBMesh3D {
         using LKernel = IBKernel<PV, double, dim, std::array>;
         using Spread = FunctorSpread3D<MyGrid::state_type, MyGrid::index_type, Particle<double>, double>;
 
-        MyGrid grid({nx, ny, nz});
+        MyGrid grid({static_cast<size_t>(nx), static_cast<size_t>(ny), static_cast<size_t>(nz)});
         size_t num_lagrangian = coordinates.size();
         for (size_t idx = 0; idx < num_lagrangian; idx++) {
             Particle<MyGrid::value_type> particle;

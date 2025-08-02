@@ -50,7 +50,7 @@ config = {"nssolver": "chorinsolver",
           "mu_s": 0.1,  # Solid elasticity
           "diastole_pressure": 8.0*mmHg,
           "systole_pressure": 110.0*mmHg,
-          "beta": 1e4,
+          "beta": 5e6,
           }
 
 

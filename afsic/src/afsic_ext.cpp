@@ -111,7 +111,7 @@ std::vector<double> scatter(MPI_Comm comm, std::int32_t size_local, const double
         // total_data = displs[size-1] + recv_counts[size-1];
     }
 
-    // Gather the data from all processes
+    // Scatter data to all processes
     MPI_Scatterv(data, size_local_s, displacement_s, dolfinx::MPI::mpi_t<double>, local_data.data(), size_local, dolfinx::MPI::mpi_t<double>, rank_root, comm);
 
     if (mpi_rank == rank_root) {
@@ -358,7 +358,6 @@ NB_MODULE(afsic_ext, m) {
             },
             nb::arg("fluid"), nb::arg("solid"));
 
-
     nb::class_<coupling::IBInterpolation3D>(m, "IBInterpolation3D")
         .def(nb::init<coupling::IBMesh3D &>(), nb::arg("ibmesh"))
         .def(
@@ -455,4 +454,25 @@ NB_MODULE(afsic_ext, m) {
             },
             nb::arg("fluid"), nb::arg("solid"));
 
-        }
+    m.def(
+        "assign_fibers_function",
+        [](const nb::ndarray<double> &data_raw, nb::object py_function) {
+            // TODO: `comm` should be from py_function
+            auto comm = MPI_COMM_WORLD;
+            int rank_root = 0;
+            int mpi_rank;
+            int mpi_size;
+            MPI_Comm_size(comm, &mpi_size);
+            MPI_Comm_rank(comm, &mpi_rank);
+
+            // Extract data
+            nb::object x_attr = py_function.attr("x");
+            std::int32_t size_local = nb::cast<std::int32_t>(x_attr.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr.attr("bs"));
+
+            // 
+            auto local_data = scatter(comm, size_local, data_raw.data());
+            auto data_function = nb::cast<nb::ndarray<T, nb::numpy>>(x_attr.attr("array"));
+            std::memcpy(data_function.data(), local_data.data(), local_data.size() * sizeof(double));
+        },
+        nb::arg("data_raw"),nb::arg("function"));
+}
