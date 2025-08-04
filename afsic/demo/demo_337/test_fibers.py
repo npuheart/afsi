@@ -28,6 +28,8 @@ Material = NeoHookeanMaterial()
 
 from PressureEndo import  calculate_pressure_linear, mmHg
 
+from ReadFibers import fun_fiber_v1, CoordinateDataMap
+
 
 
 
@@ -95,93 +97,32 @@ solid_force = Function(Vs, name="solid_force")
 solid_force_io = Function(Vs_io, name="solid_force_io")
 solid_velocity = Function(Vs, name="solid_velocity")
 solid_fiber = Function(Vs, name="fiber")
+solid_sheet = Function(Vs, name="sheet")
 solid_fiber_io = Function(Vs_io, name="fiber_io")
-
+solid_sheet_io = Function(Vs_io, name="sheet_io")
 solid_coords.interpolate(lambda x: np.array([x[0], x[1], x[2]]))
 
-
-import numpy as np
-
-def fun_fiber_v1():
-    # 读取文本文件到 float64 类型的 NumPy 数组
-    data_f0 = np.loadtxt('/home/dolfinx/afsi/afsic/demo/demo_337/mesh/f0.txt', dtype=np.float64).reshape(-1, 3)
-    data_s0 = np.loadtxt('/home/dolfinx/afsi/afsic/demo/demo_337/mesh/s0.txt', dtype=np.float64).reshape(-1, 3)
-    data_cdm = np.loadtxt('/home/dolfinx/afsi/afsic/demo/demo_337/mesh/cdm.txt', dtype=np.int64)
-    dict_fibers = {}
-    for data in zip(data_f0, data_s0, data_cdm):
-        # print(data)
-        f0, s0, cdm = data
-        dict_fibers[cdm] = np.hstack((f0, s0))
-
-    return dict_fibers
-
-import hashlib
-class CoordinateDataMap:
-    def __init__(self):
-        self.data_map = []
-    
-    def add_data(self, coord):
-        coord_key = self.hash_floats(coord)
-        self.data_map.append(coord_key)
-        return coord_key
-
-    def get_data(self, coord):
-        coord_key = self.hash_floats(coord)
-        if coord_key in self.data_map:
-            return self.data_map[coord_key]
-        else:
-            log.error(f"Coordinate {coord} not found in data map.")
-        return None
-
-    def __contains__(self, coord):
-        return self.hash_floats(coord) in self.data_map
-
-    def hash_floats(self, coords, precision=6):
-        # str_repr = f"{round(coords[0], precision):.{precision}f},{round(coords[1], precision):.{precision}f},{round(coords[2], precision):.{precision}f}"
-        str_repr = f"{round(100*coords[0]+10*coords[1]+coords[2], precision):.{precision}f}"
-        return int(hashlib.sha256(str_repr.encode()).hexdigest()[:8], 16)
-
-
-dict_fibers = fun_fiber_v1()
+# 这里假设所有进程都能访问到同样的纤维数据，每个进程都要读取完整的纤维数据，然后各个进程根据DoFs分配来提取对应的纤维数据
+dict_fibers = fun_fiber_v1(
+    '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/f0.txt', 
+    '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/s0.txt', 
+    '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/cdm.txt')
 
 cdm = CoordinateDataMap()
-# x_attr_f.attr("index_map").attr("size_local")) * nb::cast<int>(x_attr_f.attr("bs")) / 3
-
-# print(solid_coords.x.index_map.size_local*solid_coords.function_space.dofmap.bs/3)
-# ijnhu = solid_coords.x.index_map.size_local*solid_coords.function_space.dofmap.bs//3
-# print(solid_coords.x.bs)
-
-solid_coords = solid_coords.x.array.reshape(-1, 3)
-
-
-
-print("Number of fibers:", len(dict_fibers))
-for i, coord in enumerate(solid_coords):
-    # if ijnhu <= i:
-        # break
+solid_coords_np = solid_coords.x.array.reshape(-1, 3)
+for i, coord in enumerate(solid_coords_np):
     coord_key = cdm.hash_floats(coord)
-    print(coord_key, coord)
     if np.int64(coord_key) not in dict_fibers:
         raise KeyError(f"coord_key {coord_key} for coordinate {coord} not found in dict_fibers.")
-    # If found, you can assign or process as needed
-    # dict_fibers[coord_key]
     solid_fiber.x.array[3*i:3*i+3] = dict_fibers[coord_key][:3]
-
-# print(dict_fibers)
-# xieug = {}
-# 
-#     xieug[] = 
-#     # print(coord)
-#     # print(cdm.hash_floats(coord))
-#     # print(cdm.__contains__(coord))
+    solid_sheet.x.array[3*i:3*i+3] = dict_fibers[coord_key][3:6]
 
 solid_fiber_io.interpolate(solid_fiber)
+solid_sheet_io.interpolate(solid_sheet)
 file_velocity = dolfinx.io.XDMFFile(structure.comm, "fiber.xdmf", "w")
 file_velocity.write_mesh(structure)
 file_velocity.write_function(solid_fiber_io, 0.0)
-
-
-
+file_velocity.write_function(solid_sheet_io, 1.0)
 
 structure._geometry._cpp_object.x[:,0] = structure._geometry._cpp_object.x[:,0]/10.0 + 3.0
 structure._geometry._cpp_object.x[:,1] = structure._geometry._cpp_object.x[:,1]/10.0 + 2.5
