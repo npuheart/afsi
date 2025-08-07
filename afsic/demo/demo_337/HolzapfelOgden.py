@@ -58,6 +58,9 @@ class HolzapfelOgdenMaterial:
         b_fs = default_scalar_type(params["b_fs"])
         f0 = params["f0"]
         s0 = params["s0"]
+        # f0 = ufl.as_vector((1, 0, 0))
+        # s0 = ufl.as_vector((0, 1, 0))
+        # ufl.as_vector((0, 0, 1)),
         
         # Invariants
         C = ufl.variable(F.T * F)
@@ -69,9 +72,9 @@ class HolzapfelOgdenMaterial:
 
         # Strain energy
         W = a/2.0/b*ufl.exp(b*(I1-3))
-        # W += a_f/2.0/b_f*(ufl.exp(b_f*(I_4f-1.0)*(I_4f-1.0))-1.0)
-        # W += a_s/2.0/b_s*(ufl.exp(b_s*(I_4s-1.0)*(I_4s-1.0))-1.0)
-        # W += a_fs/2.0/b_fs*(ufl.exp(b_fs*I_8fs*I_8fs)-1.0)
+        W += a_f/2.0/b_f*(ufl.exp(b_f*(I_4f-1.0)*(I_4f-1.0))-1.0)
+        W += a_s/2.0/b_s*(ufl.exp(b_s*(I_4s-1.0)*(I_4s-1.0))-1.0)
+        W += a_fs/2.0/b_fs*(ufl.exp(b_fs*I_8fs*I_8fs)-1.0)
 
         return W
 
@@ -95,7 +98,7 @@ class HolzapfelOgdenMaterial:
         # nearly incompressible
         C = ufl.variable(F.T * F)
         I1 = ufl.variable(ufl.tr(C))
-        I3 = ufl.variable(ufl.det(F))
+        I3 = ufl.variable(ufl.det(C))
         P = - a*ufl.exp(b*(I1-3))*ufl.inv(F).T + kappa*ufl.ln(I3)*ufl.inv(F).T
         # active contraction
         # P_a = self.active_contraction(F)

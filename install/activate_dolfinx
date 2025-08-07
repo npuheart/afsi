@@ -29,7 +29,7 @@ export MANPATH=$INSTALL_DIR/share/man:$MANPATH
 export PETSC_DIR=$INSTALL_DIR/petsc
 export SLEPC_DIR=$INSTALL_DIR/slepc
 export PYTHONPATH=$INSTALL_DIR/lib:$PYTHONPATH
-export KAHIP_DIR=$HOME/software
+export PATH=$HOME/software:$PATH
 
 # Real by default.
 export PKG_CONFIG_PATH=$HOME/software/dolfinx-real/lib/pkgconfig:$PKG_CONFIG_PATH

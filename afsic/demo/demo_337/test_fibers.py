@@ -30,7 +30,8 @@ from PressureEndo import  calculate_pressure_linear, mmHg
 
 from ReadFibers import fun_fiber_v1, CoordinateDataMap
 
-
+from dolfinx.fem.petsc import (apply_lifting, assemble_matrix, assemble_vector,
+                               create_vector, create_matrix, set_bc)
 
 
 # Define the configuration for the simulation
@@ -119,7 +120,7 @@ for i, coord in enumerate(solid_coords_np):
 
 solid_fiber_io.interpolate(solid_fiber)
 solid_sheet_io.interpolate(solid_sheet)
-file_velocity = dolfinx.io.XDMFFile(structure.comm, "fiber.xdmf", "w")
+file_velocity = dolfinx.io.XDMFFile(structure.comm, "fiber-1.xdmf", "w")
 file_velocity.write_mesh(structure)
 file_velocity.write_function(solid_fiber_io, 0.0)
 file_velocity.write_function(solid_sheet_io, 1.0)
@@ -128,3 +129,46 @@ structure._geometry._cpp_object.x[:,0] = structure._geometry._cpp_object.x[:,0]/
 structure._geometry._cpp_object.x[:,1] = structure._geometry._cpp_object.x[:,1]/10.0 + 2.5
 structure._geometry._cpp_object.x[:,2] = structure._geometry._cpp_object.x[:,2]/10.0 + 2.5
 
+import ufl
+
+solid_sheet_normal = ufl.cross(solid_sheet, solid_fiber)
+u, v = ufl.TrialFunction(Vs), ufl.TestFunction(Vs)
+a = form(inner(u, v) * dx)
+L = form(inner(solid_sheet_normal, v) * dx)
+# L = inner(solid_sheet_normal, v) * dx
+        # a3 = form(rho * dot(u, v) * dx)
+        # L3 = form(rho * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
+        # A3 = assemble_matrix(a3)
+        # A3.assemble()
+        # b3 = create_vector(L3)
+# b = assemble_vector(L)
+# b.scatter_reverse(la.InsertMode.add)
+
+
+A = assemble_matrix(a)
+# A.scatter_reverse()
+A.assemble()
+b = create_vector(L)
+
+solver2 = PETSc.KSP().create(structure.comm)
+solver2.setOperators(A)
+solver2.setType(PETSc.KSP.Type.MINRES)
+pc2 = solver2.getPC()
+pc2.setType(PETSc.PC.Type.HYPRE)
+pc2.setHYPREType("boomeramg")
+
+
+n0 = Function(Vs, name="n0")
+
+A.zeroEntries()
+assemble_matrix(A, a)
+A.assemble()
+with b.localForm() as loc:
+    loc.set(0)
+assemble_vector(b, L)
+b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
+solver2.solve(b, n0.x.petsc_vec)
+
+
+solid_fiber_io.interpolate(n0)
+file_velocity.write_function(solid_fiber_io, 2.0)

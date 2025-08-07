@@ -25,7 +25,8 @@ from dolfinx.fem.petsc import create_vector, assemble_vector
 # 定义本构关系
 from NeoHookean import NeoHookeanMaterial
 from HolzapfelOgden import HolzapfelOgdenMaterial
-Material = NeoHookeanMaterial()
+from Guccione import GuccioneMaterial
+Material = GuccioneMaterial()
 
 from PressureEndo import  calculate_pressure, mmHg, calculate_tension
 
@@ -41,7 +42,7 @@ config = {"nssolver": "chorinsolver",
           "force_order": 2,
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
-          "T": 0.3,
+          "T": 2.0,
           "dt": 1/10000,
           "rho": 1.0,
           "Lx": 5.0,
@@ -50,10 +51,9 @@ config = {"nssolver": "chorinsolver",
           "Nx": 32,
           "Ny": 32,
           "Nz": 32,
-          "Nl": 20,
-          "mu": 0.01,
-          "mu_s": 0.1,  # Solid elasticity
-          "diastole_pressure": 0.1, # 8.0*mmHg/100000,
+          "mu": 0.4,
+          "mu_s": 1000,  # Solid elasticity
+          "diastole_pressure": 100000.0, # 1. 8.0*mmHg, 2. 10kPa
           "systole_pressure": 110.0*mmHg,
           "max_tension": 600.0*mmHg,
           "beta": 5e6,
@@ -180,8 +180,8 @@ with dolfinx.io.XDMFFile(MPI.COMM_WORLD, '/home/dolfinx/afsi/afsic/demo/demo_337
     facet_tag = dolfinx.mesh.meshtags(structure, ft.dim, marked_facets[sorted_facets], marked_values[sorted_facets])
     facet_tag.name = ft.name
 
-metadata = {"quadrature_degree": 5}
-ds = ufl.Measure("ds", domain=structure, subdomain_data=facet_tag, metadata=metadata)
+
+ds = ufl.Measure("ds", domain=structure, subdomain_data=facet_tag)
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
                 config["force_order"], shape=(structure.geometry.dim, ))
@@ -226,7 +226,7 @@ mu_s = config["mu_s"]
 lambda_s = 10
 endo_pressure = fem.Constant(structure, default_scalar_type(0.0))
 active_tension = fem.Constant(structure, default_scalar_type(0.0))
-Material = HolzapfelOgdenMaterial(f0=solid_fiber, s0=solid_sheet, tension=active_tension)
+# Material = HolzapfelOgdenMaterial(f0=solid_fiber, s0=solid_sheet, tension=active_tension)
 N = ufl.FacetNormal(structure)
 
 FF = grad(solid_coords)
@@ -282,7 +282,8 @@ log.set_log_level(log.LogLevel.INFO)
 for step in range(config['num_steps']):
     current_time = step * config['dt']
     up_velocity.t = current_time
-    endo_pressure.value = calculate_pressure(current_time, diastole_pressure=config["diastole_pressure"], systole_pressure=config["systole_pressure"])
+    # endo_pressure.value = calculate_pressure(current_time, t_load=0.5, diastole_pressure=config["diastole_pressure"], systole_pressure=config["systole_pressure"])
+    endo_pressure.value = min(current_time, 1.0)*config["diastole_pressure"]
     active_tension.value = calculate_tension(current_time, max_tension=config["max_tension"])
     u_up.interpolate(up_velocity)
     ns_solver.solve_one_step()
@@ -294,7 +295,9 @@ for step in range(config['num_steps']):
     F_L2 = mesh.comm.allreduce(assemble_scalar(form_F_L2), op=MPI.SUM)
     X_L2 = mesh.comm.allreduce(assemble_scalar(form_X_L2), op=MPI.SUM)
     volume = mesh.comm.allreduce(assemble_scalar(form_volume), op=MPI.SUM)
-
+    
+    u_max = ns_solver.u_.x.array.max()
+    
     ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
     with b1.localForm() as loc_2:
         loc_2.set(0)
@@ -306,7 +309,7 @@ for step in range(config['num_steps']):
     ns_solver.f.x.scatter_forward()
 
     data_log = {}
-    if step is 1 or time_manager.should_output(step):
+    if step == 1 or time_manager.should_output(step):
         u_io.interpolate(ns_solver.u_)
         file_velocity.write_function(u_io, current_time)
         solid_force_io.interpolate(solid_force)
@@ -315,6 +318,7 @@ for step in range(config['num_steps']):
         file_solid.write_function(solid_coords_io, current_time)
         if MPI.COMM_WORLD.rank == 0:
             data_log["u_norm"] = u_L2
+            data_log["u_max"] = u_max
             data_log["p_norm"] = p_L2
             data_log["solid_force_norm"] = F_L2
             data_log["solid_coord_norm"] = X_L2
