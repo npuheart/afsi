@@ -26,7 +26,6 @@ from dolfinx.fem.petsc import create_vector, assemble_vector
 from NeoHookean import NeoHookeanMaterial
 from HolzapfelOgden import HolzapfelOgdenMaterial
 from Guccione import GuccioneMaterial
-Material = GuccioneMaterial()
 
 from PressureEndo import  calculate_pressure, mmHg, calculate_tension
 
@@ -57,6 +56,7 @@ config = {"nssolver": "chorinsolver",
           "systole_pressure": 110.0*mmHg,
           "max_tension": 600.0*mmHg,
           "beta": 5e6,
+          "kappa": 1e6,  # Guccione model parameter
           }
 
 config["num_steps"] = int(config['T']/config['dt'])
@@ -66,6 +66,7 @@ config["experiment_name"] = requests.get(f"http://counter.pengfeima.cn/{config['
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
 swanlab_init(config['project_name'], config['experiment_name'], config)
 
+Material = GuccioneMaterial(kappa = config["kappa"])
 
 ###########################################################################################################
 ##########################################  Fluid #########################################################

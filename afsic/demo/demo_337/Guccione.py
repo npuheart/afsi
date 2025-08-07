@@ -62,8 +62,10 @@ class GuccioneMaterial:
         bt = params["bt"]
         bf = params["bf"]
         bfs = params["bfs"]
+        kappa = params["kappa"]
 
         C = F.T * F
+        J = ufl.det(F)
         dim = C.ufl_shape[0]
         # if self.deviatoric:
         #     Jm23 = pow(ufl.det(C), -1.0 / dim)
@@ -88,11 +90,11 @@ class GuccioneMaterial:
 
         return (
             bf * E11**2 + bt * (E22**2 + E33**2 + 2 * E23**2) + bfs * (2 * E12**2 + 2 * E13**2)
-        )
+        ) + kappa * ufl.ln(J)**2
 
     def first_piola_kirchhoff_stress_v1(self, domain, coords, p=None) :
         F = ufl.variable(ufl.grad(coords))
-        return ufl.diff(self.strain_energy(domain, F), F)
+        return ufl.diff(self.strain_energy(domain, F), F) 
 
 
 
