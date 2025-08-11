@@ -36,13 +36,16 @@ class GuccioneMaterial:
                 "f0" : ufl.as_vector((1, 0, 0)),
                 "s0" : ufl.as_vector((0, 1, 0)),
                 "n0" : ufl.as_vector((0, 0, 1)),
-                "tension" : None
+                "tension" : None,
+                "deviatoric" : False
                 }
         return p
 
     def strain_energy(self, domain, F) :
         params = self._parameters
-        return 0.5 * params["C"] * (ufl.exp(self._Q(F)) - 1.0)
+        kappa = params["kappa"]
+        J = ufl.det(F)
+        return 0.5 * params["C"] * (ufl.exp(self._Q(F)) - 1.0) + kappa * ufl.ln(J)**2
 
     # def active_contraction(self, F):
     #     params = self._parameters
@@ -67,9 +70,9 @@ class GuccioneMaterial:
         C = F.T * F
         J = ufl.det(F)
         dim = C.ufl_shape[0]
-        # if self.deviatoric:
-        #     Jm23 = pow(ufl.det(C), -1.0 / dim)
-        #     C *= Jm23  # Make C deviatoric
+        if params["deviatoric"]:
+            Jm23 = pow(J, -1.0 / dim)
+            C *= Jm23
         E = 0.5 * (C - ufl.Identity(dim))
 
         E11, E12, E13 = (
@@ -90,7 +93,7 @@ class GuccioneMaterial:
 
         return (
             bf * E11**2 + bt * (E22**2 + E33**2 + 2 * E23**2) + bfs * (2 * E12**2 + 2 * E13**2)
-        ) + kappa * ufl.ln(J)**2
+        )
 
     def first_piola_kirchhoff_stress_v1(self, domain, coords, p=None) :
         F = ufl.variable(ufl.grad(coords))

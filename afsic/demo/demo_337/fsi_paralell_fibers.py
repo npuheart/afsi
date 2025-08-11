@@ -50,13 +50,15 @@ config = {"nssolver": "chorinsolver",
           "Nx": 32,
           "Ny": 32,
           "Nz": 32,
-          "mu": 0.4,
-          "mu_s": 1000,  # Solid elasticity
+          "mu": 1.0,
+          "diastole_time": 1.5,  # Diastole time in seconds
           "diastole_pressure": 100000.0, # 1. 8.0*mmHg, 2. 10kPa
           "systole_pressure": 110.0*mmHg,
           "max_tension": 600.0*mmHg,
-          "beta": 5e6,
+          "beta": 5e7,
           "kappa": 1e6,  # Guccione model parameter
+          "deviatoric": False,
+          "fps": 100,  # Frames per second for output
           }
 
 config["num_steps"] = int(config['T']/config['dt'])
@@ -66,7 +68,7 @@ config["experiment_name"] = requests.get(f"http://counter.pengfeima.cn/{config['
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
 swanlab_init(config['project_name'], config['experiment_name'], config)
 
-Material = GuccioneMaterial(kappa = config["kappa"])
+Material = GuccioneMaterial(kappa = config["kappa"], deviatoric = config["deviatoric"])
 
 ###########################################################################################################
 ##########################################  Fluid #########################################################
@@ -217,14 +219,14 @@ for i, coord in enumerate(solid_coords_np):
     solid_fiber.x.array[3*i:3*i+3] = dict_fibers[coord_key][:3]
     solid_sheet.x.array[3*i:3*i+3] = dict_fibers[coord_key][3:6]
 
-structure._geometry._cpp_object.x[:,0] = structure._geometry._cpp_object.x[:,0]/10.0 + 3.0
+structure._geometry._cpp_object.x[:,0] = structure._geometry._cpp_object.x[:,0]/10.0 + 3.5
 structure._geometry._cpp_object.x[:,1] = structure._geometry._cpp_object.x[:,1]/10.0 + 2.5
 structure._geometry._cpp_object.x[:,2] = structure._geometry._cpp_object.x[:,2]/10.0 + 2.5
 
 # 定义弱形式
 dVs = TestFunction(Vs)
-mu_s = config["mu_s"]
-lambda_s = 10
+# mu_s = config["mu_s"]
+# lambda_s = 10
 endo_pressure = fem.Constant(structure, default_scalar_type(0.0))
 active_tension = fem.Constant(structure, default_scalar_type(0.0))
 # Material = HolzapfelOgdenMaterial(f0=solid_fiber, s0=solid_sheet, tension=active_tension)
@@ -271,7 +273,7 @@ file_solid = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"solid_force.x
 file_velocity.write_mesh(mesh)
 file_solid.write_mesh(structure)
 
-time_manager = TimeManager(config['T'], config['num_steps'], fps=2000)
+time_manager = TimeManager(config['T'], config['num_steps'], fps=config['fps'])
 
 form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_) * dx)
 form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_) * dx)
@@ -284,7 +286,7 @@ for step in range(config['num_steps']):
     current_time = step * config['dt']
     up_velocity.t = current_time
     # endo_pressure.value = calculate_pressure(current_time, t_load=0.5, diastole_pressure=config["diastole_pressure"], systole_pressure=config["systole_pressure"])
-    endo_pressure.value = min(current_time, 1.0)*config["diastole_pressure"]
+    endo_pressure.value = min(current_time, config["diastole_time"])/config["diastole_time"]*config["diastole_pressure"]
     active_tension.value = calculate_tension(current_time, max_tension=config["max_tension"])
     u_up.interpolate(up_velocity)
     ns_solver.solve_one_step()
