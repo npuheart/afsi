@@ -37,7 +37,8 @@ class GuccioneMaterial:
                 "s0" : ufl.as_vector((0, 1, 0)),
                 "n0" : ufl.as_vector((0, 0, 1)),
                 "tension" : None,
-                "deviatoric" : False
+                "deviatoric" : False,
+                "contraction" : False,
                 }
         return p
 
