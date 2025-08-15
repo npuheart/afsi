@@ -31,6 +31,7 @@ from PressureEndo import  calculate_pressure, mmHg, calculate_tension
 
 from ReadFibers import fun_fiber_v1, CoordinateDataMap
 
+from dolfinx.geometry import bb_tree, compute_colliding_cells, compute_collisions_points
 
 
 # Define the configuration for the simulation
@@ -56,7 +57,7 @@ config = {"nssolver": "chorinsolver",
           "systole_pressure":  150000.0,
           "max_tension":       600000.0,
           "beta": 5e7,
-          "kappa": 1e6,  # Guccione model parameter
+          "kappa": 5e5,  # Guccione model parameter
           "deviatoric": False,
           "contraction": False,  # Whether to include active contraction
           "fps": 100,  # Frames per second for output
@@ -69,7 +70,6 @@ config["experiment_name"] = requests.get(f"http://counter.pengfeima.cn/{config['
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
 swanlab_init(config['project_name'], config['experiment_name'], config)
 
-Material = GuccioneMaterial(kappa = config["kappa"], deviatoric = config["deviatoric"])
 
 ###########################################################################################################
 ##########################################  Fluid #########################################################
@@ -184,8 +184,9 @@ with dolfinx.io.XDMFFile(MPI.COMM_WORLD, '/home/dolfinx/afsi/afsic/demo/demo_337
     facet_tag = dolfinx.mesh.meshtags(structure, ft.dim, marked_facets[sorted_facets], marked_values[sorted_facets])
     facet_tag.name = ft.name
 
-
-ds = ufl.Measure("ds", domain=structure, subdomain_data=facet_tag)
+metadata = {"quadrature_degree": 4}
+dss = ufl.Measure('ds', domain=structure, subdomain_data=facet_tag, metadata=metadata)
+dxx = ufl.Measure("dx", domain=structure, metadata=metadata)
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
                 config["force_order"], shape=(structure.geometry.dim, ))
@@ -226,11 +227,14 @@ structure._geometry._cpp_object.x[:,2] = structure._geometry._cpp_object.x[:,2]/
 
 # 定义弱形式
 dVs = TestFunction(Vs)
-# mu_s = config["mu_s"]
-# lambda_s = 10
 endo_pressure = fem.Constant(structure, default_scalar_type(0.0))
 active_tension = fem.Constant(structure, default_scalar_type(0.0))
 # Material = HolzapfelOgdenMaterial(f0=solid_fiber, s0=solid_sheet, tension=active_tension)
+Material = GuccioneMaterial(
+    kappa = config["kappa"], 
+    deviatoric = config["deviatoric"],
+    )
+
 N = ufl.FacetNormal(structure)
 
 FF = grad(solid_coords)
@@ -243,10 +247,9 @@ circum_constraint = ufl.as_vector((x_constraint, y_constraint, z_constraint))
 
 # First Piola-Kirchhoff stress
 PK1 = Material.first_piola_kirchhoff_stress_v1(structure, solid_coords)
-# L_hat = -inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx
-L_hat = -inner(PK1, grad(dVs))*dx
-L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*ds(mesh_markers['BASE'][0])
-L_hat -= ufl.inner(dVs, endo_pressure * ufl.cofac(FF)* N) * ds(mesh_markers['ENDO'][0])
+L_hat = -inner(PK1, grad(dVs))*dxx
+L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(mesh_markers['BASE'][0])
+L_hat -= ufl.inner(dVs, endo_pressure * ufl.cofac(FF)* N) * dss(mesh_markers['ENDO'][0])
 L_hat = form(L_hat)
 b1 = create_vector(L_hat)
 
@@ -288,7 +291,6 @@ for step in range(config['num_steps']):
     up_velocity.t = current_time
     # endo_pressure.value = calculate_pressure(current_time, t_load=0.5, diastole_pressure=config["diastole_pressure"], systole_pressure=config["systole_pressure"])
     endo_pressure.value = min(current_time, config["diastole_time"])/config["diastole_time"]*config["diastole_pressure"]
-    active_tension.value = calculate_tension(current_time, max_tension=config["max_tension"])
     u_up.interpolate(up_velocity)
     ns_solver.solve_one_step()
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
@@ -335,6 +337,35 @@ for step in range(config['num_steps']):
 
 
 
+class DomainCollisionChecker:
+    def __init__(self, domain):
+        self.tree = bb_tree(domain, domain.geometry.dim)
+        self.domain = domain
+
+    def eval_point(self, disp, x, y, z):
+        x0 = np.array([x, y, z], dtype=dolfinx.default_scalar_type)
+        cell_candidates = compute_collisions_points(self.tree, x0)
+        cell = compute_colliding_cells(self.domain, cell_candidates, x0).array
+        if len(cell) == 0:
+            return [0.0,0.0,0.0]
+        else:
+            first_cell = cell[0]
+            return disp.eval(x0, first_cell)[:3]
+
+us = []
+dcc = DomainCollisionChecker(structure)
+for point in np.loadtxt('data/ideal_middle_wall.txt'):
+    u = dcc.eval_point(solid_coords, point[0]/10.0+3.5, point[1]/10.0+2.5, 0.0/10.0+2.5)
+    us.append([u[0], u[1]])
+
+us = np.array(us)
+global_sum = np.zeros_like(us)
+comm = MPI.COMM_WORLD
+comm.Reduce(us, global_sum, op=MPI.MAX, root=0)
+
+
+if comm.rank == 0:
+    np.savetxt("data/diastole-afsi.txt", np.column_stack((global_sum[:, 0], global_sum[:, 1])))
 
 
 

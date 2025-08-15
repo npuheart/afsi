@@ -31,6 +31,7 @@ from PressureEndo import  calculate_pressure, mmHg, calculate_tension
 
 from ReadFibers import fun_fiber_v1, CoordinateDataMap
 
+from dolfinx.geometry import bb_tree, compute_colliding_cells, compute_collisions_points
 
 
 # Define the configuration for the simulation
@@ -56,7 +57,7 @@ config = {"nssolver": "chorinsolver",
           "systole_pressure":  150000.0,
           "max_tension":       600000.0,
           "beta": 5e7,
-          "kappa": 1e6,  # Guccione model parameter
+          "kappa": 5e5,  # Guccione model parameter
           "deviatoric": False,
           "contraction": True,  # Whether to include active contraction
           "fps": 100,  # Frames per second for output
@@ -346,6 +347,35 @@ for step in range(config['num_steps']):
 
 
 
+class DomainCollisionChecker:
+    def __init__(self, domain):
+        self.tree = bb_tree(domain, domain.geometry.dim)
+        self.domain = domain
+
+    def eval_point(self, disp, x, y, z):
+        x0 = np.array([x, y, z], dtype=dolfinx.default_scalar_type)
+        cell_candidates = compute_collisions_points(self.tree, x0)
+        cell = compute_colliding_cells(self.domain, cell_candidates, x0).array
+        if len(cell) == 0:
+            return [0.0,0.0,0.0]
+        else:
+            first_cell = cell[0]
+            return disp.eval(x0, first_cell)[:3]
+
+us = []
+dcc = DomainCollisionChecker(structure)
+for point in np.loadtxt('data/ideal_middle_wall.txt'):
+    u = dcc.eval_point(solid_coords, point[0]/10.0+3.5, point[1]/10.0+2.5, 0.0/10.0+2.5)
+    us.append([u[0], u[1]])
+
+us = np.array(us)
+global_sum = np.zeros_like(us)
+comm = MPI.COMM_WORLD
+comm.Reduce(us, global_sum, op=MPI.MAX, root=0)
+
+
+if comm.rank == 0:
+    np.savetxt("data/systole-afsi.txt", np.column_stack((global_sum[:, 0], global_sum[:, 1])))
 
 
 
