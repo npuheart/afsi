@@ -23,14 +23,14 @@ from dolfinx.fem.petsc import create_vector, assemble_vector
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
-          "project_name": "demo-336", 
+          "project_name": "demo-340", 
           "tag": "parallel",
           "velocity_order": 2,
           "force_order": 2,
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
-          "T": 10.0,
-          "dt": 1/200,
+          "T": 3.0,
+          "dt": 1/2000,
           "rho": 1.0,
           "Lx": 8.0,
           "Ly": 1.61,
@@ -98,36 +98,34 @@ Q = functionspace(mesh, s_cg1)
 fdim = mesh.topology.dim - 1
 gdim = mesh.geometry.dim
 tdim = mesh.topology.dim
-class UpVelocity():
+class InletVelocity():
     def __init__(self, t):
         self.t = t
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-        values[0] = 1.0
+        values[0] = 5 * (np.sin(2 * np.pi * self.t) + 1.1) * x[1] * (1.61 - x[1])
         values[1] = 0.0
         return values
 
-
 # Inlet
-u_up = Function(V)
-up_velocity = UpVelocity(0.0)
-u_up.interpolate(up_velocity)
-bcu_up = dirichletbc(u_up, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_up)))
+u_inlet = Function(V)
+inlet_velocity = InletVelocity(0.0)
+u_inlet.interpolate(inlet_velocity)
+bcu_inlet = dirichletbc(u_inlet, locate_dofs_topological(V, fdim, facet_tag.find(marker_left)))
 # Walls
 u_nonslip = np.array((0,) * mesh.geometry.dim, dtype=PETSc.ScalarType)
-bcu_left = dirichletbc(u_nonslip, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_left)), V)
-bcu_right = dirichletbc(u_nonslip, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_right)), V)
+bcu_up = dirichletbc(u_nonslip, locate_dofs_topological(
+    V, fdim, facet_tag.find(marker_up)), V)
 bcu_down = dirichletbc(u_nonslip, locate_dofs_topological(
     V, fdim, facet_tag.find(marker_down)), V)
 
-points_dofs = locate_dofs_topological(
-    Q, 0, point_loc)
-bcp_point = dirichletbc(0.0, points_dofs,Q)
-bcu = [bcu_up, bcu_left, bcu_right, bcu_down]
-bcp = [bcp_point]
+# Outlet
+bcp_outlet = dirichletbc(0.0, locate_dofs_topological(
+    Q, fdim, facet_tag.find(marker_right)), Q)
+
+# Collect boundary conditions
+bcu = [bcu_inlet, bcu_up, bcu_down]
+bcp = [bcp_outlet]
 
 
 # Define Solver
@@ -137,6 +135,7 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ##########################################  Structure  ####################################################
 ###########################################################################################################
 with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+# with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/340-valve/mesh-340.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh()
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
@@ -200,8 +199,8 @@ form_volume = form(det(grad(solid_coords))* dx)
 log.set_log_level(log.LogLevel.INFO)
 for step in range(  config['num_steps']):
     current_time = step * config['dt']
-    up_velocity.t = current_time
-    u_up.interpolate(up_velocity)
+    inlet_velocity.t = current_time
+    u_inlet.interpolate(inlet_velocity)
     ns_solver.solve_one_step()
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
     solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']
