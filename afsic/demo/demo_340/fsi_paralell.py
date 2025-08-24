@@ -1,3 +1,6 @@
+# https://swanlab.cn/@SimCardiac/ideal_valve_2D/charts
+# https://swanlab.cn/@SimCardiac/demo-340/charts
+
 from afsic import unique_filename
 from mpi4py import MPI
 from petsc4py import PETSc
@@ -17,7 +20,7 @@ from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction, in
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from dolfinx.fem import form, assemble_scalar
 
-from afsic import IPCSSolver,ChorinSolver, TimeManager
+from afsic import IPCSSolver, ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 
@@ -30,16 +33,22 @@ config = {"nssolver": "chorinsolver",
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
           "T": 3.0,
-          "dt": 1/2000,
+          "dt": 1/64000,
           "rho": 1.0,
           "Lx": 8.0,
           "Ly": 1.61,
-          "Nx": 16*5,
-          "Ny": 16,
+          "Nx": 64*5,
+          "Ny": 64,
           "Nl": 20,
-          "mu": 0.01,
-          "mu_s": 0.1,  # Solid elasticity
+          "mu": 0.1,
+          "mu_s": 5.6e5,  # Solid elasticity
+          "nv_s": 0.4,
+          "beta": 5e7,
+          "kappa": 4e6,  # Guccione model parameter
+          "deviatoric": False,
+          "fps": 100,  # Frames per second for output
           }
+
 config["num_steps"] = int(config['T']/config['dt'])
 config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
 config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
@@ -134,14 +143,30 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
-# with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/340-valve/mesh-340.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
-    structure = file.read_mesh()
+# with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+import json
+import ufl
+
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/340-valve/mesh-340.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+    structure = file.read_mesh(name="mesh")
+    structure.topology.create_connectivity(structure.topology.dim-1, structure.topology.dim)
+    ft = file.read_meshtags(structure, "Facet markers")
+    valve_up_facets = ft.find(15)
+    valve_down_facets = ft.find(4)
+    marked_facets = np.hstack([valve_up_facets, valve_down_facets])
+    marked_values = np.hstack([np.full_like(valve_up_facets, 15), np.full_like(valve_down_facets, 4)])
+    sorted_facets = np.argsort(marked_facets)
+    facet_tag = dolfinx.mesh.meshtags(structure, ft.dim, marked_facets[sorted_facets], marked_values[sorted_facets])
+    facet_tag.name = ft.name
+
+metadata = {"quadrature_degree": 4}
+dss = ufl.Measure('ds', domain=structure, subdomain_data=facet_tag, metadata=metadata)
+dxx = ufl.Measure("dx", domain=structure, metadata=metadata)
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
-                 config["force_order"], shape=(structure.geometry.dim, ))
+                config["force_order"], shape=(structure.geometry.dim, ))
 v_cg1 = element("Lagrange", structure.topology.cell_name(),
-                 1, shape=(structure.geometry.dim, ))
+                1, shape=(structure.geometry.dim, ))
 Vs = functionspace(structure, v_cg2)
 Vs_io = functionspace(structure, v_cg1)
 
@@ -153,13 +178,20 @@ solid_velocity = Function(Vs, name="solid_velocity")
 
 # 定义弱形式
 dVs = TestFunction(Vs)
-mu_s = config["mu_s"]
-lambda_s = 10
-
 FF = grad(solid_coords)
+X0 = ufl.SpatialCoordinate(structure)
+x_constraint = solid_coords[0] - X0[0]
+y_constraint = solid_coords[1] - X0[1]
+circum_constraint = ufl.as_vector((x_constraint, y_constraint))
 
+# PK1 = mu_s*(FF-inv(FF).T)
+lambda_s = 2*config["mu_s"]*(1-config["nv_s"])/3.0/(1-2*config["nv_s"])
+PK1 = config["mu_s"]*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T
 # L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
-L_hat = form(-inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx)
+L_hat = -inner(PK1, grad(dVs))*dxx
+L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(4)
+L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(15)
+L_hat = form(L_hat)
 b1 = create_vector(L_hat)
 
 ###########################################################################################################
@@ -189,15 +221,16 @@ file_solid = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"solid_force.x
 file_velocity.write_mesh(mesh)
 file_solid.write_mesh(structure)
 
-time_manager = TimeManager(config['T'], config['num_steps'], fps=20)
+time_manager = TimeManager(config['T'], config['num_steps'], fps=config['fps'])
 
-form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_ ) * dx)
-form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_ ) * dx)
-form_F_L2 = form(dot(solid_coords, solid_coords ) * dx)
-form_volume = form(det(grad(solid_coords))* dx)
+form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_) * dx)
+form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_) * dx)
+form_X_L2 = form(dot(solid_coords, solid_coords) * dx)
+form_F_L2 = form(dot(solid_force, solid_force) * dx)
+form_volume = form(det(grad(solid_coords)) * dx)
 
 log.set_log_level(log.LogLevel.INFO)
-for step in range(  config['num_steps']):
+for step in range(config['num_steps']):
     current_time = step * config['dt']
     inlet_velocity.t = current_time
     u_inlet.interpolate(inlet_velocity)
@@ -208,8 +241,9 @@ for step in range(  config['num_steps']):
     u_L2 = mesh.comm.allreduce(assemble_scalar(form_u_L2), op=MPI.SUM)
     p_L2 = mesh.comm.allreduce(assemble_scalar(form_p_L2), op=MPI.SUM)
     F_L2 = mesh.comm.allreduce(assemble_scalar(form_F_L2), op=MPI.SUM)
+    X_L2 = mesh.comm.allreduce(assemble_scalar(form_X_L2), op=MPI.SUM)
     volume = mesh.comm.allreduce(assemble_scalar(form_volume), op=MPI.SUM)
-
+    u_max = ns_solver.u_.x.array.max()
     ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
     with b1.localForm() as loc_2:
         loc_2.set(0)
@@ -221,7 +255,7 @@ for step in range(  config['num_steps']):
     ns_solver.f.x.scatter_forward()
 
     data_log = {}
-    if time_manager.should_output(step):
+    if step == 1 or time_manager.should_output(step):
         u_io.interpolate(ns_solver.u_)
         file_velocity.write_function(u_io, current_time)
         solid_force_io.interpolate(solid_force)
@@ -230,11 +264,19 @@ for step in range(  config['num_steps']):
         file_solid.write_function(solid_coords_io, current_time)
         if MPI.COMM_WORLD.rank == 0:
             data_log["u_norm"] = u_L2
+            data_log["u_max"] = u_max
             data_log["p_norm"] = p_L2
             data_log["solid_force_norm"] = F_L2
+            data_log["solid_coord_norm"] = X_L2
             data_log["volume"] = volume
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
 
 
 
+                # "inflow":flow_velocity(0.0,0.805)[0],
+                # "data/x_displacement": X0(2.0-0.0106,0.91+1e-4)[0] - (2.0-0.0106),
+                # "data/y_displacement": X0(2.0-0.0106,0.91+1e-4)[1] - 0.91,
+                # "data/time": t, 
+                # "u_max": un.vector().max(), 
+                # "u_norm_l2":  un.vector().norm("l2")

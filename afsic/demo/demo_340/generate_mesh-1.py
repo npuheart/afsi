@@ -29,8 +29,8 @@ def gmsh_rectangle(model: gmsh.model, name: str, x0=0.0, y0=0.0, lx=1.0, ly=1.0,
 
 gmsh.initialize()
 gmsh.model.add("TwoRectangles")
-gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.05)
-gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 0.05)
+gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.01)
+gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 0.01)
 
 model = gmsh.model
 
