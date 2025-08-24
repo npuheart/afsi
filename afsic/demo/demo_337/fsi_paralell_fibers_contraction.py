@@ -43,7 +43,7 @@ config = {"nssolver": "chorinsolver",
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
           "T": 2.0,
-          "dt": 1/10000,
+          "dt": 1/20000,
           "rho": 1.0,
           "Lx": 5.0,
           "Ly": 5.0,
@@ -57,7 +57,7 @@ config = {"nssolver": "chorinsolver",
           "systole_pressure":  150000.0,
           "max_tension":       600000.0,
           "beta": 5e7,
-          "kappa": 5e5,  # Guccione model parameter
+          "kappa": 4e6,  # Guccione model parameter
           "deviatoric": False,
           "contraction": True,  # Whether to include active contraction
           "fps": 100,  # Frames per second for output
