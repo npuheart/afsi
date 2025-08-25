@@ -49,8 +49,10 @@ mesh = mesh_data[0]
 ct = mesh_data[1]
 ft = mesh_data[2]
 ft.name = "Facet markers"
+ct.name = "Cell markers"
 
 import dolfinx
 with dolfinx.io.XDMFFile(MPI.COMM_WORLD, 'mesh-340.xdmf', "w", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     file.write_mesh(mesh)
     file.write_meshtags(ft, mesh.geometry)
+    file.write_meshtags(ct, mesh.geometry)

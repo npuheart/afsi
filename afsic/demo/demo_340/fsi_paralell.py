@@ -33,12 +33,12 @@ config = {"nssolver": "chorinsolver",
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
           "T": 3.0,
-          "dt": 1/64000,
+          "dt": 1/8000,
           "rho": 1.0,
           "Lx": 8.0,
           "Ly": 1.61,
-          "Nx": 64*5,
-          "Ny": 64,
+          "Nx": 16*5,
+          "Ny": 16,
           "Nl": 20,
           "mu": 0.1,
           "mu_s": 5.6e5,  # Solid elasticity
@@ -151,17 +151,20 @@ with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/340-valve/mes
     structure = file.read_mesh(name="mesh")
     structure.topology.create_connectivity(structure.topology.dim-1, structure.topology.dim)
     ft = file.read_meshtags(structure, "Facet markers")
+    ct = file.read_meshtags(structure, "Cell markers")
     valve_up_facets = ft.find(15)
     valve_down_facets = ft.find(4)
     marked_facets = np.hstack([valve_up_facets, valve_down_facets])
     marked_values = np.hstack([np.full_like(valve_up_facets, 15), np.full_like(valve_down_facets, 4)])
     sorted_facets = np.argsort(marked_facets)
+    # Create facet tags
     facet_tag = dolfinx.mesh.meshtags(structure, ft.dim, marked_facets[sorted_facets], marked_values[sorted_facets])
     facet_tag.name = ft.name
+    cell_tag = ct
 
 metadata = {"quadrature_degree": 4}
 dss = ufl.Measure('ds', domain=structure, subdomain_data=facet_tag, metadata=metadata)
-dxx = ufl.Measure("dx", domain=structure, metadata=metadata)
+dxx = ufl.Measure("dx", domain=structure, subdomain_data=cell_tag, metadata=metadata)
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
                 config["force_order"], shape=(structure.geometry.dim, ))
@@ -188,7 +191,8 @@ circum_constraint = ufl.as_vector((x_constraint, y_constraint))
 lambda_s = 2*config["mu_s"]*(1-config["nv_s"])/3.0/(1-2*config["nv_s"])
 PK1 = config["mu_s"]*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T
 # L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
-L_hat = -inner(PK1, grad(dVs))*dxx
+L_hat = -inner(PK1, grad(dVs))*dxx(11) # Upper valve
+L_hat -= inner(0.1*PK1, grad(dVs))*dxx(1) # Bottom valve
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(4)
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(15)
 L_hat = form(L_hat)
