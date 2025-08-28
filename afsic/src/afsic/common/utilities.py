@@ -4,7 +4,7 @@ from datetime import datetime
 import os
 
 start_time = time.time()
-dt_minimum = 1e-7
+dt_minimum = 1e-5
 
 
 class TimeManager:

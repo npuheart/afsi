@@ -23,6 +23,10 @@ from dolfinx.fem import form, assemble_scalar
 from afsic import IPCSSolver, ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
+from dolfinx.geometry import bb_tree, compute_colliding_cells, compute_collisions_points
+
+from NeoHookean import NeoHookeanMaterial
+from FRH import FRHMaterial
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
@@ -37,14 +41,14 @@ config = {"nssolver": "chorinsolver",
           "rho": 1.0,
           "Lx": 8.0,
           "Ly": 1.61,
-          "Nx": 16*5,
+          "Nx": 16*4,
           "Ny": 16,
           "Nl": 20,
           "mu": 0.1,
-          "mu_s": 5.6e5,  # Solid elasticity
-          "nv_s": 0.4,
-          "beta": 5e7,
-          "kappa": 4e6,  # Guccione model parameter
+          "E_s": 5.6e5,  # Solid elasticity
+          "nu_s": 0.4,
+          "beta": 1e8,
+          "kappa": 1e5,  # Guccione model parameter
           "deviatoric": False,
           "fps": 100,  # Frames per second for output
           }
@@ -187,12 +191,25 @@ x_constraint = solid_coords[0] - X0[0]
 y_constraint = solid_coords[1] - X0[1]
 circum_constraint = ufl.as_vector((x_constraint, y_constraint))
 
-# PK1 = mu_s*(FF-inv(FF).T)
-lambda_s = 2*config["mu_s"]*(1-config["nv_s"])/3.0/(1-2*config["nv_s"])
-PK1 = config["mu_s"]*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T
+
+
+# f1_d = Constant((0.70710678118654750, 0.7071067811865475)) # 45
+# f1_u = Constant((0.70710678118654750, -0.7071067811865475)) # 45
+# f2_d = Constant((0.50000000000000000, 0.8660254037844386)) # 60
+# f2_u = Constant((0.50000000000000000, -0.8660254037844386)) # 60
+# f3_d = Constant((0.25881904510252074, 0.9659258262890682)) # 75
+# f3_p = Constant((0.25881904510252074, -0.9659258262890682)) # 75
+
+# PK1_up = NeoHookeanMaterial(nu = config["nu_s"], E = config["E_s"], f = f1_u)
+# PK1_down = NeoHookeanMaterial(nu = config["nu_s"], E = config["E_s"], f = f1_d)
+
+Material = NeoHookeanMaterial(nu = config["nu_s"], E = config["E_s"])
+PK1 = Material.first_piola_kirchhoff_stress_v1(structure, solid_coords)
+
+
 # L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
 L_hat = -inner(PK1, grad(dVs))*dxx(11) # Upper valve
-L_hat -= inner(0.1*PK1, grad(dVs))*dxx(1) # Bottom valve
+L_hat -= inner(PK1, grad(dVs))*dxx(1) # Bottom valve
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(4)
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(15)
 L_hat = form(L_hat)
@@ -233,6 +250,22 @@ form_X_L2 = form(dot(solid_coords, solid_coords) * dx)
 form_F_L2 = form(dot(solid_force, solid_force) * dx)
 form_volume = form(det(grad(solid_coords)) * dx)
 
+class DomainCollisionChecker:
+    def __init__(self, domain):
+        self.tree = bb_tree(domain, domain.geometry.dim)
+        self.domain = domain
+
+    def eval_point(self, disp, x, y):
+        x0 = np.array([x, y, 0.0], dtype=dolfinx.default_scalar_type)
+        cell_candidates = compute_collisions_points(self.tree, x0)
+        cell = compute_colliding_cells(self.domain, cell_candidates, x0).array
+        if len(cell) == 0:
+            return [0.0,0.0]
+        else:
+            first_cell = cell[0]
+            return disp.eval(x0, first_cell)[:2]
+
+dcc = DomainCollisionChecker(structure)
 log.set_log_level(log.LogLevel.INFO)
 for step in range(config['num_steps']):
     current_time = step * config['dt']
@@ -258,6 +291,16 @@ for step in range(config['num_steps']):
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
 
+    us = []
+    for point in [[2.0-0.0106,0.91+1e-4]]:
+        u = dcc.eval_point(solid_coords, point[0], point[1])
+        us.append([u[0], u[1]])
+
+    us = np.array(us)
+    global_sum = np.zeros_like(us)
+    comm = MPI.COMM_WORLD
+    comm.Reduce(us, global_sum, op=MPI.MAX, root=0)
+
     data_log = {}
     if step == 1 or time_manager.should_output(step):
         u_io.interpolate(ns_solver.u_)
@@ -272,6 +315,8 @@ for step in range(config['num_steps']):
             data_log["p_norm"] = p_L2
             data_log["solid_force_norm"] = F_L2
             data_log["solid_coord_norm"] = X_L2
+            data_log["x_displacement"] = global_sum[0][0] - (2.0-0.0106)
+            data_log["y_displacement"] = global_sum[0][1] - (0.91+1e-4)
             data_log["volume"] = volume
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
@@ -284,3 +329,22 @@ for step in range(config['num_steps']):
                 # "data/time": t, 
                 # "u_max": un.vector().max(), 
                 # "u_norm_l2":  un.vector().norm("l2")
+
+# us = []
+# dcc = DomainCollisionChecker(structure)
+# for point in np.loadtxt('data/ideal_middle_wall.txt'):
+#     u = dcc.eval_point(solid_coords, point[0]/10.0+3.5, point[1]/10.0+2.5, 0.0/10.0+2.5)
+#     us.append([u[0], u[1]])
+
+# us = np.array(us)
+# global_sum = np.zeros_like(us)
+# comm = MPI.COMM_WORLD
+# comm.Reduce(us, global_sum, op=MPI.MAX, root=0)
+# global_sum[0][0]
+
+# if comm.rank == 0:
+#     np.savetxt("data/systole-afsi.txt", np.column_stack((global_sum[:, 0], global_sum[:, 1])))
+
+
+
+ 
