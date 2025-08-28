@@ -1,3 +1,5 @@
+# https://swanlab.cn/@SimCardiac/demo-343/charts
+
 from afsic import unique_filename
 from mpi4py import MPI
 from petsc4py import PETSc
@@ -7,7 +9,6 @@ import requests
 import numpy as np
 
 import dolfinx
-from dolfinx import fem, default_scalar_type
 from dolfinx import log
 from dolfinx.fem import (Function, functionspace,
                          dirichletbc, locate_dofs_topological)
@@ -22,44 +23,28 @@ from afsic import IPCSSolver, ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 
-# 定义本构关系
-from NeoHookean import NeoHookeanMaterial
-from HolzapfelOgden import HolzapfelOgdenMaterial
-from Guccione import GuccioneMaterial
-
-from PressureEndo import  calculate_pressure, mmHg, calculate_tension
-
-from ReadFibers import fun_fiber_v1, CoordinateDataMap
-
-from dolfinx.geometry import bb_tree, compute_colliding_cells, compute_collisions_points
-
-
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
-          "project_name": "demo-337",
+          "project_name": "demo-343", 
           "tag": "parallel",
           "velocity_order": 2,
           "force_order": 2,
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
-          "T": 2.0,
-          "dt": 1/80000,
+          "T": 3.0,
+          "dt": 1/64000,
           "rho": 1.0,
-          "Lx": 5.0,
-          "Ly": 5.0,
-          "Lz": 5.0,
-          "Nx": 32,
-          "Ny": 32,
-          "Nz": 32,
-          "mu": 1.0,
-          "diastole_time": 1.5,  # Diastole time in seconds
-          "diastole_pressure": 100000.0, # 1. 8.0*mmHg, 2. 10kPa
-          "systole_pressure":  150000.0,
-          "max_tension":       600000.0,
-          "beta": 5e6,
-          "kappa": 5e6,  # Guccione model parameter
+          "Lx": 8.0,
+          "Ly": 1.61,
+          "Nx": 64*5,
+          "Ny": 64,
+          "Nl": 20,
+          "mu": 0.1,
+          "mu_s": 5.6e5,  # Solid elasticity
+          "nv_s": 0.4,
+          "beta": 5e7,
+          "kappa": 4e6,  # Guccione model parameter
           "deviatoric": False,
-          "contraction": True,  # Whether to include active contraction
           "fps": 100,  # Frames per second for output
           }
 
@@ -75,27 +60,24 @@ swanlab_init(config['project_name'], config['experiment_name'], config)
 ##########################################  Fluid #########################################################
 ###########################################################################################################
 # Create mesh
-mesh = dolfinx.mesh.create_box(
+mesh = dolfinx.mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
-    points=((0.0, 0.0, 0.0), (config["Lx"], config["Ly"], config["Lz"])),
-    n=(config["Nx"], config["Ny"], config["Nz"]),
-    cell_type=CellType.hexahedron,
+    points=((0.0, 0.0), (config["Lx"], config["Ly"])),
+    n=(config["Nx"], config["Ny"]),
+    cell_type=CellType.quadrilateral,
     ghost_mode=GhostMode.shared_facet,
 )
 
 # Mark the boundaries
-mesh.topology.create_connectivity(1, 2)
-marker_left, marker_right, marker_down, marker_up, marker_front, marker_back = 1, 2, 3, 4, 5, 6
+mesh.topology.create_connectivity(1, 2) 
+marker_left, marker_right, marker_down, marker_up = 1, 2, 3, 4
 boundaries = [(1, lambda x: np.isclose(x[0], 0)),
               (2, lambda x: np.isclose(x[0], config["Lx"])),
               (3, lambda x: np.isclose(x[1], 0)),
-              (4, lambda x: np.isclose(x[1], config["Ly"])),
-              (5, lambda x: np.isclose(x[2], 0)),
-              (6, lambda x: np.isclose(x[2], config["Lz"])),
-              ]
+              (4, lambda x: np.isclose(x[1], config["Ly"]))]
 
 def fixed_points(x):
-    return np.logical_and.reduce((np.isclose(x[0], 0.0), np.isclose(x[1], 0.0), np.isclose(x[2], 0.0)))
+    return np.logical_and(np.isclose(x[0],0.0), np.isclose(x[1],0.0))
 
 point_loc = dolfinx.mesh.locate_entities_boundary(mesh, 0, fixed_points)
 
@@ -124,40 +106,34 @@ Q = functionspace(mesh, s_cg1)
 fdim = mesh.topology.dim - 1
 gdim = mesh.geometry.dim
 tdim = mesh.topology.dim
-class UpVelocity():
+class InletVelocity():
     def __init__(self, t):
         self.t = t
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-        values[0] = 0.0
+        values[0] = 5 * (np.sin(2 * np.pi * self.t) + 1.1) * x[1] * (1.61 - x[1])
         values[1] = 0.0
-        values[2] = 0.0
         return values
 
-
 # Inlet
-u_up = Function(V)
-up_velocity = UpVelocity(0.0)
-u_up.interpolate(up_velocity)
-bcu_up = dirichletbc(u_up, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_up)))
+u_inlet = Function(V)
+inlet_velocity = InletVelocity(0.0)
+u_inlet.interpolate(inlet_velocity)
+bcu_inlet = dirichletbc(u_inlet, locate_dofs_topological(V, fdim, facet_tag.find(marker_left)))
 # Walls
 u_nonslip = np.array((0,) * mesh.geometry.dim, dtype=PETSc.ScalarType)
-bcu_left = dirichletbc(u_nonslip, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_left)), V)
-bcu_right = dirichletbc(u_nonslip, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_right)), V)
+bcu_up = dirichletbc(u_nonslip, locate_dofs_topological(
+    V, fdim, facet_tag.find(marker_up)), V)
 bcu_down = dirichletbc(u_nonslip, locate_dofs_topological(
     V, fdim, facet_tag.find(marker_down)), V)
-bcu_front = dirichletbc(u_nonslip, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_front)), V)
-bcu_back = dirichletbc(u_nonslip, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_back)), V)
-points_dofs = locate_dofs_topological(
-    Q, 0, point_loc)
-bcp_point = dirichletbc(0.0, points_dofs, Q)
-bcu = [bcu_up, bcu_left, bcu_right, bcu_down, bcu_front, bcu_back]
-bcp = [bcp_point]
+
+# Outlet
+bcp_outlet = dirichletbc(0.0, locate_dofs_topological(
+    Q, fdim, facet_tag.find(marker_right)), Q)
+
+# Collect boundary conditions
+bcu = [bcu_inlet, bcu_up, bcu_down]
+bcp = [bcp_outlet]
 
 
 # Define Solver
@@ -166,27 +142,27 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
+# with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
 import json
 import ufl
-with open('/home/dolfinx/afsi/afsic/demo/demo_337/mesh/lv_ellipsoid/geometry/markers.json', 'r', encoding='utf-8') as file:
-    mesh_markers = json.load(file)
-
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/lv_ellipsoid/geometry/mesh.xdmf', "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
-    structure = file.read_mesh(name="Mesh")
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/343-valve-circle/mesh-343.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+    structure = file.read_mesh(name="mesh")
     structure.topology.create_connectivity(structure.topology.dim-1, structure.topology.dim)
-    ft = file.read_meshtags(structure, "Facet tags")
-    endo_facets = ft.find(mesh_markers['ENDO'][0])
-    base_facets = ft.find(mesh_markers['BASE'][0])
-    epi_facets = ft.find(mesh_markers['EPI'][0])
-    marked_facets = np.hstack([endo_facets, base_facets, epi_facets])
-    marked_values = np.hstack([np.full_like(endo_facets, mesh_markers['ENDO'][0]), np.full_like(base_facets, mesh_markers['BASE'][0]), np.full_like(epi_facets, mesh_markers['EPI'][0])])
+    ft = file.read_meshtags(structure, "Facet markers")
+    ct = file.read_meshtags(structure, "Cell markers")
+    valve_up_facets = ft.find(15)
+    valve_down_facets = ft.find(4)
+    marked_facets = np.hstack([valve_up_facets, valve_down_facets])
+    marked_values = np.hstack([np.full_like(valve_up_facets, 15), np.full_like(valve_down_facets, 4)])
     sorted_facets = np.argsort(marked_facets)
+    # Create facet tags
     facet_tag = dolfinx.mesh.meshtags(structure, ft.dim, marked_facets[sorted_facets], marked_values[sorted_facets])
     facet_tag.name = ft.name
+    cell_tag = ct
 
 metadata = {"quadrature_degree": 4}
 dss = ufl.Measure('ds', domain=structure, subdomain_data=facet_tag, metadata=metadata)
-dxx = ufl.Measure("dx", domain=structure, metadata=metadata)
+dxx = ufl.Measure("dx", domain=structure, subdomain_data=cell_tag, metadata=metadata)
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
                 config["force_order"], shape=(structure.geometry.dim, ))
@@ -200,84 +176,47 @@ solid_coords_io = Function(Vs_io, name="solid_coords_io")
 solid_force = Function(Vs, name="solid_force")
 solid_force_io = Function(Vs_io, name="solid_force_io")
 solid_velocity = Function(Vs, name="solid_velocity")
-solid_fiber = Function(Vs, name="fiber")
-solid_sheet = Function(Vs, name="sheet")
-solid_fiber_io = Function(Vs_io, name="fiber_io")
-solid_sheet_io = Function(Vs_io, name="sheet_io")
-solid_coords.interpolate(lambda x: np.array([x[0], x[1], x[2]]))
-
-# 这里假设所有进程都能访问到同样的纤维数据，每个进程都要读取完整的纤维数据，然后各个进程根据DoFs分配来提取对应的纤维数据
-dict_fibers = fun_fiber_v1(
-    '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/f0.txt', 
-    '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/s0.txt', 
-    '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/cdm.txt')
-
-cdm = CoordinateDataMap()
-solid_coords_np = solid_coords.x.array.reshape(-1, 3)
-for i, coord in enumerate(solid_coords_np):
-    coord_key = cdm.hash_floats(coord)
-    if np.int64(coord_key) not in dict_fibers:
-        raise KeyError(f"coord_key {coord_key} for coordinate {coord} not found in dict_fibers.")
-    solid_fiber.x.array[3*i:3*i+3] = dict_fibers[coord_key][:3]
-    solid_sheet.x.array[3*i:3*i+3] = dict_fibers[coord_key][3:6]
-
-structure._geometry._cpp_object.x[:,0] = structure._geometry._cpp_object.x[:,0]/10.0 + 3.5
-structure._geometry._cpp_object.x[:,1] = structure._geometry._cpp_object.x[:,1]/10.0 + 2.5
-structure._geometry._cpp_object.x[:,2] = structure._geometry._cpp_object.x[:,2]/10.0 + 2.5
 
 # 定义弱形式
 dVs = TestFunction(Vs)
-endo_pressure = fem.Constant(structure, default_scalar_type(0.0))
-active_tension = fem.Constant(structure, default_scalar_type(0.0))
-# Material = HolzapfelOgdenMaterial(f0=solid_fiber, s0=solid_sheet, tension=active_tension)
-Material = GuccioneMaterial(
-    kappa = config["kappa"], 
-    deviatoric = config["deviatoric"], 
-    contraction = config["contraction"],
-    C = 20000.0, 
-    bf = 8,
-    bt = 2,
-    bfs = 4,
-    f0=solid_fiber, 
-    s0=solid_sheet, 
-    n0 = ufl.cross(solid_sheet, solid_fiber),
-    )
-
-N = ufl.FacetNormal(structure)
-
 FF = grad(solid_coords)
-
 X0 = ufl.SpatialCoordinate(structure)
 x_constraint = solid_coords[0] - X0[0]
 y_constraint = solid_coords[1] - X0[1]
-z_constraint = solid_coords[2] - X0[2]
-circum_constraint = ufl.as_vector((x_constraint, y_constraint, z_constraint))
+circum_constraint = ufl.as_vector((x_constraint, y_constraint))
 
-# First Piola-Kirchhoff stress
-PK1 = Material.first_piola_kirchhoff_stress_v1(structure, solid_coords)
-PK1 += active_tension*FF*ufl.outer(solid_fiber, solid_fiber)
-L_hat = -inner(PK1, grad(dVs))*dxx
-L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(mesh_markers['BASE'][0])
-L_hat -= ufl.inner(dVs, endo_pressure * ufl.cofac(FF)* N) * dss(mesh_markers['ENDO'][0])
+# PK1 = mu_s*(FF-inv(FF).T)
+lambda_s = 2*config["mu_s"]*(1-config["nv_s"])/3.0/(1-2*config["nv_s"])
+PK1 = config["mu_s"]*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T
+# L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
+L_hat = -inner(PK1, grad(dVs))*dxx(11) # Upper valve
+L_hat -= inner(PK1, grad(dVs))*dxx(1) # Bottom valve
+L_hat -= inner(0.01*PK1, grad(dVs))*dxx(21) # circle
+L_hat -= inner(0.01*PK1, grad(dVs))*dxx(31) # circle
+L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(4)
+L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(15)
 L_hat = form(L_hat)
 b1 = create_vector(L_hat)
 
 ###########################################################################################################
 ##########################################  Interaction  ##################################################
 ###########################################################################################################
-from afsic import IBMesh3D, IBInterpolation3D
-ibmesh = IBMesh3D(0.0, config["Lx"], 0.0, config["Ly"], 0.0, config["Lz"], config["Nx"], config["Ny"], config["Nz"], config["velocity_order"])
-ib_interpolation = IBInterpolation3D(ibmesh)
+from afsic import IBMesh, IBInterpolation
+ibmesh = IBMesh(0.0, config["Lx"],0.0, config["Ly"], config["Nx"], config["Ny"], config["velocity_order"])
+ib_interpolation = IBInterpolation(ibmesh)
 coords_bg = Function(V)
-coords_bg.interpolate(lambda x: np.array([x[0], x[1], x[2]]))
-solid_coords.interpolate(lambda x: np.array([x[0], x[1], x[2]]))
+coords_bg.interpolate(lambda x: np.array([x[0], x[1]])) 
+solid_coords.interpolate(lambda x: np.array([x[0], x[1]]))
 ibmesh.build_map(coords_bg._cpp_object)
 ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
+
+
 
 
 ###########################################################################################################
 ##########################################  Output  #######################################################
 ###########################################################################################################
+
 
 
 u_io = Function(V_io)
@@ -297,11 +236,8 @@ form_volume = form(det(grad(solid_coords)) * dx)
 log.set_log_level(log.LogLevel.INFO)
 for step in range(config['num_steps']):
     current_time = step * config['dt']
-    up_velocity.t = current_time
-    # endo_pressure.value = calculate_pressure(current_time, t_load=0.5, diastole_pressure=config["diastole_pressure"], systole_pressure=config["systole_pressure"])
-    endo_pressure.value = min(current_time, config["diastole_time"])/config["diastole_time"]*config["systole_pressure"]
-    active_tension.value = min(current_time, config["diastole_time"])/config["diastole_time"]*config["max_tension"]
-    u_up.interpolate(up_velocity)
+    inlet_velocity.t = current_time
+    u_inlet.interpolate(inlet_velocity)
     ns_solver.solve_one_step()
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
     solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']
@@ -311,9 +247,7 @@ for step in range(config['num_steps']):
     F_L2 = mesh.comm.allreduce(assemble_scalar(form_F_L2), op=MPI.SUM)
     X_L2 = mesh.comm.allreduce(assemble_scalar(form_X_L2), op=MPI.SUM)
     volume = mesh.comm.allreduce(assemble_scalar(form_volume), op=MPI.SUM)
-    
     u_max = ns_solver.u_.x.array.max()
-    
     ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
     with b1.localForm() as loc_2:
         loc_2.set(0)
@@ -339,44 +273,14 @@ for step in range(config['num_steps']):
             data_log["solid_force_norm"] = F_L2
             data_log["solid_coord_norm"] = X_L2
             data_log["volume"] = volume
-            data_log["endo_pressure"] = endo_pressure.value
-            data_log["active_tension"] = active_tension.value
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
 
 
 
-
-class DomainCollisionChecker:
-    def __init__(self, domain):
-        self.tree = bb_tree(domain, domain.geometry.dim)
-        self.domain = domain
-
-    def eval_point(self, disp, x, y, z):
-        x0 = np.array([x, y, z], dtype=dolfinx.default_scalar_type)
-        cell_candidates = compute_collisions_points(self.tree, x0)
-        cell = compute_colliding_cells(self.domain, cell_candidates, x0).array
-        if len(cell) == 0:
-            return [0.0,0.0,0.0]
-        else:
-            first_cell = cell[0]
-            return disp.eval(x0, first_cell)[:3]
-
-us = []
-dcc = DomainCollisionChecker(structure)
-for point in np.loadtxt('data/ideal_middle_wall.txt'):
-    u = dcc.eval_point(solid_coords, point[0]/10.0+3.5, point[1]/10.0+2.5, 0.0/10.0+2.5)
-    us.append([u[0], u[1]])
-
-us = np.array(us)
-global_sum = np.zeros_like(us)
-comm = MPI.COMM_WORLD
-comm.Reduce(us, global_sum, op=MPI.MAX, root=0)
-
-
-if comm.rank == 0:
-    np.savetxt("data/systole-afsi.txt", np.column_stack((global_sum[:, 0], global_sum[:, 1])))
-
-
-
- 
+                # "inflow":flow_velocity(0.0,0.805)[0],
+                # "data/x_displacement": X0(2.0-0.0106,0.91+1e-4)[0] - (2.0-0.0106),
+                # "data/y_displacement": X0(2.0-0.0106,0.91+1e-4)[1] - 0.91,
+                # "data/time": t, 
+                # "u_max": un.vector().max(), 
+                # "u_norm_l2":  un.vector().norm("l2")
