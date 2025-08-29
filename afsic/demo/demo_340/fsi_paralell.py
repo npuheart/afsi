@@ -37,18 +37,20 @@ config = {"nssolver": "chorinsolver",
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
           "T": 3.0,
-          "dt": 1/8000,
+          "dt": 1/16000,
           "rho": 1.0,
           "Lx": 8.0,
           "Ly": 1.61,
-          "Nx": 16*4,
-          "Ny": 16,
+          "Nx": 32*4,
+          "Ny": 32,
           "Nl": 20,
           "mu": 0.1,
           "E_s": 5.6e5,  # Solid elasticity
           "nu_s": 0.4,
           "beta": 1e8,
-          "kappa": 1e5,  # Guccione model parameter
+          "C0": 2e5,
+          "C1": 1e6,
+          "kappa": 4e5,  # Guccione model parameter
           "deviatoric": False,
           "fps": 100,  # Frames per second for output
           }
@@ -191,25 +193,31 @@ x_constraint = solid_coords[0] - X0[0]
 y_constraint = solid_coords[1] - X0[1]
 circum_constraint = ufl.as_vector((x_constraint, y_constraint))
 
+# f1_d = ufl.as_vector((1, 0))  # 45度
+# f1_u = ufl.as_vector((1, 0)) # 45
+# f1_d = ufl.as_vector((0, 1))  # 45度
+# f1_u = ufl.as_vector((0, 1)) # 45
+f1_d = ufl.as_vector((0.70710678118654750, 0.7071067811865475))  # 45度
+f1_u = ufl.as_vector((0.70710678118654750, -0.7071067811865475)) # 45
+f2_d = ufl.as_vector((0.50000000000000000, 0.8660254037844386)) # 60
+f2_u = ufl.as_vector((0.50000000000000000, -0.8660254037844386)) # 60
+f3_d = ufl.as_vector((0.25881904510252074, 0.9659258262890682)) # 75
+f3_u = ufl.as_vector((0.25881904510252074, -0.9659258262890682)) # 75
 
+material_up = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f1_u)
+material_down = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f1_d)
+# material_up = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f2_u)
+# material_down = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f2_d)
+# material_up = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f3_u)
+# material_down = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f3_d)
 
-# f1_d = Constant((0.70710678118654750, 0.7071067811865475)) # 45
-# f1_u = Constant((0.70710678118654750, -0.7071067811865475)) # 45
-# f2_d = Constant((0.50000000000000000, 0.8660254037844386)) # 60
-# f2_u = Constant((0.50000000000000000, -0.8660254037844386)) # 60
-# f3_d = Constant((0.25881904510252074, 0.9659258262890682)) # 75
-# f3_p = Constant((0.25881904510252074, -0.9659258262890682)) # 75
-
-# PK1_up = NeoHookeanMaterial(nu = config["nu_s"], E = config["E_s"], f = f1_u)
-# PK1_down = NeoHookeanMaterial(nu = config["nu_s"], E = config["E_s"], f = f1_d)
-
-Material = NeoHookeanMaterial(nu = config["nu_s"], E = config["E_s"])
-PK1 = Material.first_piola_kirchhoff_stress_v1(structure, solid_coords)
+PK1_up = material_up.first_piola_kirchhoff_stress_v1(structure, solid_coords)
+PK1_down = material_down.first_piola_kirchhoff_stress_v1(structure, solid_coords)
 
 
 # L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
-L_hat = -inner(PK1, grad(dVs))*dxx(11) # Upper valve
-L_hat -= inner(PK1, grad(dVs))*dxx(1) # Bottom valve
+L_hat = -inner(PK1_up, grad(dVs))*dxx(11) # Upper valve
+L_hat -= inner(PK1_down, grad(dVs))*dxx(1) # Bottom valve
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(4)
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(15)
 L_hat = form(L_hat)

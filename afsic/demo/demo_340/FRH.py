@@ -36,15 +36,16 @@ class FRHMaterial:
     def strain_energy(self, domain, F) :
         # Parameters
         params = self._parameters
-        mu_s = 0.5*params["E"]/(1+params["nu"])
-        lambda_s = 2*params["E"]*params["nu"]/(1+params["nu"])/(1-2*params["nu"])
-        # mu_s = 5.6e5
-        # lambda_s = 2*mu_s*(1-0.4)/3.0/(1-2*0.4)
-
-        C = ufl.variable(F.T * F)
-        Ic = ufl.variable(ufl.tr(C))
-        J = ufl.variable(ufl.det(F))
-        psi = (mu_s / 2) * (Ic - 3) - mu_s * ufl.ln(J) + (lambda_s / 2) * (ufl.ln(J))**2
+        J = ufl.det(F)
+        C = F.T*F
+        F_bar = J**(-1/2)*F
+        C_bar = F_bar.T*F_bar
+        I1_bar = ufl.tr(C_bar)
+        I4_bar = ufl.dot(params["f1"], C_bar*params["f1"])
+        # Ic = ufl.variable(ufl.tr(C))
+        # J = ufl.variable(ufl.det(F))
+        # psi = (mu_s / 2) * (Ic - 3) - mu_s * ufl.ln(J) + (lambda_s / 2) * (ufl.ln(J))**2
+        psi = 0.5*params["C0"]*(I1_bar-3) + params["C1"]*(ufl.exp(I4_bar-1) - I4_bar) + 0.5*params["kappa_s"]*(0.5*(J*J-1)-ufl.ln(J))
         return psi
 
     def first_piola_kirchhoff_stress(self, domain, u, p=None) :
@@ -56,21 +57,3 @@ class FRHMaterial:
     def first_piola_kirchhoff_stress_v1(self, domain, coords, p=None) :
         F = ufl.variable(ufl.grad(coords))
         return ufl.diff(self.strain_energy(domain, F), F)
-
-
-# def MaterialModel_3(X0, fiber, C0, C1, kappa_s):
-#     # 计算形变梯度
-#     FF = variable(grad(X0))
-#     J = det(FF)
-#     FF_bar = J**(-1/2)*FF
-#     CC_bar = FF_bar.T*FF_bar
-#     CC = FF.T*FF
-#     I1_bar = tr(CC_bar)
-#     m = fiber
-#     I4_bar = dot(m, CC_bar*m)
-#     # 本构参数
-#     Psi = 0.5*C0*(I1_bar-3) + C1*(exp(I4_bar-1) - I4_bar) + 0.5*kappa_s*(0.5*(J*J-1)-ln(J))
-#     dPsi = diff(Psi, FF)    
-#     dVs = TestFunction(Vs)
-#     L_hat = - inner(dPsi, grad(dVs))*dx
-#     return L_hat
