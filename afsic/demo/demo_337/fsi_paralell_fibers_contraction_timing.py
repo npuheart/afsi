@@ -33,6 +33,38 @@ from ReadFibers import fun_fiber_v1, CoordinateDataMap
 
 from dolfinx.geometry import bb_tree, compute_colliding_cells, compute_collisions_points
 
+import time
+from functools import wraps
+from typing import Any, Callable, Dict
+
+
+def time_it(func: Callable, *args, **kwargs) -> Dict[str, Any]:
+    """
+    Measure the execution time of a function and return both result and timing data.
+    
+    Args:
+        func: The function to be timed
+        *args: Positional arguments for the function
+        **kwargs: Keyword arguments for the function
+        
+    Returns:
+        Dictionary containing:
+            - 'result': The return value of the function
+            - 'execution_time': Execution time in seconds
+            - 'function_name': Name of the timed function
+    """
+    start_time = time.perf_counter()
+    result = func(*args, **kwargs)
+    end_time = time.perf_counter()
+    
+    execution_time = end_time - start_time
+    
+    return {
+        'result': result,
+        'execution_time': execution_time,
+        'function_name': func.__name__
+    }
+
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
@@ -43,7 +75,7 @@ config = {"nssolver": "chorinsolver",
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
           "T": 2.0,
-          "dt": 1/10000,
+          "dt": 1/20000,
           "rho": 1.0,
           "Lx": 5.0,
           "Ly": 5.0,
@@ -56,11 +88,11 @@ config = {"nssolver": "chorinsolver",
           "diastole_pressure": 100000.0, # 1. 8.0*mmHg, 2. 10kPa
           "systole_pressure":  150000.0,
           "max_tension":       600000.0,
-          "beta": 5e6,
+          "beta": 1e7,
           "kappa": 4e6,  # Guccione model parameter
           "deviatoric": False,
           "contraction": True,  # Whether to include active contraction
-          "fps": 100,  # Frames per second for output
+          "fps": 10000,  # Frames per second for output
           }
 
 config["num_steps"] = int(config['T']/config['dt'])
@@ -294,6 +326,14 @@ form_X_L2 = form(dot(solid_coords, solid_coords) * dx)
 form_F_L2 = form(dot(solid_force, solid_force) * dx)
 form_volume = form(det(grad(solid_coords)) * dx)
 
+timing_results = {
+    'interpolate_bcu': 0,
+    'ns_solver':0,
+    'fluid_to_solid': 0,
+    'advance_solid': 0,
+    'solid_to_fluid': 0,
+    'solid_force': 0,
+}
 log.set_log_level(log.LogLevel.INFO)
 for step in range(config['num_steps']):
     current_time = step * config['dt']
@@ -301,11 +341,21 @@ for step in range(config['num_steps']):
     # endo_pressure.value = calculate_pressure(current_time, t_load=0.5, diastole_pressure=config["diastole_pressure"], systole_pressure=config["systole_pressure"])
     endo_pressure.value = min(current_time, config["diastole_time"])/config["diastole_time"]*config["systole_pressure"]
     active_tension.value = min(current_time, config["diastole_time"])/config["diastole_time"]*config["max_tension"]
-    u_up.interpolate(up_velocity)
-    ns_solver.solve_one_step()
-    ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
+    res_interpolate_bcu = time_it(u_up.interpolate, up_velocity)
+    res_ns_solver       = time_it(ns_solver.solve_one_step)
+    res_fluid_to_solid  = time_it(ib_interpolation.fluid_to_solid, ns_solver.u_._cpp_object, solid_velocity._cpp_object)
+    timing_results['interpolate_bcu'] += res_interpolate_bcu['execution_time']
+    timing_results['ns_solver']       += res_ns_solver['execution_time']
+    timing_results['fluid_to_solid']  += res_fluid_to_solid['execution_time']
+
+    start_time = time.perf_counter()
     solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']
     solid_coords.x.scatter_forward()
+    end_time = time.perf_counter()
+    execution_time = end_time - start_time
+    timing_results['advance_solid'] += execution_time
+
+
     u_L2 = mesh.comm.allreduce(assemble_scalar(form_u_L2), op=MPI.SUM)
     p_L2 = mesh.comm.allreduce(assemble_scalar(form_p_L2), op=MPI.SUM)
     F_L2 = mesh.comm.allreduce(assemble_scalar(form_F_L2), op=MPI.SUM)
@@ -314,15 +364,26 @@ for step in range(config['num_steps']):
     
     u_max = ns_solver.u_.x.array.max()
     
+    start_time = time.perf_counter()
     ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
     with b1.localForm() as loc_2:
         loc_2.set(0)
     assemble_vector(b1, L_hat)
+    end_time = time.perf_counter()
+    execution_time = end_time - start_time
+    timing_results['solid_force'] += execution_time
+
+    start_time = time.perf_counter()
     b1.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
     with b1.getBuffer() as arr:
         solid_force.x.array[:len(arr)] = arr[:]
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
+    end_time = time.perf_counter()
+    execution_time = end_time - start_time
+    timing_results['solid_to_fluid'] += execution_time
+
+
 
     data_log = {}
     if step == 1 or time_manager.should_output(step):
@@ -341,6 +402,14 @@ for step in range(config['num_steps']):
             data_log["volume"] = volume
             data_log["endo_pressure"] = endo_pressure.value
             data_log["active_tension"] = active_tension.value
+            
+            data_log["timing/advance_solid"] = timing_results['advance_solid']
+            data_log["timing/interpolate_bcu"] = timing_results['interpolate_bcu']
+            data_log["timing/fluid_to_solid"] = timing_results['fluid_to_solid']
+            data_log["timing/solid_to_fluid"] = timing_results['solid_to_fluid']
+            data_log["timing/ns_solver"] = timing_results['ns_solver']
+            data_log["timing/solid_force"] = timing_results['solid_force']
+
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
 

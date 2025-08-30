@@ -46,7 +46,7 @@ class GuccioneMaterial:
         params = self._parameters
         kappa = params["kappa"]
         J = ufl.det(F)
-        return 0.5 * params["C"] * (ufl.exp(self._Q(F)) - 1.0) + kappa * ufl.ln(J)**2
+        return 0.5 * params["C"] * (ufl.exp(self._Q(F)) - 1.0) + kappa * (J-1)**2
 
     # def active_contraction(self, F):
     #     params = self._parameters
