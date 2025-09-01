@@ -1,7 +1,8 @@
+from petsc4py import PETSc
 from afsic import unique_filename
 from mpi4py import MPI
-from petsc4py import PETSc
 
+import os
 import time
 import requests
 import numpy as np
@@ -137,7 +138,8 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+home_dir = os.path.expanduser("~")
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{home_dir}/afsi-data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh()
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),

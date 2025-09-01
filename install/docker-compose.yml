@@ -1,0 +1,13 @@
+services:
+  fenicsx-pulse:
+    image: mapengfei/dolfinx:local
+    container_name: mapengfei_dolfinx_local_2
+    command: tail -f /dev/null
+    volumes:
+    #   - .:/repo
+      - ../..:/root
+
+
+# sudo docker compose up -d
+# sudo docker exec -it mapengfei_dolfinx_local /usr/bin/bash
+# sudo docker run --rm -v $PWD:/home/shared -w /home/shared -it ghcr.io/finsberg/fenicsx-ldrb bash
