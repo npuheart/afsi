@@ -80,9 +80,9 @@ config = {"nssolver": "chorinsolver",
           "Lx": 5.0,
           "Ly": 5.0,
           "Lz": 5.0,
-          "Nx": 32,
-          "Ny": 32,
-          "Nz": 32,
+          "Nx": 64,
+          "Ny": 64,
+          "Nz": 64,
           "mu": 1.0,
           "diastole_time": 1.5,  # Diastole time in seconds
           "diastole_pressure": 100000.0, # 1. 8.0*mmHg, 2. 10kPa
@@ -335,7 +335,8 @@ timing_results = {
     'solid_force': 0,
 }
 log.set_log_level(log.LogLevel.INFO)
-for step in range(config['num_steps']):
+# for step in range(config['num_steps']):
+for step in range(101):
     current_time = step * config['dt']
     up_velocity.t = current_time
     # endo_pressure.value = calculate_pressure(current_time, t_load=0.5, diastole_pressure=config["diastole_pressure"], systole_pressure=config["systole_pressure"])
