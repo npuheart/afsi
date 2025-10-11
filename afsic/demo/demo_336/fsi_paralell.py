@@ -22,6 +22,21 @@ from afsic import IPCSSolver,ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 
+# 每个实验的名称都是唯一的
+def get_project_name(project_name):
+    url = "https://api.pengfeima.cn/simcardiac/counter"
+    headers = {
+        "X-API-Key": "B6IPZQJW5K3TRB9L7ABIMC3UOJR0AY3H"
+    }
+    params = {"project": project_name}
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code == 200:
+        data = response.json()["experiment"]
+        return data
+    else:
+        return "d-b"
+
+
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
           "project_name": "demo-336", 
@@ -45,7 +60,7 @@ config = {"nssolver": "chorinsolver",
 config["num_steps"] = int(config['T']/config['dt'])
 config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
 config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
-config["experiment_name"] = requests.get(f"http://counter.pengfeima.cn/{config['project_name']}").text if MPI.COMM_WORLD.rank == 0 else None
+config["experiment_name"] = get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
 swanlab_init(config['project_name'], config['experiment_name'], config)
 

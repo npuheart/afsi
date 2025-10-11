@@ -33,7 +33,6 @@ GPLv3
 
 Documentation
 -------------
-Work in progress......
 
 Some demos are under the directory: `afsic/demo`.
 
@@ -52,10 +51,7 @@ cd afsic && pip install .
 The installation process has been tested and verified on a fresh installation of Ubuntu 24.04.
 Before each use of AFSI, remember to activate the environment by sourcing `install/activate_dolfinx`.
 
-Use
----
-
-Work in progress......
+More guidance : https://github.com/npuheart/afsi/discussions/2
 
 Contact
 -------
@@ -66,3 +62,7 @@ The latest version of this software can be obtained from
 Please report bugs and other issues through the issue tracker at:
 
   https://github.com/npuheart/afsi/issues
+
+Cite
+----
+Ma, Pengfei, Li Cai, Xuan Wang, and Hao Gao. "AFSI: Automated Fluid-Structure Interaction Solver Development for Nonlinear Solid Mechanics." arXiv preprint arXiv:2509.00014 (2025).
