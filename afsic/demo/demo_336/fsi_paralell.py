@@ -1,5 +1,5 @@
 from petsc4py import PETSc
-from afsic import unique_filename
+from afsic import unique_filename, get_project_name
 from mpi4py import MPI
 
 import os
@@ -22,19 +22,7 @@ from afsic import IPCSSolver,ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 
-# 每个实验的名称都是唯一的
-def get_project_name(project_name):
-    url = "https://api.pengfeima.cn/simcardiac/counter"
-    headers = {
-        "X-API-Key": "B6IPZQJW5K3TRB9L7ABIMC3UOJR0AY3H"
-    }
-    params = {"project": project_name}
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code == 200:
-        data = response.json()["experiment"]
-        return data
-    else:
-        return "d-b"
+
 
 
 # Define the configuration for the simulation

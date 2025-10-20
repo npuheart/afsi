@@ -7,4 +7,4 @@ from .afsic_ext import coupling, IBMesh, IBMesh3D,  IBInterpolation,IBInterpolat
 from .euler.IPCSSolver import IPCSSolver
 from .euler.ChorinSolver import ChorinSolver
 
-from .common.utilities import TimeManager, swanlab_init, swanlab_upload, unique_filename
+from .common.utilities import TimeManager, swanlab_init, swanlab_upload, unique_filename, get_project_name
