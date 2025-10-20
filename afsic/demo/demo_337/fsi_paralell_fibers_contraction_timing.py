@@ -1,7 +1,8 @@
+from petsc4py import PETSc
 from afsic import unique_filename
 from mpi4py import MPI
-from petsc4py import PETSc
 
+import os
 import time
 import requests
 import numpy as np
@@ -37,6 +38,19 @@ import time
 from functools import wraps
 from typing import Any, Callable, Dict
 
+# 每个实验的名称都是唯一的
+def get_project_name(project_name):
+    url = "https://api.pengfeima.cn/simcardiac/counter"
+    headers = {
+        "X-API-Key": "B6IPZQJW5K3TRB9L7ABIMC3UOJR0AY3H"
+    }
+    params = {"project": project_name}
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code == 200:
+        data = response.json()["experiment"]
+        return data
+    else:
+        return "d-b"
 
 def time_it(func: Callable, *args, **kwargs) -> Dict[str, Any]:
     """
@@ -88,8 +102,8 @@ config = {"nssolver": "chorinsolver",
           "diastole_pressure": 100000.0, # 1. 8.0*mmHg, 2. 10kPa
           "systole_pressure":  150000.0,
           "max_tension":       600000.0,
-          "beta": 1e7,
-          "kappa": 4e6,  # Guccione model parameter
+          "beta": 5e5,
+          "kappa": 5e5,  # Guccione model parameter
           "deviatoric": False,
           "contraction": True,  # Whether to include active contraction
           "fps": 10000,  # Frames per second for output
@@ -98,7 +112,7 @@ config = {"nssolver": "chorinsolver",
 config["num_steps"] = int(config['T']/config['dt'])
 config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
 config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
-config["experiment_name"] = requests.get(f"http://counter.pengfeima.cn/{config['project_name']}").text if MPI.COMM_WORLD.rank == 0 else None
+config["experiment_name"] = get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
 swanlab_init(config['project_name'], config['experiment_name'], config)
 
@@ -167,6 +181,7 @@ class UpVelocity():
         return values
 
 
+
 # Inlet
 u_up = Function(V)
 up_velocity = UpVelocity(0.0)
@@ -200,10 +215,11 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 import json
 import ufl
-with open('/home/dolfinx/afsi/afsic/demo/demo_337/mesh/lv_ellipsoid/geometry/markers.json', 'r', encoding='utf-8') as file:
+home_dir = os.path.expanduser("~")
+with open(f'{home_dir}/afsi-data/337_ideal_left_ventricle/lv_ellipsoid/geometry/markers.json', 'r', encoding='utf-8') as file:
     mesh_markers = json.load(file)
 
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/lv_ellipsoid/geometry/mesh.xdmf', "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f'{home_dir}/afsi-data/337_ideal_left_ventricle/lv_ellipsoid/geometry/mesh.xdmf', "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh(name="Mesh")
     structure.topology.create_connectivity(structure.topology.dim-1, structure.topology.dim)
     ft = file.read_meshtags(structure, "Facet tags")
@@ -240,9 +256,9 @@ solid_coords.interpolate(lambda x: np.array([x[0], x[1], x[2]]))
 
 # 这里假设所有进程都能访问到同样的纤维数据，每个进程都要读取完整的纤维数据，然后各个进程根据DoFs分配来提取对应的纤维数据
 dict_fibers = fun_fiber_v1(
-    '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/f0.txt', 
-    '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/s0.txt', 
-    '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/cdm.txt')
+    f'{home_dir}/afsi-data/337_ideal_left_ventricle/f0.txt', 
+    f'{home_dir}/afsi-data/337_ideal_left_ventricle/s0.txt', 
+    f'{home_dir}/afsi-data/337_ideal_left_ventricle/cdm.txt')
 
 cdm = CoordinateDataMap()
 solid_coords_np = solid_coords.x.array.reshape(-1, 3)

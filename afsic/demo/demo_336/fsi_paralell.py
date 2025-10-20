@@ -1,5 +1,5 @@
 from petsc4py import PETSc
-from afsic import unique_filename
+from afsic import unique_filename, get_project_name
 from mpi4py import MPI
 
 import os
@@ -21,6 +21,9 @@ from dolfinx.fem import form, assemble_scalar
 from afsic import IPCSSolver,ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
+
+
+
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
@@ -45,7 +48,7 @@ config = {"nssolver": "chorinsolver",
 config["num_steps"] = int(config['T']/config['dt'])
 config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
 config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
-config["experiment_name"] = requests.get(f"http://counter.pengfeima.cn/{config['project_name']}").text if MPI.COMM_WORLD.rank == 0 else None
+config["experiment_name"] = get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
 swanlab_init(config['project_name'], config['experiment_name'], config)
 

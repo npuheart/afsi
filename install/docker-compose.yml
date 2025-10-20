@@ -1,7 +1,7 @@
 services:
-  fenicsx-pulse:
+  mapengfei_afsi:
     image: mapengfei/dolfinx:local
-    container_name: mapengfei_dolfinx_local_2
+    container_name: mapengfei_dolfinx_local_3
     command: tail -f /dev/null
     volumes:
     #   - .:/repo
