@@ -3,6 +3,7 @@ import swanlab, time
 from datetime import datetime
 import os
 import requests
+import dolfinx.log
 
 start_time = time.time()
 dt_minimum = 1e-5
@@ -90,3 +91,10 @@ def get_project_name(project_name):
         return data
     else:
         return "d-b"
+
+
+def log(message, log_level=dolfinx.log.LogLevel.INFO):
+    """Log message only on MPI rank 0"""
+    comm = MPI.COMM_WORLD
+    if comm.rank == 0:
+        dolfinx.log.log(log_level, message)

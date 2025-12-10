@@ -22,9 +22,6 @@ from afsic import IPCSSolver,ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 
-
-
-
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
           "project_name": "demo-336", 
@@ -182,12 +179,9 @@ ibmesh.build_map(coords_bg._cpp_object)
 ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 
 
-
-
 ###########################################################################################################
 ##########################################  Output  #######################################################
 ###########################################################################################################
-
 
 
 u_io = Function(V_io)
@@ -198,13 +192,13 @@ file_solid.write_mesh(structure)
 
 time_manager = TimeManager(config['T'], config['num_steps'], fps=20)
 
-form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_ ) * dx)
-form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_ ) * dx)
-form_F_L2 = form(dot(solid_coords, solid_coords ) * dx)
-form_volume = form(det(grad(solid_coords))* dx)
+form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_) * dx)
+form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_) * dx)
+form_F_L2 = form(dot(solid_coords, solid_coords) * dx)
+form_volume = form(det(grad(solid_coords)) * dx)
 
 log.set_log_level(log.LogLevel.INFO)
-for step in range(  config['num_steps']):
+for step in range(config['num_steps']):
     current_time = step * config['dt']
     up_velocity.t = current_time
     u_up.interpolate(up_velocity)
@@ -242,6 +236,3 @@ for step in range(  config['num_steps']):
             data_log["volume"] = volume
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
-
-
-

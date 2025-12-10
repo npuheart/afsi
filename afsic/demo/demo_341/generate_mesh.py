@@ -55,7 +55,7 @@ def create_mesh(comm: MPI.Comm, model: gmsh.model, name: str, filename: str, mod
 
 
 
-def gmsh_sphere(model: gmsh.model, name: str, center=[0.6,0.5,0.5], radius=0.2,  mesh_size=0.03) -> gmsh.model:
+def gmsh_sphere(model: gmsh.model, name: str, center=[0.6,0.5,0.5], radius=0.2,  mesh_size=0.01) -> gmsh.model:
     """Create a Gmsh model of a sphere and tag sub entitites
     from all co-dimensions (peaks, ridges, facets and cells).
 

@@ -1,8 +1,9 @@
-from afsic import IBMesh3D, IBInterpolation3D
-from afsic import unique_filename
-from mpi4py import MPI
 from petsc4py import PETSc
+from afsic import IBMesh3D, IBInterpolation3D
+from afsic import unique_filename, get_project_name
+from mpi4py import MPI
 
+import os
 import time
 import requests
 import numpy as np
@@ -47,7 +48,7 @@ config = {"nssolver": "chorinsolver",
 config["num_steps"] = int(config['T']/config['dt'])
 config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
 config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
-config["experiment_name"] = requests.get(f"http://counter.pengfeima.cn/{config['project_name']}").text if MPI.COMM_WORLD.rank == 0 else None
+config["experiment_name"] = get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
 swanlab_init(config['project_name'], config['experiment_name'], config)
 
@@ -107,12 +108,9 @@ Q = functionspace(mesh, s_cg1)
 fdim = mesh.topology.dim - 1
 gdim = mesh.geometry.dim
 tdim = mesh.topology.dim
-
-
 class UpVelocity():
     def __init__(self, t):
         self.t = t
-
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
         values[0] = 1.0
@@ -152,7 +150,7 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/afsic/demo/demo_341/mesh-341.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/root/afsi/afsic/demo/demo_341/mesh-341.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh()
 # structure = dolfinx.mesh.create_box(
 #     comm=MPI.COMM_WORLD,
@@ -162,9 +160,9 @@ with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/afsic/demo/demo_34
 #     ghost_mode=GhostMode.shared_facet,
 # )
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
-                config["force_order"], shape=(structure.geometry.dim, ))
+                 config["force_order"], shape=(structure.geometry.dim, ))
 v_cg1 = element("Lagrange", structure.topology.cell_name(),
-                1, shape=(structure.geometry.dim, ))
+                 1, shape=(structure.geometry.dim, ))
 Vs = functionspace(structure, v_cg2)
 Vs_io = functionspace(structure, v_cg1)
 
