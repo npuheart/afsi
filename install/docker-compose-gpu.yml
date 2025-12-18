@@ -1,0 +1,21 @@
+services:
+  mapengfei_afsi_gpu_dev:
+    image: mapengfei/dolfinx:local
+    container_name: afsi_dev_gpu
+    command: tail -f /dev/null
+    volumes:
+      - ../..:/root
+    deploy:
+      resources:
+        limits:
+          memory: 128g
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    shm_size: 8g
+
+# sudo docker compose -f docker-compose-gpu.yml up -d
+# sudo docker exec -it mapengfei_dolfinx_local /usr/bin/bash
+# sudo docker run --rm -v $PWD:/home/shared -w /home/shared -it ghcr.io/finsberg/fenicsx-ldrb bash
