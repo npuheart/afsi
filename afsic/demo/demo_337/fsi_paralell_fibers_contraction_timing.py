@@ -181,7 +181,6 @@ class UpVelocity():
         return values
 
 
-
 # Inlet
 u_up = Function(V)
 up_velocity = UpVelocity(0.0)

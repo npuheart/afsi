@@ -28,10 +28,9 @@ class TimeManager:
         return False
 
 
-def swanlab_init(project_name, experiment_name, config):
+def swanlab_init(project_name, experiment_name, config, api_key="VBxEp1UBe2606KHDM9264", host='https://swanlab.cn'):
     if (MPI.COMM_WORLD.rank == 0):
-        swanlab.login(api_key="VBxEp1UBe2606KHDM9264", host='https://swanlab.cn', save=True)
-        # swanlab.login(api_key='5z4lwzHZK8rpXY1lyTcey', host='http://swanlab.pengfeima.cn', save=True)
+        swanlab.login(api_key=api_key, host=host, save=True)
         swanlab.init(
             project=project_name,
             # workspace="deepheart",
@@ -41,7 +40,8 @@ def swanlab_init(project_name, experiment_name, config):
             tags=["dolfinx", "dynamic", "hyperelastic", "swanlab"],
             config=config,
         )
-    
+
+
 
 def swanlab_upload(current_time, data_log_1, **params):
     data_log = {}

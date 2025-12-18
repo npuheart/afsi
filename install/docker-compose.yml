@@ -1,7 +1,7 @@
 services:
-  mapengfei_afsi:
+  mapengfei_afsi_dev:
     image: mapengfei/dolfinx:local
-    container_name: mapengfei_dolfinx_local_3
+    container_name: afsi_dev
     command: tail -f /dev/null
     volumes:
     #   - .:/repo
