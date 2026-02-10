@@ -1,0 +1,51 @@
+{
+  "project": {
+    "name": "Fluid-Structure Interaction Benchmark Suite",
+    "version": "1.0.0",
+    "case_id": "problem_2_case_6"
+  },
+  "global_settings": {
+    "output_directory": "./results/problem_2/case_6",
+    "solver_backend": "fem_fsi_solver"
+  },
+  "case": {
+    "title": "Idealized Heart Valve - Closed Valve (Mesh 3)",
+    "description": "Simulation of a closed valve with pressure discontinuity.",
+    "file_reference": "problem-2.md",
+    "geometry": {
+      "channel_size_cm": [4.0, 1.0],
+      "leaflet": {
+        "type": "single_elastic_beam",
+        "position_x_cm": 2.0,
+        "thickness_cm": 0.0212,
+        "height_cm": 1.0
+      }
+    },
+    "boundary_conditions": {
+      "inlet_pressure": {
+        "function": "piecewise_linear",
+        "max_pressure_dyne_cm2": 3.0e5,
+        "ramp_time_s": 0.1
+      }
+    },
+    "materials": {
+      "fluid": {
+        "density_g_cm3": 100,
+        "viscosity_poise": 10
+      },
+      "solid": {
+        "model": "compressible_neo_hookean",
+        "density_g_cm3": 100,
+        "youngs_modulus_dyne_cm2": 5.6e7,
+        "poisson_ratio": 0.4
+      }
+    },
+    "numerics": {
+      "time_step_s": 1.0e-4,
+      "mesh": {
+        "fluid_grid": "512x128",
+        "solid_grid": "5x256"
+      }
+    }
+  }
+}

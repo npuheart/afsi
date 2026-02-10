@@ -1,15 +1,31 @@
-*.bp
-figures
-results
-
+# Python
+__pycache__/
+*.py[cod]
 mail/build
 
-data
+# Output Data / Temporary Files (关键！)
+*.h5
+*.xdmf
+*.bp
+checkpoint/
+swanlog/
+plot/
+build/
+output/
+_results/
 
+# IDE
+.vscode/
+.idea/
+
+# Logs
 *nohup.out
 
-*.xdmf
-*.h5
+
+# benchmarks
+figures
+results
+data
 
 afsic/demo/demo_337/mesh
 afsic/demo/demo_337/mesh-90

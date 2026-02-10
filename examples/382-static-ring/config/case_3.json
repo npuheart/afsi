@@ -1,0 +1,51 @@
+{
+  "project": {
+    "name": "Fluid-Structure Interaction Benchmark Suite",
+    "version": "1.0.0",
+    "case_id": "problem_1_case_3"
+  },
+  "global_settings": {
+    "output_directory": "./results/problem_1_case_3",
+    "solver_backend": "fem_fsi_solver"
+  },
+  "case": {
+    "title": "Static Equilibrium of Immersed Annular Solid (N=64)",
+    "description": "Simulation of a thick annular cylinder achieving equilibrium in a square fluid domain.",
+    "file_reference": "problem-1.md",
+    "geometry": {
+      "fluid_domain": {
+        "shape": "square",
+        "length_m": 1.0
+      },
+      "solid_domain": {
+        "shape": "annulus",
+        "inner_radius_m": 0.25,
+        "thickness_m": 0.0625,
+        "position": "center"
+      },
+      "dimension": "2D"
+    },
+    "materials": {
+      "fluid": {
+        "model": "incompressible_newtonian",
+        "density_kg_m3": 1.0,
+        "dynamic_viscosity_pa_s": 1.0
+      },
+      "solid": {
+        "model": "fiber_reinforced",
+        "fiber_direction": "circumferential",
+        "stiffness_mu_pa": 1.0,
+        "initial_density_kg_m3": 1.0
+      }
+    },
+    "numerics": {
+      "time_step_s": 1.0e-3,
+      "duration_steps": 10,
+      "mesh": {
+        "fluid_grid_N": [64, 64],
+        "solid_grid_M_number": 8,
+        "note": "solid_grid_M = 2*N/16"
+      }
+    }
+  }
+}

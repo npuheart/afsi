@@ -1,0 +1,45 @@
+{
+  "project": {
+    "name": "Fluid-Structure Interaction Benchmark Suite",
+    "version": "1.0.0",
+    "case_id": "problem_2_case_1"
+  },
+  "global_settings": {
+    "output_directory": "./results/problem_2/case_1",
+    "solver_backend": "fem_fsi_solver"
+  },
+  "case": {
+    "title": "Idealized Heart Valve - Open Valve (Mesh 1)",
+    "description": "Simulation of open valve with pulsatile flow.",
+    "file_reference": "problem-2.md",
+    "geometry": {
+      "channel_size_cm": [8.0, 1.61],
+      "leaflets": {
+        "position_x_cm": 2.0,
+        "thickness_cm": 0.0212,
+        "height_cm": 0.7,
+        "gap": "separated"
+      }
+    },
+    "materials": {
+      "fluid": {
+        "density_g_cm3": 100,
+        "viscosity_poise": 10
+      },
+      "solid": {
+        "model": "compressible_neo_hookean",
+        "density_g_cm3": 100,
+        "youngs_modulus_dyne_cm2": 5.6e7,
+        "poisson_ratio": 0.4
+      }
+    },
+    "numerics": {
+      "time_step_s": 1.0e-4,
+      "duration_s": 3.0,
+      "mesh": {
+        "fluid_grid": "129x32",
+        "solid_mesh": "4x100"
+      }
+    }
+  }
+}
