@@ -15,7 +15,7 @@
 
 Description
 -----------
-AFSI is a automated fluid-structure interaction solver based on the immersed boundary method and developed within the FEniCS framework. Leveraging FEniCS’s support for automated solution of partial differential equations, AFSI offers out-of-the-box high-performance capabilities, making it a practical tool for research groups and individual researchers to investigate complex FSI problems—including those involving nonlinear solids with large deformations and large displacements.
+AFSI is an automated fluid-structure interaction solver based on the immersed boundary method and developed within the FEniCS framework. Leveraging FEniCS’s support for automated solution of partial differential equations, AFSI offers out-of-the-box high-performance capabilities, making it a practical tool for research groups and individual researchers to investigate complex FSI problems—including those involving nonlinear solids with large deformations and large displacements.
 
 
 Authors
