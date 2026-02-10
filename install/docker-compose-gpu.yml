@@ -1,21 +1,13 @@
 services:
-  mapengfei_afsi_gpu_dev:
+  mapengfei_afsi_dev_gpu_1:
     image: mapengfei/dolfinx:local
-    container_name: afsi_dev_gpu
+    container_name: afsi_dev_gpu_1
+    runtime: nvidia  # 关键：指定使用 nvidia 运行时
     command: tail -f /dev/null
     volumes:
       - ../..:/root
-    deploy:
-      resources:
-        limits:
-          memory: 128g
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all  # 关键：设置可见的 GPU
+      - NVIDIA_DRIVER_CAPABILITIES=all
     shm_size: 8g
-
-# sudo docker compose -f docker-compose-gpu.yml up -d
-# sudo docker exec -it mapengfei_dolfinx_local /usr/bin/bash
-# sudo docker run --rm -v $PWD:/home/shared -w /home/shared -it ghcr.io/finsberg/fenicsx-ldrb bash
+    mem_limit: 128g  # 直接使用 mem_limit 而不是 deploy.resources.limits
