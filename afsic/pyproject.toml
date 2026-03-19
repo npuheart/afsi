@@ -5,18 +5,31 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "afsic"
 version = "0.0.1"
-description = "An example minimal project that compiles bindings using nanobind and scikit-build"
+description = "AFSI: Automated Fluid-Structure Interaction Solver for Nonlinear Solid Mechanics"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 authors = [
-    { name = "Wenzel Jakob", email = "wenzel.jakob@epfl.ch" },
+    { name = "Pengfei Ma" },
+    { name = "Xuan Wang" },
 ]
+license = { text = "GPL-3.0-or-later" }
 classifiers = [
-    "License :: OSI Approved :: BSD License",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "mpi4py",
+    "petsc4py",
+    "swanlab",
+    "tqdm",
 ]
 
 [project.urls]
-Homepage = "https://github.com/wjakob/afsic"
+Homepage = "https://github.com/npuheart/afsi"
+"Bug Tracker" = "https://github.com/npuheart/afsi/issues"
 
 
 [tool.scikit-build]

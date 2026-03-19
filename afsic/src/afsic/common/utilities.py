@@ -28,9 +28,10 @@ class TimeManager:
         return False
 
 
-def swanlab_init(project_name, experiment_name, config, api_key="VBxEp1UBe2606KHDM9264", host='https://swanlab.cn'):
+def swanlab_init(project_name, experiment_name, config, api_key=None, host='https://swanlab.cn'):
     if (MPI.COMM_WORLD.rank == 0):
-        swanlab.login(api_key=api_key, host=host, save=True)
+        resolved_key = api_key or os.environ.get("SWANLAB_API_KEY", "")
+        swanlab.login(api_key=resolved_key, host=host, save=True)
         swanlab.init(
             project=project_name,
             # workspace="deepheart",
