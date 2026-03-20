@@ -1,0 +1,3 @@
+spack load cmake 
+
+

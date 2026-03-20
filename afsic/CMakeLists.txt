@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15...3.26)
 
-project(afsic LANGUAGES CXX)
+project(afsic LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,10 +59,10 @@ nanobind_add_module(
 )
 
 add_subdirectory(src/cpp/mail)
-add_subdirectory(src/cpp/coupling)
+# add_subdirectory(src/cpp/coupling)
 target_link_libraries(afsic_ext PRIVATE 
   smtp_mail_sender
-  coupling
+  # coupling
   )
 
 # Install directive for scikit-build-core
