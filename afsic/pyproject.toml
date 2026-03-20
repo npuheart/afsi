@@ -6,7 +6,6 @@ build-backend = "scikit_build_core.build"
 name = "afsic"
 version = "0.0.1"
 description = "AFSI: Automated Fluid-Structure Interaction Solver for Nonlinear Solid Mechanics"
-readme = "README.md"
 requires-python = ">=3.10"
 authors = [
     { name = "Pengfei Ma" },
@@ -41,6 +40,9 @@ build-dir = "build/{wheel_tag}"
 
 # Build stable ABI wheels for CPython 3.12+
 wheel.py-api = "cp312"
+
+# Include the Python package from src/
+wheel.packages = ["src/afsic"]
 
 [tool.cibuildwheel]
 # Necessary to see build output from the actual compilation

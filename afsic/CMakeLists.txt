@@ -28,6 +28,15 @@ if (NOT SKBUILD)
   after editing C++ files.")
 endif()
 
+# When building directly (not via pip) inside a spack environment,
+# use the environment's Python and nanobind.
+if(DEFINED ENV{SPACK_ENV})
+  set(Python_ROOT_DIR "$ENV{SPACK_ENV}/.spack-env/view" CACHE PATH "Spack environment Python prefix")
+  set(Python_FIND_REGISTRY NEVER)
+  set(Python_FIND_VIRTUALENV FIRST)
+  list(PREPEND CMAKE_PREFIX_PATH "$ENV{SPACK_ENV}/.spack-env/view/lib/python3.12/site-packages/nanobind/cmake")
+endif()
+
 # Try to import all Python components potentially needed by nanobind
 find_package(Python 3.10
   REQUIRED COMPONENTS Interpreter Development.Module
@@ -59,11 +68,7 @@ nanobind_add_module(
 )
 
 add_subdirectory(src/cpp/mail)
-# add_subdirectory(src/cpp/coupling)
-target_link_libraries(afsic_ext PRIVATE 
-  smtp_mail_sender
-  # coupling
-  )
+target_link_libraries(afsic_ext PRIVATE smtp_mail_sender)
 
 # Install directive for scikit-build-core
 install(TARGETS afsic_ext LIBRARY DESTINATION afsic)
