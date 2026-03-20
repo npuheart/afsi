@@ -1,6 +1,6 @@
-# afsic_ext — Email Module
+# afsic — Email Module
 
-`afsic_ext` exposes a thin nanobind wrapper around libcurl SMTP so Python
+`afsic` exposes a thin nanobind wrapper around libcurl SMTP so Python
 scripts can send notification emails without any extra Python dependency.
 
 ---
@@ -26,9 +26,9 @@ export AFSIC_SMTP_FROM="499908174@qq.com"
 ## API
 
 ```python
-import afsic_ext
+import afsic
 
-info = afsic_ext.EmailInfo()
+info = afsic.EmailInfo()
 info.smtp_url = "smtp://smtp.qq.com:587"
 info.username = "499908174@qq.com"
 info.password = "<authorisation-code>"
@@ -38,7 +38,7 @@ info.subject  = "Hello from afsic"
 info.body     = "Plain-text body."
 info.is_html  = False          # set True for HTML body
 
-ok = afsic_ext.send_email(info)
+ok = afsic.send_email(info)
 print("sent:", ok)
 ```
 
