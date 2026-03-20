@@ -29,7 +29,7 @@ if (NOT SKBUILD)
 endif()
 
 # Try to import all Python components potentially needed by nanobind
-find_package(Python 3.8
+find_package(Python 3.10
   REQUIRED COMPONENTS Interpreter Development.Module
   OPTIONAL_COMPONENTS Development.SABIModule)
 
@@ -55,12 +55,11 @@ nanobind_add_module(
   NB_STATIC
 
   # Source code goes here
-  src/afsic_ext.cpp
+  src/cpp/afsic_ext.cpp
 )
 
-
-add_subdirectory(src/mail)
-add_subdirectory(src/coupling)
+add_subdirectory(src/cpp/mail)
+add_subdirectory(src/cpp/coupling)
 target_link_libraries(afsic_ext PRIVATE 
   smtp_mail_sender
   coupling

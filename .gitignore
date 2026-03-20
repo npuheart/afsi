@@ -1,32 +1,31 @@
 # Python
 __pycache__/
 *.py[cod]
-mail/build
+*.egg-info/
+dist/
 
-# Output Data / Temporary Files (关键！)
+# Output Data / Temporary Files
 *.h5
 *.xdmf
 *.bp
-checkpoint/
 swanlog/
 plot/
 build/
 output/
 _results/
+nohup.out
 
 # IDE
 .vscode/
 .idea/
 
-# Logs
-*nohup.out
+# Benchmarks / generated data
+figures/
+results/
+data/
 
-
-# benchmarks
-figures
-results
-data
-
+# Demo-specific generated files
 afsic/demo/demo_337/mesh
+afsic/demo/demo_337/mesh-90
 afsic/demo/demo_337/mesh-90
 afsic/demo/demo_344/MNIST/
