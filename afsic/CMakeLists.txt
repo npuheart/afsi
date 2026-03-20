@@ -35,6 +35,10 @@ if(DEFINED ENV{SPACK_ENV})
   set(Python_FIND_REGISTRY NEVER)
   set(Python_FIND_VIRTUALENV FIRST)
   list(PREPEND CMAKE_PREFIX_PATH "$ENV{SPACK_ENV}/.spack-env/view/lib/python3.12/site-packages/nanobind/cmake")
+  # Embed the spack library paths into the .so RPATH at install time,
+  # so Python can dlopen the extension without LD_LIBRARY_PATH being set.
+  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
+  set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 endif()
 
 # Try to import all Python components potentially needed by nanobind
@@ -68,7 +72,10 @@ nanobind_add_module(
 )
 
 add_subdirectory(src/cpp/mail)
-target_link_libraries(afsic_ext PRIVATE smtp_mail_sender)
+add_subdirectory(src/cpp/coupling)
+target_link_libraries(afsic_ext PRIVATE 
+  smtp_mail_sender
+  coupling)
 
 # Install directive for scikit-build-core
 install(TARGETS afsic_ext LIBRARY DESTINATION afsic)

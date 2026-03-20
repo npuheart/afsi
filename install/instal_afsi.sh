@@ -1,3 +1,1 @@
-spack load cmake 
-
-
+cd ~/afsi/afsic && pip install .

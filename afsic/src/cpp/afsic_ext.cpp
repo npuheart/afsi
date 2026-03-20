@@ -1,4 +1,5 @@
 #include "mail/smtp_mail_sender.h"
+#include "coupling/main.h"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
@@ -20,4 +21,6 @@ NB_MODULE(afsic_ext, m) {
         .def_rw("is_html", &smtp::EmailInfo::is_html);
 
     m.def("send_email", &smtp::send_email, "Send an email");
+
+    m.def("coupling", &coupling::coupling, "IB coupling");
 }
