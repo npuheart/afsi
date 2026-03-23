@@ -5,12 +5,11 @@ import numpy as np
 
 from dolfinx.fem import Constant, Function, functionspace, assemble_scalar, dirichletbc, form, locate_dofs_geometrical
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector, apply_lifting, create_vector, set_bc
-from dolfinx.io import VTXWriter
 from dolfinx.mesh import create_unit_square
 from dolfinx.plot import vtk_mesh
 from basix.ufl import element
-from ufl import (FacetNormal, Identity, TestFunction, TrialFunction,
-                 div, dot, ds, dx, inner, lhs, nabla_grad,grad, rhs, sym)
+from ufl import (TestFunction, TrialFunction,
+                 div, dot, dx, inner, lhs, nabla_grad,grad, rhs, sym)
 
 
 # Solver

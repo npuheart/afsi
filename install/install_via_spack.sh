@@ -23,7 +23,7 @@ spack env create fenicsx-env
 spack env activate fenicsx-env -p
 
 log "Add FEniCSx with PETSc/SLEPc (using gcc@14)"
-spack add py-fenics-dolfinx@main+petsc4py+slepc4py %gcc@14
+spack add py-fenics-dolfinx@main+petsc4py+slepc4py+adios %gcc@14
 
 log "Add pip"
 spack add py-pip
