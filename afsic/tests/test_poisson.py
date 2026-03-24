@@ -40,6 +40,7 @@ def solve_poisson(n=(32, 16)):
 def test_poisson_solves():
     uh = solve_poisson()
     print(sum(uh.x.array[:]))
+    # TODO: The result should be approximately 83.42890213751603
     assert isinstance(uh, fem.Function)
 
 if __name__ == "__main__":

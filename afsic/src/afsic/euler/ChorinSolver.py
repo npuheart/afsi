@@ -15,7 +15,8 @@ from ufl import (TestFunction, TrialFunction,
 # Solver
 class ChorinSolver:
 
-    def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw):
+    def __init__(self, V, Q, bcu, bcp, f, dt_raw, rho_raw, mu_raw):
+    # def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw):
         self.bcu = bcu
         self.bcp = bcp
 
