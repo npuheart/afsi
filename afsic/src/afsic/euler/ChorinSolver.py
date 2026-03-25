@@ -1,116 +1,115 @@
-
+# https://jsdokken.com/dolfinx-tutorial/chapter2/ns_code1.html
 from mpi4py import MPI
 from petsc4py import PETSc
 import numpy as np
 
-from dolfinx.fem import Constant, Function, functionspace, assemble_scalar, dirichletbc, form, locate_dofs_geometrical
-from dolfinx.fem.petsc import assemble_matrix, assemble_vector, apply_lifting, create_vector, set_bc
-from dolfinx.mesh import create_unit_square
-from dolfinx.plot import vtk_mesh
-from basix.ufl import element
-from ufl import (TestFunction, TrialFunction,
-                 div, dot, dx, inner, lhs, nabla_grad,grad, rhs, sym)
+from dolfinx.fem import (
+    Constant,
+    Function,
+    extract_function_spaces,
+    form,
+)
+from dolfinx.fem.petsc import (
+    assemble_matrix,
+    assemble_vector,
+    apply_lifting,
+    create_vector,
+    set_bc,
+)
+from ufl import (
+    FacetNormal,
+    Identity,
+    TestFunction,
+    TrialFunction,
+    div,
+    dot,
+    ds,
+    dx,
+    inner,
+    lhs,
+    nabla_grad,
+    grad,
+    rhs,
+    sym,
+)
 
 
-# Solver
 class ChorinSolver:
-
     def __init__(self, V, Q, bcu, bcp, f, dt_raw, rho_raw, mu_raw):
-    # def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw):
-        self.bcu = bcu
-        self.bcp = bcp
-
         self.V = V
         self.Q = Q
-
-        u = TrialFunction(V)
-        v = TestFunction(V)
-        p = TrialFunction(Q)
-        q = TestFunction(Q)
+        self.bcu = bcu
+        self.bcp = bcp
+        self.f = f
         
         mesh = V.mesh
         self.mesh = mesh
+        
+        self.dt = Constant(mesh, PETSc.ScalarType(dt_raw))
+        self.mu = Constant(mesh, PETSc.ScalarType(mu_raw))
+        self.rho = Constant(mesh, PETSc.ScalarType(rho_raw))
 
-        k = Constant(mesh, PETSc.ScalarType(dt_raw))
-        mu = Constant(mesh, PETSc.ScalarType(mu_raw))
-        rho = Constant(mesh, PETSc.ScalarType(rho_raw))
+        self.u = TrialFunction(self.V)
+        self.v = TestFunction(self.V)
+        self.p = TrialFunction(self.Q)
+        self.q = TestFunction(self.Q)
 
-        u_n = Function(V,name = "u_n")
-        u_ = Function(V,name = "u_")
-        p_n = Function(Q,name = "p_n")
-        p_ = Function(Q,name = "p_")
-        f = Function(V,name="force")
+
+        self.u_n = Function(self.V,name = "u_n")
+        self.u_ = Function(V,name = "u_")
+        self.p_n = Function(Q,name = "p_n")
+        self.p_ = Function(Q,name = "p_")
 
 
         # Define the variational problem for the first step
-        F1 = rho * dot((u - u_n) / k, v) * dx
-        F1 += rho * inner(grad(u_n)*u_n, v)*dx
-        F1 += inner(mu * grad(u), grad(v)) * dx
-        F1 -= inner(f, v) * dx
-        a1 = form(lhs(F1))
-        L1 = form(rhs(F1))
+        self.F1 = self.rho * dot((self.u - self.u_n) / self.dt, self.v) * dx
+        self.F1 += self.rho * inner(grad(self.u_n)*self.u_n, self.v)*dx
+        self.F1 += inner(self.mu * grad(self.u), grad(self.v)) * dx
+        self.F1 -= inner(self.f, self.v) * dx
+        self.a1 = form(lhs(self.F1))
+        self.L1 = form(rhs(self.F1))
 
-        A1 = assemble_matrix(a1, bcs=bcu)
-        A1.assemble()
-        b1 = create_vector(L1)
+        self.A1 = assemble_matrix(self.a1, bcs=self.bcu)
+        self.A1.assemble()
+        self.b1 = create_vector(extract_function_spaces(self.L1))
 
         # Define variational problem for step 2
-        a2 = form(dot(grad(p), grad(q)) * dx)
-        L2 = form(dot(- (1 / k) * div(u_), q) * dx)
-        A2 = assemble_matrix(a2, bcs=bcp)
-        A2.assemble()
-        b2 = create_vector(L2)
+        self.a2 = form(dot(grad(self.p), grad(self.q)) * dx)
+        self.L2 = form(dot(- (1 / self.dt) * div(self.u_), self.q) * dx)
+        self.A2 = assemble_matrix(self.a2, bcs=self.bcp)
+        self.A2.assemble()
+        self.b2 = create_vector(extract_function_spaces(self.L2))
 
         # Define variational problem for step 3
-        a3 = form(dot(u, v) * dx)
-        L3 = form(dot(u_, v) * dx - k *
-                  dot(grad(p_), v) * dx)
-        A3 = assemble_matrix(a3, bcs=bcu)
-        A3.assemble()
-        b3 = create_vector(L3)
+        self.a3 = form(dot(self.u, self.v) * dx)
+        self.L3 = form(dot(self.u_, self.v) * dx - self.dt * dot(grad(self.p_), self.v) * dx)
+        # self.A3 = assemble_matrix(self.a3)
+        self.A3 = assemble_matrix(self.a3)
+        self.A3.assemble()
+        self.b3 = create_vector(extract_function_spaces(self.L3))
 
         # Solver for step 1
-        solver1 = PETSc.KSP().create(mesh.comm)
-        solver1.setOperators(A1)
-        solver1.setType(PETSc.KSP.Type.BCGS)
-        pc1 = solver1.getPC()
-        pc1.setType(PETSc.PC.Type.HYPRE)
-        pc1.setHYPREType("boomeramg")
+        self.solver1 = PETSc.KSP().create(mesh.comm)
+        self.solver1.setOperators(self.A1)
+        self.solver1.setType(PETSc.KSP.Type.BCGS)
+        # self.pc1 = self.solver1.getPC()
+        # self.pc1.setType(PETSc.PC.Type.HYPRE)
+        # self.pc1.setHYPREType("boomeramg")
 
         # Solver for step 2
-        solver2 = PETSc.KSP().create(mesh.comm)
-        solver2.setOperators(A2)
-        solver2.setType(PETSc.KSP.Type.BCGS)
-        pc2 = solver2.getPC()
-        pc2.setType(PETSc.PC.Type.HYPRE)
-        pc2.setHYPREType("boomeramg")
+        self.solver2 = PETSc.KSP().create(mesh.comm)
+        self.solver2.setOperators(self.A2)
+        self.solver2.setType(PETSc.KSP.Type.BCGS)
+        # self.pc2 = self.solver2.getPC()
+        # self.pc2.setType(PETSc.PC.Type.HYPRE)
+        # self.pc2.setHYPREType("boomeramg")
 
         # Solver for step 3
-        solver3 = PETSc.KSP().create(mesh.comm)
-        solver3.setOperators(A3)
-        solver3.setType(PETSc.KSP.Type.CG)
-        pc3 = solver3.getPC()
-        pc3.setType(PETSc.PC.Type.SOR)
-
-        self.a1 = a1
-        self.a2 = a2
-        self.a3 = a3
-
-        self.b1 = b1
-        self.b2 = b2
-        self.b3 = b3
-        self.L1 = L1
-        self.L2 = L2
-        self.L3 = L3
-        self.solver1 = solver1
-        self.solver2 = solver2
-        self.solver3 = solver3
-
-        self.u_n = u_n
-        self.u_ = u_
-        self.p_ = p_
-        self.p_n = p_n
-        self.f = f
+        self.solver3 = PETSc.KSP().create(mesh.comm)
+        self.solver3.setOperators(self.A3)
+        self.solver3.setType(PETSc.KSP.Type.CG)
+        self.pc3 = self.solver3.getPC()
+        self.pc3.setType(PETSc.PC.Type.SOR)
 
     def solve_one_step(self):
         # Step 1: Tentative velocity step
@@ -118,8 +117,7 @@ class ChorinSolver:
             loc_1.set(0)
         assemble_vector(self.b1, self.L1)
         apply_lifting(self.b1, [self.a1], [self.bcu])
-        self.b1.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
-                            mode=PETSc.ScatterMode.REVERSE)
+        self.b1.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
         set_bc(self.b1, self.bcu)
         self.solver1.solve(self.b1, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()
@@ -129,28 +127,23 @@ class ChorinSolver:
             loc_2.set(0)
         assemble_vector(self.b2, self.L2)
         apply_lifting(self.b2, [self.a2], [self.bcp])
-        self.b2.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
-                            mode=PETSc.ScatterMode.REVERSE)
+        self.b2.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
         set_bc(self.b2, self.bcp)
         self.solver2.solve(self.b2, self.p_.x.petsc_vec)
         self.p_.x.scatter_forward()
-
 
         # Step 3: Velocity correction step
         with self.b3.localForm() as loc_3:
             loc_3.set(0)
         assemble_vector(self.b3, self.L3)
-        apply_lifting(self.b3, [self.a3], [self.bcu])
-        self.b3.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
-                            mode=PETSc.ScatterMode.REVERSE)
-        set_bc(self.b3, self.bcu)
+        # apply_lifting(self.b3, [self.a3], [self.bcu])
+        self.b3.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
+        # set_bc(self.b3, self.bcu)
         self.solver3.solve(self.b3, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()
-
         # Update variable with solution form this time step
         self.u_n.x.array[:] = self.u_.x.array[:]
         self.p_n.x.array[:] = self.p_.x.array[:]
-
     def post_process(self):
         self.b1.destroy()
         self.b2.destroy()

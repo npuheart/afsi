@@ -19,13 +19,11 @@ spack load gcc@14
 spack compiler find
 
 log "Create and activate Spack env"
-spack env create fenicsx-env
-spack env activate fenicsx-env -p
+spack env create fenicsx-adios-env
+spack env activate fenicsx-adios-env -p
 
 log "Add FEniCSx with PETSc/SLEPc (using gcc@14)"
-# TODO: can not find VTXWriter and HYPRE, how to fix this?
-spack add py-fenics-dolfinx@main+petsc4py+slepc4py+adios %gcc@14
-
+spack add py-fenics-dolfinx@main+petsc4py+slepc4py ^fenics-dolfinx+adios2 ^petsc+hypre+mumps %gcc@14
 
 log "Add pip"
 spack add py-pip
@@ -37,7 +35,7 @@ log "Install packages"
 spack install
 
 log "Install adios4dolfinx via pip"
-python3 -m pip install adios4dolfinx[test]
+python3 -m pip install adios4dolfinx[test] gmsh matplotlib
 
 ELAPSED=$(( $(date +%s) - START ))
 log "Done — total time: $(( ELAPSED/3600 ))h $(( ELAPSED%3600/60 ))m $(( ELAPSED%60 ))s"

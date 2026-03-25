@@ -20,10 +20,10 @@ from ufl import (
     dot,
     dx
 )
-from afsic.euler import NSCode1Solver
+from afsic.euler import NSCode1Solver, ChorinSolver
 
 
-def test_ns_code1_poiseuille():
+def demo_poiseuille(NSSolver):
     # https://jsdokken.com/dolfinx-tutorial/chapter2/ns_code1.html
     mesh = create_unit_square(MPI.COMM_WORLD, 10, 10)
     t = 0.0
@@ -72,7 +72,7 @@ def test_ns_code1_poiseuille():
     # I will stick to the valid class definition I created: `NSCode1Solver(V, Q, bcu, bcp, dt_raw=dt, rho_raw=1.0, mu_raw=1.0)`
     # refusing the `f` argument.
     f = Constant(mesh, PETSc.ScalarType((0, 0)))
-    ns_solver = NSCode1Solver(V, Q, bcu, bcp, f, dt_raw=dt, rho_raw=1, mu_raw=1)
+    ns_solver = NSSolver(V, Q, bcu, bcp, f, dt_raw=dt, rho_raw=1, mu_raw=1)
     
     # Setup exact solution for error calculation
     def u_exact_func(x):
@@ -98,11 +98,14 @@ def test_ns_code1_poiseuille():
             np.max(ns_solver.u_.x.petsc_vec.array - u_ex.x.petsc_vec.array), op=MPI.MAX
         )
     # Print error only every 20th step and at the last step
-        if (i % 20 == 0) or (i == num_steps - 1):
-            print(f"Time {t:.2f}, L2-error {error_L2:.6e}, Max error {error_max:.6e}")
+        # if (i % 20 == 0) or (i == num_steps - 1):
+        #     print(f"Time {t:.2f}, L2-error {error_L2:.6e}, Max error {error_max:.6e}")
     
     ns_solver.post_process()
-    # Final error check at the end of the simulation
+    return error_L2
+
+def test_poseuille_NSCode1Solver():
+    error_L2 = demo_poiseuille(NSCode1Solver)
     assert math.isclose(
         error_L2,
         5.201511e-06,
@@ -110,6 +113,15 @@ def test_ns_code1_poiseuille():
         abs_tol=1e-12,
     )
 
+def test_poseuille_ChorinSolver():
+    error_L2 = demo_poiseuille(ChorinSolver)
+    assert math.isclose(
+        error_L2,
+        1.581219e-01,
+        rel_tol=1e-4,
+        abs_tol=1e-4,
+    )
+
 if __name__ == "__main__":
-    test_ns_code1_poiseuille()
-# Time 10.00, L2-error 5.201511e-06, Max error 8.923966e-06
+    test_poseuille_ChorinSolver()
+    test_poseuille_NSCode1Solver()

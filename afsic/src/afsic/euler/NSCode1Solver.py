@@ -59,14 +59,13 @@ class NSCode1Solver:
         self.v = TestFunction(self.V)
         self.p = TrialFunction(self.Q)
         self.q = TestFunction(self.Q)
-        self.u_n = Function(self.V)
-        self.u_n.name = "u_n"
+        self.u_n = Function(self.V,name = "u_n")
         self.U = 0.5 * (self.u_n + self.u)
-
         n = FacetNormal(mesh)
+        self.p_n = Function(self.Q, name = "p_n")
+        self.u_ = Function(self.V)
+        self.p_ = Function(self.Q)
 
-        self.p_n = Function(self.Q)
-        self.p_n.name = "p_n"
         self.F1 = self.rho * dot((self.u - self.u_n) / self.dt, self.v) * dx
         self.F1 += self.rho * dot(dot(self.u_n, nabla_grad(self.u_n)), self.v) * dx
         self.F1 += inner(self.sigma(self.U, self.p_n), self.epsilon(self.v)) * dx
@@ -79,7 +78,6 @@ class NSCode1Solver:
         self.b1 = create_vector(extract_function_spaces(self.L1))
 
         # Define variational problem for step 2
-        self.u_ = Function(self.V)
         self.a2 = form(dot(nabla_grad(self.p), nabla_grad(self.q)) * dx)
         self.L2 = form(dot(nabla_grad(self.p_n), nabla_grad(self.q)) * dx - (self.rho / self.dt) * div(self.u_) * self.q * dx)
         self.A2 = assemble_matrix(self.a2, bcs=bcp)
@@ -87,7 +85,6 @@ class NSCode1Solver:
         self.b2 = create_vector(extract_function_spaces(self.L2))
 
         # Define variational problem for step 3
-        self.p_ = Function(self.Q)
         self.a3 = form(self.rho * dot(self.u, self.v) * dx)
         self.L3 = form(self.rho * dot(self.u_, self.v) * dx - self.dt * dot(nabla_grad(self.p_ - self.p_n), self.v) * dx)
         self.A3 = assemble_matrix(self.a3)
@@ -118,7 +115,7 @@ class NSCode1Solver:
         self.pc3.setType(PETSc.PC.Type.SOR)
 
     def solve_one_step(self):
-        # Step 1: Tentative veolcity step
+        # Step 1: Tentative velocity step
         with self.b1.localForm() as loc_1:
             loc_1.set(0)
         assemble_vector(self.b1, self.L1)
@@ -142,13 +139,13 @@ class NSCode1Solver:
         with self.b3.localForm() as loc_3:
             loc_3.set(0)
         assemble_vector(self.b3, self.L3)
-        self.b3.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
+        self.b3.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
+                             mode=PETSc.ScatterMode.REVERSE)
         self.solver3.solve(self.b3, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()
         # Update variable with solution form this time step
         self.u_n.x.array[:] = self.u_.x.array[:]
         self.p_n.x.array[:] = self.p_.x.array[:]
-    
     def post_process(self):
         self.b1.destroy()
         self.b2.destroy()
