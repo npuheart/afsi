@@ -28,7 +28,7 @@ from ufl import (
     inner,
     grad,
 )
-from afsic.euler import NSCode2Solver
+from afsic.euler import NSCode2Solver, NSCode1Solver
 
 gmsh.initialize()
 
@@ -160,7 +160,7 @@ bcp = [bcp_outlet]
 
 
 f = Constant(mesh, PETSc.ScalarType((0, 0)))    
-solver = NSCode2Solver(V, Q, bcu, bcp, f, dt, 1.0, 0.001)
+solver = NSCode1Solver(V, Q, bcu, bcp, f, dt, 1.0, 0.001)
 
 
 

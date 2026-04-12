@@ -9,6 +9,7 @@ rm -rf ~/.spack ~/spack
 
 log "Clone Spack"
 git clone https://github.com/spack/spack.git ~/spack
+# checkout a specific commit to ensure reproducibility: e2c49f2b3a7aabc324a2d54f6c8319b854191bd4
 
 log "Load Spack environment"
 source ~/spack/share/spack/setup-env.sh
