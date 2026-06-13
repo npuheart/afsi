@@ -12,7 +12,7 @@ from dolfinx.fem import (Function, functionspace,
 from dolfinx.mesh import CellType, GhostMode, locate_entities, meshtags
 from basix.ufl import element
 
-from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction, inv, ln, det,
+from ufl import (FacetNormal, Identity, Measure, SpatialCoordinate, TestFunction, TrialFunction, inv, ln, det,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from dolfinx.fem import form, assemble_scalar
 
@@ -33,11 +33,12 @@ config = {"nssolver": "chorinsolver",
           "rho": 1.0,
           "Lx": 1.0,
           "Ly": 1.0,
-          "Nx": 64,
-          "Ny": 64,
+          "Nx": 128,
+          "Ny": 128,
           "Nl": 20,
           "mu": 0.01,
           "mu_s": 0.1,  # Solid elasticity
+          "beta": 10.0,  # Penalty for head/tail fixation
           }
 
 config["num_steps"] = int(config['T']/config['dt'])
@@ -103,7 +104,7 @@ class UpVelocity():
         self.t = t
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-        values[0] = 1.0
+        values[0] = 0.1
         values[1] = 0.0
         return values
 
@@ -164,11 +165,20 @@ solid_velocity = Function(Vs, name="solid_velocity")
 dVs = TestFunction(Vs)
 mu_s = config["mu_s"]
 lambda_s = 10
+beta = config["beta"]
 
 FF = grad(solid_coords)
 
+# 惩罚项：固定乌龟头尾（facet tag 15）
+X0 = SpatialCoordinate(structure)
+dss = Measure("ds", domain=structure, subdomain_data=facet_tags)
+x_constraint = solid_coords[0] - X0[0]
+y_constraint = solid_coords[1] - X0[1]
+circum_constraint = as_vector((x_constraint, y_constraint))
+
 # L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
-L_hat = form(-inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx)
+L_hat = form(-inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx
+             - beta*inner(circum_constraint, dVs)*dss(15))
 b1 = create_vector(L_hat)
 
 ###########################################################################################################
