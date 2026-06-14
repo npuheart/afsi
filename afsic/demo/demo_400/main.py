@@ -1,5 +1,4 @@
 from petsc4py import PETSc
-from afsic import unique_filename, get_project_name
 from mpi4py import MPI
 
 import os
@@ -19,34 +18,10 @@ from dolfinx.fem import form, assemble_scalar
 from afsic import IPCSSolver,ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
+from configuration import config
 
-# Define the configuration for the simulation
-config = {"nssolver": "chorinsolver",
-          "project_name": "demo-336", 
-          "tag": "parallel",
-          "velocity_order": 2,
-          "force_order": 2,
-          "pressure_order": 1,
-          "num_processors": MPI.COMM_WORLD.size,
-          "T": 10.0,
-          "dt": 1/200,
-          "rho": 1.0,
-          "Lx": 1.0,
-          "Ly": 1.0,
-          "Nx": 128,
-          "Ny": 128,
-          "Nl": 20,
-          "mu": 0.01,
-          "mu_s": 0.1,  # Solid elasticity
-          "beta": 10.0,  # Penalty for head/tail fixation
-          }
 
-config["num_steps"] = int(config['T']/config['dt'])
-config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
-config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
-config["experiment_name"] = get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None
-config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
-swanlab_init(config['project_name'], config['experiment_name'], config)
+swanlab_init(config['project_name'], config['experiment_name'], config, api_key="odR9FodGeQojOPlk2sir1")
 
 
 ###########################################################################################################
@@ -62,17 +37,12 @@ mesh = dolfinx.mesh.create_rectangle(
 )
 
 # Mark the boundaries
-mesh.topology.create_connectivity(1, 2) 
-marker_left, marker_right, marker_down, marker_up = 1, 2, 3, 4
-boundaries = [(1, lambda x: np.isclose(x[0], 0)),
-              (2, lambda x: np.isclose(x[0], config["Lx"])),
-              (3, lambda x: np.isclose(x[1], 0)),
-              (4, lambda x: np.isclose(x[1], config["Ly"]))]
-
-def fixed_points(x):
-    return np.logical_and(np.isclose(x[0],0.0), np.isclose(x[1],0.0))
-
-point_loc = dolfinx.mesh.locate_entities_boundary(mesh, 0, fixed_points)
+mesh.topology.create_connectivity(1, 2)
+marker_inlet, marker_outlet, marker_bottom, marker_top = 14, 12, 11, 13
+boundaries = [(14, lambda x: np.isclose(x[0], 0)),             # inlet (left)
+              (12, lambda x: np.isclose(x[0], config["Lx"])),  # outlet (right)
+              (11, lambda x: np.isclose(x[1], 0)),             # bottom
+              (13, lambda x: np.isclose(x[1], config["Ly"]))]  # top
 
 facet_indices, facet_markers = [], []
 fdim = mesh.topology.dim - 1
@@ -99,36 +69,51 @@ Q = functionspace(mesh, s_cg1)
 fdim = mesh.topology.dim - 1
 gdim = mesh.geometry.dim
 tdim = mesh.topology.dim
-class UpVelocity():
-    def __init__(self, t):
+class Inlet:
+    def __init__(self, Um):
+        self.t = 0.0
+        self.t_ramp = 0.5
+        self.Um = Um
+        self.value = 0.0
+
+    def update(self, t):
         self.t = t
+        if self.t < self.t_ramp:
+            self.value = self.Um * np.abs(np.cos(self.t / self.t_ramp * np.pi) - 1) / 2
+        else:
+            Um_min = self.Um / 6
+            self.value = (self.Um - Um_min) * np.abs(np.cos(self.t / self.t_ramp * np.pi) - 1) / 2 + Um_min
+
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-        values[0] = 0.1
-        values[1] = 0.0
+        values[0] = self.value
         return values
 
 
-# Inlet
-u_up = Function(V)
-up_velocity = UpVelocity(0.0)
-u_up.interpolate(up_velocity)
-bcu_up = dirichletbc(u_up, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_up)))
-# Walls
-u_nonslip = np.array((0,) * mesh.geometry.dim, dtype=PETSc.ScalarType)
-bcu_left = dirichletbc(u_nonslip, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_left)), V)
-bcu_right = dirichletbc(u_nonslip, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_right)), V)
-bcu_down = dirichletbc(u_nonslip, locate_dofs_topological(
-    V, fdim, facet_tag.find(marker_down)), V)
+# Inlet velocity (left wall, tag 14)
+inlet = Inlet(config["Um"])
+u_inlet_func = Function(V)
+u_inlet_func.interpolate(inlet)
+bcu_inlet = dirichletbc(u_inlet_func, locate_dofs_topological(V, fdim, facet_tag.find(marker_inlet)))
 
-points_dofs = locate_dofs_topological(
-    Q, 0, point_loc)
-bcp_point = dirichletbc(0.0, points_dofs,Q)
-bcu = [bcu_up, bcu_left, bcu_right, bcu_down]
-bcp = [bcp_point]
+# Slip on top/bottom: only normal (y) component = 0, tags 11, 13
+V_sub_y = V.sub(1)
+V_y, _ = V_sub_y.collapse()
+u_zero_y = Function(V_y)
+u_zero_y.x.array[:] = 0.0
+bcu_bottom = dirichletbc(u_zero_y,
+                         locate_dofs_topological((V_sub_y, V_y), fdim, facet_tag.find(marker_bottom)),
+                         V_sub_y)
+bcu_top = dirichletbc(u_zero_y,
+                      locate_dofs_topological((V_sub_y, V_y), fdim, facet_tag.find(marker_top)),
+                      V_sub_y)
+
+# Pressure outlet (right wall, tag 12)
+bcp_outlet = dirichletbc(PETSc.ScalarType(0.0),
+                         locate_dofs_topological(Q, fdim, facet_tag.find(marker_outlet)), Q)
+
+bcu = [bcu_inlet, bcu_bottom, bcu_top]
+bcp = [bcp_outlet]
 
 
 # Define Solver
@@ -147,6 +132,8 @@ with dolfinx.io.XDMFFile(MPI.COMM_WORLD, turtle_mesh_path, "r") as xdmf:
 # 向右移动 0.5，向上移动 0.5
 structure.geometry.x[:, 0] += 0.5
 structure.geometry.x[:, 1] += 0.5
+structure.geometry.x[:, 0] *= 100.0
+structure.geometry.x[:, 1] *= 100.0
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
                  config["force_order"], shape=(structure.geometry.dim, ))
@@ -164,10 +151,11 @@ solid_velocity = Function(Vs, name="solid_velocity")
 # 定义弱形式
 dVs = TestFunction(Vs)
 mu_s = config["mu_s"]
-lambda_s = 10
+lambda_s = config["lambda_s"]
 beta = config["beta"]
 
 FF = grad(solid_coords)
+J = det(FF)
 
 # 惩罚项：固定乌龟头尾（facet tag 15）
 X0 = SpatialCoordinate(structure)
@@ -176,8 +164,8 @@ x_constraint = solid_coords[0] - X0[0]
 y_constraint = solid_coords[1] - X0[1]
 circum_constraint = as_vector((x_constraint, y_constraint))
 
-# L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
-L_hat = form(-inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx
+# Neo-Hookean: P = mu_s*(F - F^-T) + lambda_s*ln(J)*F^-T
+L_hat = form(-inner(mu_s*(FF - inv(FF).T) + lambda_s*ln(J)*inv(FF).T, grad(dVs))*dx
              - beta*inner(circum_constraint, dVs)*dss(15))
 b1 = create_vector(L_hat)
 
@@ -200,9 +188,12 @@ ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 
 
 u_io = Function(V_io)
+p_io = Function(Q)
 file_velocity = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"velocity.xdmf", "w")
+file_pressure = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"pressure.xdmf", "w")
 file_solid = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"solid_force.xdmf", "w")
 file_velocity.write_mesh(mesh)
+file_pressure.write_mesh(mesh)
 file_solid.write_mesh(structure)
 
 time_manager = TimeManager(config['T'], config['num_steps'], fps=20)
@@ -215,8 +206,8 @@ form_volume = form(det(grad(solid_coords)) * dx)
 log.set_log_level(log.LogLevel.INFO)
 for step in range(config['num_steps']):
     current_time = step * config['dt']
-    up_velocity.t = current_time
-    u_up.interpolate(up_velocity)
+    inlet.update(current_time)
+    u_inlet_func.interpolate(inlet)
     ns_solver.solve_one_step()
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
     solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']
@@ -239,7 +230,9 @@ for step in range(config['num_steps']):
     data_log = {}
     if time_manager.should_output(step):
         u_io.interpolate(ns_solver.u_)
+        p_io.interpolate(ns_solver.p_)
         file_velocity.write_function(u_io, current_time)
+        file_pressure.write_function(p_io, current_time)
         solid_force_io.interpolate(solid_force)
         solid_coords_io.interpolate(solid_coords)
         file_solid.write_function(solid_force_io, current_time)
