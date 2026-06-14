@@ -24,6 +24,25 @@ from configuration import config
 swanlab_init(config['project_name'], config['experiment_name'], config, api_key="odR9FodGeQojOPlk2sir1")
 
 
+def pressure_waveform(t, period, amp, fast_ratio, waveform="sin"):
+    """Return pressure at time t.
+
+    waveform:
+        'sin'       – symmetric sine
+        'fast_open' – piecewise linear two-segment:
+                      [0, fast_ratio*T]         : 0 -> amp  (fast rise)
+                      [fast_ratio*T, T]         : amp -> 0  (slow fall)
+    """
+    phase = (t % period) / period   # in [0, 1)
+    if waveform == "sin":
+        return amp * np.sin(2 * np.pi * phase)
+    # fast_open (default asymmetric)
+    if phase < fast_ratio:
+        return amp * (phase / fast_ratio)
+    else:
+        return amp * (1.0 - (phase - fast_ratio) / (1.0 - fast_ratio))
+
+
 ###########################################################################################################
 ##########################################  Fluid #########################################################
 ###########################################################################################################
@@ -125,7 +144,7 @@ with dolfinx.io.XDMFFile(MPI.COMM_WORLD, turtle_mesh_path, "r") as xdmf:
     facet_tags = xdmf.read_meshtags(structure, name="facet_tags")
 
 # 向右移动 0.5，向上移动 0.5
-structure.geometry.x[:, 0] += 0.5
+structure.geometry.x[:, 0] += 1.0
 structure.geometry.x[:, 1] += 0.5
 structure.geometry.x[:, 0] *= 100.0
 structure.geometry.x[:, 1] *= 100.0
@@ -162,10 +181,38 @@ circum_constraint = as_vector((x_constraint, y_constraint))
 # Neo-Hookean: P = mu_s*(F - F^-T) + lambda_s*ln(J)*F^-T
 N0 = FacetNormal(structure)
 p_ext = dolfinx.fem.Constant(structure, dolfinx.default_scalar_type(0.0))
+# spine_dir: unit vector from centroid of tag16 to centroid of tag17, updated each step
+spine_dir = dolfinx.fem.Constant(structure, np.array([0.0, 1.0]))  # initial: y-axis
+
+# Precompile centroid integrals (area and weighted coords for tag 16 & 17)
+form_area16  = form(dolfinx.fem.Constant(structure, 1.0) * dss(16))
+form_area17  = form(dolfinx.fem.Constant(structure, 1.0) * dss(17))
+form_cx16 = form(solid_coords[0] * dss(16))
+form_cy16 = form(solid_coords[1] * dss(16))
+form_cx17 = form(solid_coords[0] * dss(17))
+form_cy17 = form(solid_coords[1] * dss(17))
+
+def update_spine_dir():
+    """Compute unit vector from centroid(tag16) to centroid(tag17) in current config."""
+    comm = structure.comm
+    a16 = comm.allreduce(assemble_scalar(form_area16), op=MPI.SUM)
+    a17 = comm.allreduce(assemble_scalar(form_area17), op=MPI.SUM)
+    cx16 = comm.allreduce(assemble_scalar(form_cx16), op=MPI.SUM) / a16
+    cy16 = comm.allreduce(assemble_scalar(form_cy16), op=MPI.SUM) / a16
+    cx17 = comm.allreduce(assemble_scalar(form_cx17), op=MPI.SUM) / a17
+    cy17 = comm.allreduce(assemble_scalar(form_cy17), op=MPI.SUM) / a17
+    d = np.array([cx17 - cx16, cy17 - cy16])
+    d /= np.linalg.norm(d)
+    spine_dir.value[:] = d
+
+# Follower pressure (Nanson), projected onto current spine direction
+f_follower = -p_ext * J * inv(FF).T * N0
+f_parallel = dot(f_follower, spine_dir) * spine_dir
 
 L_hat = form(-inner(mu_s*(FF - inv(FF).T) + lambda_s*ln(J)*inv(FF).T, grad(dVs))*dx
             #  - beta*inner(circum_constraint, dVs)*dss(15)
-             - inner(-p_ext * as_vector([0.0, N0[1]]), dVs)*dss(16))
+             - inner(f_parallel, dVs)*dss(16)
+             - inner(f_parallel, dVs)*dss(17))
 b1 = create_vector(L_hat)
 
 ###########################################################################################################
@@ -207,8 +254,11 @@ for step in range(config['num_steps']):
     current_time = step * config['dt']
     inlet.update(current_time)
     u_inlet_func.interpolate(inlet)
-    _s = np.sin(2 * np.pi * current_time / config["p_period"])
-    p_ext.value = config["p_amp"] * (10 * _s if _s > 0 else _s)
+    p_ext.value = pressure_waveform(
+        current_time, config["p_period"], config["p_amp"],
+        config["fast_ratio"], config["waveform"])
+    update_spine_dir()
+    print(spine_dir.value)
     ns_solver.solve_one_step()
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
     solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']

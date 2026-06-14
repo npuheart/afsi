@@ -14,20 +14,22 @@ config = {"nssolver": "chorinsolver",
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
           "Um": 0.0,                  # 100 cm/s
-          "p_amp": 1000.0,                  # 1 dyne/cm^2 
-          "p_period": 1.0,                  # s
-          "T": 2.5,                    # s
+          "p_amp": 20000.0,                  # 1 dyne/cm^2 
+          "p_period": 2.0,                  # s
+          "T": 15.0,                    # s
           "dt": 0.005/10,
           "rho": 1.0,                   # 1 g/cm^3
           "Lx": 200.0,
           "Ly": 100.0,
           "Nx": 128,
           "Ny": 64,
-          "mu": 10.0,                  # 1 [Pa*s] , 10 [dyne/cm^2*s]
-          "mu_s": 5e5,  # Solid elasticity
+          "mu": 1.0,                  # 1 [Pa*s] , 10 [dyne/cm^2*s]
+          "mu_s": 1e5,  # Solid elasticity
           "lambda_s": 4.5e6,  # Solid elasticity
           "nu_s": 0.45,
           "beta": 1e6,  # Penalty for head/tail fixation, 1e4 [dyne/cm^2]
+          "waveform": "fast_open",  # "sin" | "fast_open" | "fast_close"
+          "fast_ratio": 0.05,        # fraction of period for the fast phase
           }
 
 

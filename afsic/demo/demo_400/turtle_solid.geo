@@ -165,4 +165,5 @@ s0 = news;
 Plane Surface(s0) = {ll0};
 Physical Surface(2) = {s0};
 Physical Line(15) = {l37, l38, l39, l0, l1, l18, l19, l20};
-Physical Line(16) = {l7, l31};
+Physical Line(16) = {l7};
+Physical Line(17) = {l31};
