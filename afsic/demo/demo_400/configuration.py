@@ -7,14 +7,16 @@ from afsic import unique_filename, get_project_name
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
-          "project_name": "demo-340", 
+          "project_name": "demo-400", 
           "tag": "parallel",
           "velocity_order": 2,
           "force_order": 2,
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
-          "Um": 100.0,                  # 100 cm/s       
-          "T": 1.0,                    # s
+          "Um": 0.0,                  # 100 cm/s
+          "p_amp": 1000.0,                  # 1 dyne/cm^2 
+          "p_period": 1.0,                  # s
+          "T": 2.5,                    # s
           "dt": 0.005/10,
           "rho": 1.0,                   # 1 g/cm^3
           "Lx": 200.0,

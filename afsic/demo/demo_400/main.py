@@ -96,23 +96,18 @@ u_inlet_func = Function(V)
 u_inlet_func.interpolate(inlet)
 bcu_inlet = dirichletbc(u_inlet_func, locate_dofs_topological(V, fdim, facet_tag.find(marker_inlet)))
 
-# Slip on top/bottom: only normal (y) component = 0, tags 11, 13
-V_sub_y = V.sub(1)
-V_y, _ = V_sub_y.collapse()
-u_zero_y = Function(V_y)
-u_zero_y.x.array[:] = 0.0
-bcu_bottom = dirichletbc(u_zero_y,
-                         locate_dofs_topological((V_sub_y, V_y), fdim, facet_tag.find(marker_bottom)),
-                         V_sub_y)
-bcu_top = dirichletbc(u_zero_y,
-                      locate_dofs_topological((V_sub_y, V_y), fdim, facet_tag.find(marker_top)),
-                      V_sub_y)
+# No-slip on top/bottom (both components = 0), tags 11, 13
+u_zero = Function(V)
+u_zero.x.array[:] = 0.0
+bcu_bottom = dirichletbc(u_zero, locate_dofs_topological(V, fdim, facet_tag.find(marker_bottom)))
+bcu_top = dirichletbc(u_zero, locate_dofs_topological(V, fdim, facet_tag.find(marker_top)))
 
 # Pressure outlet (right wall, tag 12)
 bcp_outlet = dirichletbc(PETSc.ScalarType(0.0),
                          locate_dofs_topological(Q, fdim, facet_tag.find(marker_outlet)), Q)
 
-bcu = [bcu_inlet, bcu_bottom, bcu_top]
+# Inlet (tag 14): zero Neumann (natural BC, no Dirichlet applied)
+bcu = [bcu_bottom, bcu_top]
 bcp = [bcp_outlet]
 
 
@@ -165,8 +160,12 @@ y_constraint = solid_coords[1] - X0[1]
 circum_constraint = as_vector((x_constraint, y_constraint))
 
 # Neo-Hookean: P = mu_s*(F - F^-T) + lambda_s*ln(J)*F^-T
+N0 = FacetNormal(structure)
+p_ext = dolfinx.fem.Constant(structure, dolfinx.default_scalar_type(0.0))
+
 L_hat = form(-inner(mu_s*(FF - inv(FF).T) + lambda_s*ln(J)*inv(FF).T, grad(dVs))*dx
-             - beta*inner(circum_constraint, dVs)*dss(15))
+            #  - beta*inner(circum_constraint, dVs)*dss(15)
+             - inner(-p_ext * as_vector([0.0, N0[1]]), dVs)*dss(16))
 b1 = create_vector(L_hat)
 
 ###########################################################################################################
@@ -208,6 +207,8 @@ for step in range(config['num_steps']):
     current_time = step * config['dt']
     inlet.update(current_time)
     u_inlet_func.interpolate(inlet)
+    _s = np.sin(2 * np.pi * current_time / config["p_period"])
+    p_ext.value = config["p_amp"] * (10 * _s if _s > 0 else _s)
     ns_solver.solve_one_step()
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
     solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']
