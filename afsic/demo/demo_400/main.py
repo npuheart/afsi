@@ -125,7 +125,6 @@ bcu_top = dirichletbc(u_zero, locate_dofs_topological(V, fdim, facet_tag.find(ma
 bcp_outlet = dirichletbc(PETSc.ScalarType(0.0),
                          locate_dofs_topological(Q, fdim, facet_tag.find(marker_outlet)), Q)
 
-# Inlet (tag 14): zero Neumann (natural BC, no Dirichlet applied)
 bcu = [bcu_bottom, bcu_top]
 bcp = [bcp_outlet]
 
