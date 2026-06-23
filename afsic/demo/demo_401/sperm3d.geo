@@ -1,61 +1,133 @@
-// Sperm 3D geometry: sphere head + cylindrical tail
-// Units: can be rescaled in Python
-//
-// Physical Surface tags:
-//   15 = nose cap of sphere (fixed/anchored)
-//   16 = tail tip disk (driven)
-//   17 = tail lateral surface (flagellum)
-// Physical Volume:
-//    1 = full body
+// 球体连接三段直杆的几何模型
+// 单位：cm
 
-SetFactory("OpenCASCADE");
+// 定义几何参数
+R_sphere = 5.0      // 球体半径
+R_rod = 1.0         // 直杆半径
+L_rod1 = 10.0       // 第一段直杆长度
+L_rod2 = 8.0        // 第二段直杆长度
+L_rod3 = 12.0       // 第三段直杆长度
 
-R  = 0.05;   // sphere radius
-r  = 0.01;  // tail (cylinder) radius
-L  = 0.30;   // tail length
-ms_h = 0.005; // mesh size head
-ms_t = 0.008; // mesh size tail
+// 定义材料编号
+m_void = 0          // 真空
+m_sphere = 1        // 球体材料
+m_rod1 = 2          // 第一段直杆材料
+m_rod2 = 3          // 第二段直杆材料
+m_rod3 = 4          // 第三段直杆材料
 
-// ── Head: sphere ─────────────────────────────────────────────
-Sphere(1) = {0, 0, 0, R};
+// 定义cell编号
+c_void = 1          // 外部真空
+c_sphere = 10       // 球体
+c_rod1 = 20         // 第一段直杆
+c_rod2 = 30         // 第二段直杆
+c_rod3 = 40         // 第三段直杆
 
-// ── Tail: cylinder (aligned along +x from sphere surface) ────
-// Start at x = sqrt(R²-r²) so the cylinder base sits flush inside the sphere
-x0 = Sqrt(R*R - r*r);
-Cylinder(2) = {x0, 0, 0,  L, 0, 0,  r};
+// 定义曲面
+// 球体表面
+surf_sph = SQ 0 0 0 R_sphere
 
-// ── Boolean: fuse sphere and cylinder ────────────────────────
-BooleanUnion(3) = { Volume{1}; Delete; }{ Volume{2}; Delete; };
+// 第一段直杆（沿X轴正方向）
+surf_cyl1_x = C/X 0 0 R_rod
+surf_plane1a = PX 0
+surf_plane1b = PX L_rod1
 
-// ── Mesh sizes ───────────────────────────────────────────────
-// Apply via fields or characteristic length on points
-MeshSize{ PointsOf{ Volume{3}; } } = ms_t;
+// 第二段直杆（沿Y轴正方向）
+surf_cyl2_y = C/Y L_rod1 0 R_rod
+surf_plane2a = PY 0
+surf_plane2b = PY L_rod2
 
-// ── Identify surfaces ─────────────────────────────────────────
-// After BooleanUnion the surface tags may be renumbered;
-// use bounding-box queries to tag them.
+// 第三段直杆（沿Z轴正方向）
+surf_cyl3_z = C/Z L_rod1 L_rod2 R_rod
+surf_plane3a = PZ 0
+surf_plane3b = PZ L_rod3
 
-// Nose: part of sphere with x < -R/2
-Field[1] = Box;
-Field[1].VIn  = ms_h;
-Field[1].VOut = ms_t;
-Field[1].XMin = -R - 0.001;
-Field[1].XMax = -R/2;
-Field[1].YMin = -R - 0.001;
-Field[1].YMax =  R + 0.001;
-Field[1].ZMin = -R - 0.001;
-Field[1].ZMax =  R + 0.001;
-Background Field = 1;
+// 世界边界
+surf_world = SO 100
 
-// Tag surfaces by position
-nose_surfaces[] = Surface In BoundingBox{-R-0.001, -R-0.001, -R-0.001,
-                                          -R/2,      R+0.001,  R+0.001};
-tail_tip[]      = Surface In BoundingBox{ x0+L-0.001, -r-0.001, -r-0.001,
-                                           x0+L+0.001,  r+0.001,  r+0.001};
-tail_lateral[]  = Surface In BoundingBox{ x0-0.001, -r-0.001, -r-0.001,
-                                           x0+L+0.001, r+0.001,  r+0.001};
+// 定义cells
+// 外部真空
+cell c_void m_void 
+    -surf_world 
+    #(-surf_sph) 
+    #(surf_cyl1_x -surf_plane1a surf_plane1b) 
+    #(surf_cyl2_y -surf_plane2a surf_plane2b) 
+    #(surf_cyl3_z -surf_plane3a surf_plane3b)
 
-Physical Surface(15) = {nose_surfaces[]};
-Physical Surface(16) = {tail_tip[]};
-Physical Surface(17) = {tail_lateral[]};
-Physical Volume(1)   = {3};
+// 球体
+cell c_sphere m_sphere 
+    -surf_sph 
+    #(surf_cyl1_x -surf_plane1a) 
+    #(surf_cyl2_y -surf_plane2a) 
+    #(surf_cyl3_z -surf_plane3a)
+
+// 第一段直杆
+cell c_rod1 m_rod1 
+    -surf_cyl1_x surf_plane1a -surf_plane1b 
+    #(-surf_sph)
+
+// 第二段直杆
+cell c_rod2 m_rod2 
+    -surf_cyl2_y surf_plane2a -surf_plane2b
+
+// 第三段直杆
+cell c_rod3 m_rod3 
+    -surf_cyl3_z surf_plane3a -surf_plane3b
+
+// 定义facet标记（用于可视化或特殊处理）
+// 球体表面标记
+facet f_sph_outer 
+    surf_sph
+    
+// 直杆1表面标记
+facet f_rod1_lateral 
+    surf_cyl1_x
+    
+facet f_rod1_base 
+    surf_plane1a
+    
+facet f_rod1_top 
+    surf_plane1b
+    
+// 直杆2表面标记
+facet f_rod2_lateral 
+    surf_cyl2_y
+    
+facet f_rod2_base 
+    surf_plane2a
+    
+facet f_rod2_top 
+    surf_plane2b
+    
+// 直杆3表面标记
+facet f_rod3_lateral 
+    surf_cyl3_z
+    
+facet f_rod3_base 
+    surf_plane3a
+    
+facet f_rod3_top 
+    surf_plane3b
+
+// 材料定义（示例）
+// 球体材料
+material m_sphere 
+    composition H 2 O 1
+    density 1.0
+    
+// 直杆材料
+material m_rod1 
+    composition Fe 1
+    density 7.8
+    
+material m_rod2 
+    composition Al 1
+    density 2.7
+    
+material m_rod3 
+    composition Cu 1
+    density 8.9
+
+// 真空材料
+material m_void 
+    composition void
+    density 0.0

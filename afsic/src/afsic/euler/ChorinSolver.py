@@ -44,7 +44,7 @@ class ChorinSolver:
 
         # Define the variational problem for the first step
         F1 = rho * dot((u - u_n) / k, v) * dx
-        F1 += rho * inner(grad(u_n)*u_n, v)*dx
+        F1 += rho * inner(dot(grad(u_n), u_n), v)*dx
         F1 += inner(mu * grad(u), grad(v)) * dx
         F1 -= inner(f, v) * dx
         a1 = form(lhs(F1))
@@ -56,14 +56,14 @@ class ChorinSolver:
 
         # Define variational problem for step 2
         a2 = form(dot(grad(p), grad(q)) * dx)
-        L2 = form(dot(- (1 / k) * div(u_), q) * dx)
+        L2 = form(dot(-(rho / k) * div(u_), q) * dx)
         A2 = assemble_matrix(a2, bcs=bcp)
         A2.assemble()
         b2 = create_vector(L2)
 
         # Define variational problem for step 3
         a3 = form(dot(u, v) * dx)
-        L3 = form(dot(u_, v) * dx - k *
+        L3 = form(dot(u_, v) * dx - (k / rho) *
                   dot(grad(p_), v) * dx)
         A3 = assemble_matrix(a3, bcs=bcu)
         A3.assemble()

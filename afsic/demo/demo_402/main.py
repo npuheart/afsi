@@ -97,29 +97,32 @@ Q = functionspace(mesh, s_cg1)
 fdim = mesh.topology.dim - 1
 gdim = mesh.geometry.dim
 tdim = mesh.topology.dim
+# Turek FSI parabolic inlet: u_x(y) = 1.5*Um * y*(Ly-y) / (Ly/2)^2
 class Inlet:
-    def __init__(self, Um):
+    def __init__(self, Um, Ly):
         self.t = 0.0
-        self.t_ramp = 0.5
+        self.t_ramp = 2.0
         self.Um = Um
-        self.value = 0.0
+        self.Ly = Ly
+        self.scale = 0.0
 
     def update(self, t):
         self.t = t
+        # smooth ramp-up over t_ramp seconds
         if self.t < self.t_ramp:
-            self.value = self.Um * np.abs(np.cos(self.t / self.t_ramp * np.pi) - 1) / 2
+            self.scale = self.Um * (1.0 - np.cos(np.pi * self.t / self.t_ramp)) / 2.0
         else:
-            Um_min = self.Um / 6
-            self.value = (self.Um - Um_min) * np.abs(np.cos(self.t / self.t_ramp * np.pi) - 1) / 2 + Um_min
+            self.scale = self.Um
 
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-        values[0] = self.value
+        H = self.Ly
+        values[0] = 1.5 * self.scale * x[1] * (H - x[1]) / (H / 2.0) ** 2
         return values
 
 
 # Inlet velocity (left wall, tag 14)
-inlet = Inlet(config["Um"])
+inlet = Inlet(config["Um"], config["Ly"])
 u_inlet_func = Function(V)
 u_inlet_func.interpolate(inlet)
 bcu_inlet = dirichletbc(u_inlet_func, locate_dofs_topological(V, fdim, facet_tag.find(marker_inlet)))
@@ -134,7 +137,7 @@ bcu_top = dirichletbc(u_zero, locate_dofs_topological(V, fdim, facet_tag.find(ma
 bcp_outlet = dirichletbc(PETSc.ScalarType(0.0),
                          locate_dofs_topological(Q, fdim, facet_tag.find(marker_outlet)), Q)
 
-bcu = [bcu_bottom, bcu_top]
+bcu = [bcu_inlet, bcu_bottom, bcu_top]
 bcp = [bcp_outlet]
 
 
@@ -144,16 +147,15 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-turtle_mesh_path = os.path.join(os.path.dirname(__file__), "./turtle_mesh.xdmf")
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, turtle_mesh_path, "r") as xdmf:
+# Turek FSI: circle (area tag 1, facet tag 3) + elastic tail (area tag 2)
+turek_mesh_path = os.path.join(os.path.dirname(__file__), "./turek_mesh.xdmf")
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, turek_mesh_path, "r") as xdmf:
     structure = xdmf.read_mesh(name="mesh")
     structure.topology.create_connectivity(structure.topology.dim, structure.topology.dim - 1)
     cell_tags = xdmf.read_meshtags(structure, name="cell_tags")
     facet_tags = xdmf.read_meshtags(structure, name="facet_tags")
 
-# 向右移动 0.5，向上移动 0.5
-structure.geometry.x[:, 0] += 1.0
-structure.geometry.x[:, 1] += 0.5
+# Scale from metres to centimetres (geo is in SI units)
 structure.geometry.x[:, 0] *= 100.0
 structure.geometry.x[:, 1] *= 100.0
 
@@ -170,7 +172,6 @@ solid_force = Function(Vs, name="solid_force")
 solid_force_io = Function(Vs_io, name="solid_force_io")
 solid_velocity = Function(Vs, name="solid_velocity")
 
-# 定义弱形式
 dVs = TestFunction(Vs)
 mu_s = config["mu_s"]
 lambda_s = config["lambda_s"]
@@ -179,7 +180,7 @@ beta = config["beta"]
 FF = grad(solid_coords)
 J = det(FF)
 
-# 惩罚项：固定乌龟头尾（facet tag 15）
+# Penalty: fix circle boundary (facet tag 3), same as turtle head/tail fixation
 X0 = SpatialCoordinate(structure)
 dss = Measure("ds", domain=structure, subdomain_data=facet_tags)
 x_constraint = solid_coords[0] - X0[0]
@@ -187,46 +188,14 @@ y_constraint = solid_coords[1] - X0[1]
 circum_constraint = as_vector((x_constraint, y_constraint))
 
 # Neo-Hookean: P = mu_s*(F - F^-T) + lambda_s*ln(J)*F^-T
-N0 = FacetNormal(structure)
-p_ext = dolfinx.fem.Constant(structure, dolfinx.default_scalar_type(0.0))
-# spine_dir: unit vector from centroid of tag16 to centroid of tag17, updated each step
-spine_dir = dolfinx.fem.Constant(structure, np.array([0.0, 1.0]))  # initial: y-axis
-
-# Precompile centroid integrals (area and weighted coords for tag 16 & 17)
-form_area16  = form(dolfinx.fem.Constant(structure, 1.0) * dss(16))
-form_area17  = form(dolfinx.fem.Constant(structure, 1.0) * dss(17))
-form_cx16 = form(solid_coords[0] * dss(16))
-form_cy16 = form(solid_coords[1] * dss(16))
-form_cx17 = form(solid_coords[0] * dss(17))
-form_cy17 = form(solid_coords[1] * dss(17))
-
-def update_spine_dir():
-    """Compute unit vector from centroid(tag16) to centroid(tag17) in current config."""
-    comm = structure.comm
-    a16 = comm.allreduce(assemble_scalar(form_area16), op=MPI.SUM)
-    a17 = comm.allreduce(assemble_scalar(form_area17), op=MPI.SUM)
-    cx16 = comm.allreduce(assemble_scalar(form_cx16), op=MPI.SUM) / a16
-    cy16 = comm.allreduce(assemble_scalar(form_cy16), op=MPI.SUM) / a16
-    cx17 = comm.allreduce(assemble_scalar(form_cx17), op=MPI.SUM) / a17
-    cy17 = comm.allreduce(assemble_scalar(form_cy17), op=MPI.SUM) / a17
-    d = np.array([cx17 - cx16, cy17 - cy16])
-    d /= np.linalg.norm(d)
-    spine_dir.value[:] = d
-
-
-I1 = inner(FF, FF)                  
+I1 = inner(FF, FF)
 P_iso = mu_s * J**(-2.0/2.0) * (FF - (I1/2.0) * inv(FF).T)
 P_vol = lambda_s * ln(J) * inv(FF).T
 P_s = P_iso + P_vol
 
-# Follower pressure (Nanson), projected onto current spine direction
-f_follower = -p_ext * J * inv(FF).T * N0
-f_parallel = dot(f_follower, spine_dir) * spine_dir
-
+# Circle (facet tag 3) is fixed via penalty; tail deforms freely
 L_hat = form(-inner(P_s, grad(dVs))*dx
-            #  - beta*inner(circum_constraint, dVs)*dss(15)
-             - inner(f_parallel, dVs)*dss(16)
-             - inner(f_parallel, dVs)*dss(17))
+             - beta*inner(circum_constraint, dVs)*dss(3))
 b1 = create_vector(L_hat)
 
 ###########################################################################################################
@@ -268,11 +237,6 @@ for step in range(config['num_steps']):
     current_time = step * config['dt']
     inlet.update(current_time)
     u_inlet_func.interpolate(inlet)
-    p_ext.value = pressure_waveform(
-        current_time, config["p_period"], config["p_amp"],
-        config["fast_ratio"], config["waveform"])
-    update_spine_dir()
-    print(spine_dir.value)
     ns_solver.solve_one_step()
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
     solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']
@@ -307,6 +271,5 @@ for step in range(config['num_steps']):
             data_log["p_norm"] = p_L2
             data_log["solid_force_norm"] = F_L2
             data_log["volume"] = volume
-            data_log["p_ext.value"] = p_ext.value
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)

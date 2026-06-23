@@ -7,22 +7,22 @@ from afsic import unique_filename, get_project_name
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
-          "project_name": "demo-400", 
+          "project_name": "demo-402", 
           "tag": "parallel",
           "velocity_order": 2,
           "force_order": 2,
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
-          "Um": 0.0,                  # 100 cm/s
-          "p_amp": 100.0,                  # 1 dyne/cm^2 
-          "p_period": 2.0,                  # s
+          "Um": 1.0,                  # mean inlet velocity [cm/s]
+          "p_amp": 0.0,                    # no follower pressure for Turek FSI
+          "p_period": 2.0,                 # s (unused)
           "T": 30.0,                    # s
-          "dt": 0.005/100,
+          "dt": 0.005/10,
           "rho": 1.0,                   # 1 g/cm^3
-          "Lx": 200.0,
-          "Ly": 100.0,
-          "Nx": 128,
-          "Ny": 64,
+          "Lx": 220.0,                  # Turek channel length [cm]
+          "Ly": 41.0,                   # Turek channel height [cm]
+          "Nx": 220,
+          "Ny": 41,
           "mu": 0.01,                  # 1 [Pa*s] , 10 [dyne/cm^2*s]
           "mu_s": 1e4,  # Solid elasticity
           "lambda_s": 1e4,  # Solid elasticity

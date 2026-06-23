@@ -1,25 +1,13 @@
 from mpi4py import MPI
-import gmsh
-import dolfinx
-from dolfinx.io import XDMFFile, gmshio
-
-# 1. 初始化 Gmsh，加载 .geo 文件并生成网格
-gmsh.initialize()
-gmsh.model.add("sperm")
-gmsh.merge("sperm3d.geo")          # 加载几何
-gmsh.model.mesh.generate(dim=3)   # 生成 3D 网格
-
-# 2. 转为 DOLFINx 网格（含 cell/facet 标记）
-model_rank = 0
-gdim = 3
-mesh_data = gmshio.model_to_mesh(
-    gmsh.model, MPI.COMM_WORLD, model_rank, gdim=gdim
-)
-mesh, cell_tags, facet_tags = mesh_data[0], mesh_data[1], mesh_data[2]
-gmsh.finalize()
+from dolfinx.io import gmshio   # 若这行报错，改用: from dolfinx.io import gmsh as gmshio
+from dolfinx.io import XDMFFile
+mesh_data  = gmshio.read_from_msh("sperm3d.msh", MPI.COMM_WORLD, gdim=3)
+mesh       = mesh_data.mesh
+cell_tags  = mesh_data.cell_tags
+facet_tags = mesh_data.facet_tags
 
 # 3. 写出 XDMF（ParaView 可直接打开 .xdmf 文件）
-with XDMFFile(MPI.COMM_WORLD, "sperm.xdmf", "w") as xdmf:
+with XDMFFile(MPI.COMM_WORLD, "sperm-2.xdmf", "w") as xdmf:
     xdmf.write_mesh(mesh)
     xdmf.write_meshtags(cell_tags, mesh.geometry)   # Physical Surface 标记
     xdmf.write_meshtags(facet_tags, mesh.geometry)  # Physical Line 标记
