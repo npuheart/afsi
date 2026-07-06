@@ -183,6 +183,7 @@ J = det(FF)
 # Penalty: fix circle boundary (facet tag 3), same as turtle head/tail fixation
 X0 = SpatialCoordinate(structure)
 dss = Measure("ds", domain=structure, subdomain_data=facet_tags)
+dxx = Measure("dx", domain=structure, subdomain_data=cell_tags)
 x_constraint = solid_coords[0] - X0[0]
 y_constraint = solid_coords[1] - X0[1]
 circum_constraint = as_vector((x_constraint, y_constraint))
@@ -193,9 +194,13 @@ P_iso = mu_s * J**(-2.0/2.0) * (FF - (I1/2.0) * inv(FF).T)
 P_vol = lambda_s * ln(J) * inv(FF).T
 P_s = P_iso + P_vol
 
-# Circle (facet tag 3) is fixed via penalty; tail deforms freely
-L_hat = form(-inner(P_s, grad(dVs))*dx
-             - beta*inner(circum_constraint, dVs)*dss(3))
+# Circle (facet tag 3, cell tag 1) is fixed via penalty; tail (cell tag 2) deforms freely
+L_hat = form(
+    -inner(P_s, grad(dVs))*dxx(1)
+    -inner(P_s, grad(dVs))*dxx(2)
+    - beta*inner(circum_constraint, dVs)*dxx(1)
+    #  - beta*inner(circum_constraint, dVs)*dss(3)
+)
 b1 = create_vector(L_hat)
 
 ###########################################################################################################
@@ -225,7 +230,7 @@ file_velocity.write_mesh(mesh)
 file_pressure.write_mesh(mesh)
 file_solid.write_mesh(structure)
 
-time_manager = TimeManager(config['T'], config['num_steps'], fps=20)
+time_manager = TimeManager(config['T'], config['num_steps'], fps=100)
 
 form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_) * dx)
 form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_) * dx)
@@ -271,5 +276,6 @@ for step in range(config['num_steps']):
             data_log["p_norm"] = p_L2
             data_log["solid_force_norm"] = F_L2
             data_log["volume"] = volume
+            data_log["inlet_velocity"] = inlet.scale
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)

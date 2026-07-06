@@ -1,35 +1,32 @@
 from mpi4py import MPI
 from afsic import unique_filename, get_project_name
 
-#         mu_s=5.0E4,                    # Solid shear modulus or 2nd Lame Coef. [Pa]
-#         lambda_s=4.5E5,                # Solid 1st Lame Coef. [Pa]
-#         nu_s=0.45,                     # Solid Poisson ratio [-]
+# Material properties: Young's modulus E = 5.6 MPa, Poisson's ratio nu = 0.4
+# Lame constants in CGS [dyne/cm^2]:
+#   mu_s = E / (2*(1+nu)) = 5.6e7 / 2.8 = 2.0e7
+#   lambda_s = E*nu / ((1+nu)*(1-2*nu)) = 5.6e7*0.4 / (1.4*0.2) = 8.0e7
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
-          "project_name": "demo-402", 
+          "project_name": "demo-402",
           "tag": "parallel",
           "velocity_order": 2,
           "force_order": 2,
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
-          "Um": 1.0,                  # mean inlet velocity [cm/s]
-          "p_amp": 0.0,                    # no follower pressure for Turek FSI
-          "p_period": 2.0,                 # s (unused)
-          "T": 30.0,                    # s
-          "dt": 0.005/10,
+          "Um": 200.0,                  # mean inlet velocity [cm/s] (2 m/s)
+          "T": 10.0,                    # s
+          "dt": 0.005/100,
           "rho": 1.0,                   # 1 g/cm^3
           "Lx": 220.0,                  # Turek channel length [cm]
           "Ly": 41.0,                   # Turek channel height [cm]
           "Nx": 220,
           "Ny": 41,
-          "mu": 0.01,                  # 1 [Pa*s] , 10 [dyne/cm^2*s]
-          "mu_s": 1e4,  # Solid elasticity
-          "lambda_s": 1e4,  # Solid elasticity
-          "nu_s": 0.45,
-          "beta": 1e6,  # Penalty for head/tail fixation, 1e4 [dyne/cm^2]
-          "waveform": "fast_open",  # "sin" | "fast_open" | "fast_close"
-          "fast_ratio": 0.1,        # fraction of period for the fast phase
+          "mu": 10.0,                   # 1 [Pa*s] , 10 [dyne/cm^2*s]
+          "mu_s": 2.0e7,                # Solid shear modulus (2nd Lame Coef.) [dyne/cm^2]
+          "lambda_s": 8.0e7,            # Solid 1st Lame Coef. [dyne/cm^2]
+          "nu_s": 0.4,                  # Solid Poisson ratio [-]
+          "beta": 1e8,  # Penalty for head/tail fixation, 1e4 [dyne/cm^2]
           }
 
 

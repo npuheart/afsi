@@ -35,3 +35,8 @@ body-fitted ALE mesh.
 python generate_mesh.py   # turek.geo -> turek_mesh.xdmf/.h5
 python main.py            # or mpirun -n <N> python main.py
 ```
+
+## Note 
+
+the density of and is the same
+the solid is added with the same viscosity with fluid
