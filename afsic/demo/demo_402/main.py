@@ -15,11 +15,10 @@ from ufl import (FacetNormal, Identity, Measure, SpatialCoordinate, TestFunction
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from dolfinx.fem import form, assemble_scalar
 
-from afsic import IPCSSolver,ChorinSolver, TimeManager
+from afsic import IPCSSolver, ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 from configuration import config
-
 
 swanlab_init(config['project_name'], config['experiment_name'], config, api_key="odR9FodGeQojOPlk2sir1")
 
@@ -98,7 +97,7 @@ fdim = mesh.topology.dim - 1
 gdim = mesh.geometry.dim
 tdim = mesh.topology.dim
 # Turek FSI parabolic inlet: u_x(y) = 1.5*Um * y*(Ly-y) / (Ly/2)^2
-class Inlet:
+class InletVelocity:
     def __init__(self, Um, Ly):
         self.t = 0.0
         self.t_ramp = 2.0
@@ -120,11 +119,9 @@ class Inlet:
         values[0] = 1.5 * self.scale * x[1] * (H - x[1]) / (H / 2.0) ** 2
         return values
 
-
-# Inlet velocity (left wall, tag 14)
-inlet = Inlet(config["Um"], config["Ly"])
+inlet_velocity = InletVelocity(config["Um"], config["Ly"])
 u_inlet_func = Function(V)
-u_inlet_func.interpolate(inlet)
+u_inlet_func.interpolate(inlet_velocity)
 bcu_inlet = dirichletbc(u_inlet_func, locate_dofs_topological(V, fdim, facet_tag.find(marker_inlet)))
 
 # No-slip on top/bottom (both components = 0), tags 11, 13
@@ -139,8 +136,6 @@ bcp_outlet = dirichletbc(PETSc.ScalarType(0.0),
 
 bcu = [bcu_inlet, bcu_bottom, bcu_top]
 bcp = [bcp_outlet]
-
-
 # Define Solver
 ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'])
 
@@ -207,10 +202,13 @@ b1 = create_vector(L_hat)
 ##########################################  Interaction  ##################################################
 ###########################################################################################################
 from afsic import IBMesh, IBInterpolation
-ibmesh = IBMesh(0.0, config["Lx"],0.0, config["Ly"], config["Nx"], config["Ny"], config["velocity_order"])
+ibmesh = IBMesh(0.0, config["Lx"],
+                  0.0, config["Ly"],
+                  config["Nx"], config["Ny"],
+                  config["velocity_order"])
 ib_interpolation = IBInterpolation(ibmesh)
 coords_bg = Function(V)
-coords_bg.interpolate(lambda x: np.array([x[0], x[1]])) 
+coords_bg.interpolate(lambda x: np.array([x[0], x[1]]))
 solid_coords.interpolate(lambda x: np.array([x[0], x[1]]))
 ibmesh.build_map(coords_bg._cpp_object)
 ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
@@ -220,12 +218,11 @@ ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 ##########################################  Output  #######################################################
 ###########################################################################################################
 
-
 u_io = Function(V_io)
 p_io = Function(Q)
-file_velocity = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"velocity.xdmf", "w")
-file_pressure = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"pressure.xdmf", "w")
-file_solid = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"solid_force.xdmf", "w")
+file_velocity = dolfinx.io.XDMFFile(mesh.comm, config["output_path"] + "velocity.xdmf", "w")
+file_pressure = dolfinx.io.XDMFFile(mesh.comm, config["output_path"] + "pressure.xdmf", "w")
+file_solid = dolfinx.io.XDMFFile(mesh.comm, config["output_path"] + "solid.xdmf", "w")
 file_velocity.write_mesh(mesh)
 file_pressure.write_mesh(mesh)
 file_solid.write_mesh(structure)
@@ -240,11 +237,11 @@ form_volume = form(det(grad(solid_coords)) * dx)
 log.set_log_level(log.LogLevel.INFO)
 for step in range(config['num_steps']):
     current_time = step * config['dt']
-    inlet.update(current_time)
-    u_inlet_func.interpolate(inlet)
+    inlet_velocity.update(current_time)
+    u_inlet_func.interpolate(inlet_velocity)
     ns_solver.solve_one_step()
     ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object, solid_velocity._cpp_object)
-    solid_coords.x.array[:] += solid_velocity.x.array[:]*config['dt']
+    solid_coords.x.array[:] += solid_velocity.x.array[:] * config['dt']
     solid_coords.x.scatter_forward()
     u_L2 = mesh.comm.allreduce(assemble_scalar(form_u_L2), op=MPI.SUM)
     p_L2 = mesh.comm.allreduce(assemble_scalar(form_p_L2), op=MPI.SUM)
@@ -276,6 +273,6 @@ for step in range(config['num_steps']):
             data_log["p_norm"] = p_L2
             data_log["solid_force_norm"] = F_L2
             data_log["volume"] = volume
-            data_log["inlet_velocity"] = inlet.scale
+            data_log["inlet_velocity"] = inlet_velocity.scale
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)

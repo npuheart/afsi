@@ -26,7 +26,7 @@ config = {"nssolver": "chorinsolver",
           "mu_s": 2.0e7,                # Solid shear modulus (2nd Lame Coef.) [dyne/cm^2]
           "lambda_s": 8.0e7,            # Solid 1st Lame Coef. [dyne/cm^2]
           "nu_s": 0.4,                  # Solid Poisson ratio [-]
-          "beta": 1e8,  # Penalty for head/tail fixation, 1e4 [dyne/cm^2]
+          "beta": 1e6,  # Penalty for head/tail fixation, 1e4 [dyne/cm^2]
           }
 
 
