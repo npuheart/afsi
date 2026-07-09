@@ -9,8 +9,8 @@ config = {"nssolver": "chorinsolver",
           "force_order": 2,
           "pressure_order": 1,
           "num_processors": MPI.COMM_WORLD.size,
-          "T": 0.05,
-          "dt": 1/1000,
+          "T": 0.2,
+          "dt": 1/10000,
           "rho": 1.0,
           "Lx": 8.0,
           "Ly": 8.0,
@@ -18,7 +18,7 @@ config = {"nssolver": "chorinsolver",
           "Nx": 32,
           "Ny": 32,
           "Nz": 80,
-          "mu": 0.01,
+          "mu": 0.036,      # dyn·s/cm² (CGS)
           "U_max": 1.0,     # Max inlet velocity (sinusoidal)
           "freq": 1.0,       # Inlet velocity frequency (Hz)
           "R_inner": 1.3,    # Pipe inner radius (for inlet profile)
