@@ -246,8 +246,6 @@ struct IBMesh {
     std::shared_ptr<mesh::Mesh<U>> mesh_ptr;
 };
 
-int coupling();
-
 class IBInterpolation {
   public:
     IBMesh &fluid_mesh;
