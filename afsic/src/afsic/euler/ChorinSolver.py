@@ -52,14 +52,14 @@ class ChorinSolver:
 
         A1 = assemble_matrix(a1, bcs=bcu)
         A1.assemble()
-        b1 = create_vector(L1)
+        b1 = create_vector(V)
 
         # Define variational problem for step 2
         a2 = form(dot(grad(p), grad(q)) * dx)
         L2 = form(dot(-(rho / k) * div(u_), q) * dx)
         A2 = assemble_matrix(a2, bcs=bcp)
         A2.assemble()
-        b2 = create_vector(L2)
+        b2 = create_vector(Q)
 
         # Define variational problem for step 3
         a3 = form(dot(u, v) * dx)
@@ -67,7 +67,7 @@ class ChorinSolver:
                   dot(grad(p_), v) * dx)
         A3 = assemble_matrix(a3, bcs=bcu)
         A3.assemble()
-        b3 = create_vector(L3)
+        b3 = create_vector(V)
 
         # Solver for step 1
         solver1 = PETSc.KSP().create(mesh.comm)

@@ -56,19 +56,19 @@ class IPCSSolver:
         a1 = form(lhs(F1))
         L1 = form(rhs(F1))
         A1 = create_matrix(a1)
-        b1 = create_vector(L1)
+        b1 = create_vector(V)
         # Pressure update
         a2 = form(dot(grad(p), grad(q)) * dx)
         L2 = form(-rho / k * dot(div(u_s), q) * dx)
         A2 = assemble_matrix(a2, bcs=self.bcp)
         A2.assemble()
-        b2 = create_vector(L2)
+        b2 = create_vector(Q)
         # Velocity update
         a3 = form(rho * dot(u, v) * dx)
         L3 = form(rho * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
         A3 = assemble_matrix(a3)
         A3.assemble()
-        b3 = create_vector(L3)
+        b3 = create_vector(V)
 
         # Solver for step 1
         solver1 = PETSc.KSP().create(mesh.comm)
