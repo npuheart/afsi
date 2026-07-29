@@ -1,5 +1,6 @@
 from mpi4py import MPI
 import swanlab, time
+import numpy as np
 from datetime import datetime
 import os
 import requests
@@ -98,3 +99,33 @@ def log(message, log_level=dolfinx.log.LogLevel.INFO):
     comm = MPI.COMM_WORLD
     if comm.rank == 0:
         dolfinx.log.log(log_level, message)
+
+
+def pressure_waveform(t, period, amp, fast_ratio, waveform="sin"):
+    """Return pressure at time t.
+
+    Parameters
+    ----------
+    t : float
+        Current time.
+    period : float
+        Waveform period.
+    amp : float
+        Amplitude.
+    fast_ratio : float
+        Fraction of period for fast phase (0 < fast_ratio < 1).
+    waveform : str
+        'sin' for symmetric sine; 'fast_open' for asymmetric piecewise linear.
+
+    Returns
+    -------
+    float
+        Pressure value at time t.
+    """
+    phase = (t % period) / period
+    if waveform == "sin":
+        return amp * np.sin(2 * np.pi * phase)
+    if phase < fast_ratio:
+        return amp * (phase / fast_ratio)
+    else:
+        return amp * (1.0 - (phase - fast_ratio) / (1.0 - fast_ratio))

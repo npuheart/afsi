@@ -16,12 +16,15 @@ from petsc4py import PETSc
 import dolfinx
 from dolfinx.fem import (Function, functionspace,
                          dirichletbc, locate_dofs_topological)
-from dolfinx.mesh import CellType, GhostMode, locate_entities, meshtags
+from dolfinx.mesh import CellType, GhostMode
 from dolfinx.fem import form, assemble_scalar
 from basix.ufl import element
 from ufl import (TestFunction, dot, dx, grad, det, inv, ln, inner)
 
 from afsic import ChorinSolver, IBMesh, IBInterpolation
+from afsic.common import (tag_boundaries, rectangle_boundaries,
+                          UpVelocity2D, MARKER_LEFT, MARKER_RIGHT,
+                          MARKER_BOTTOM, MARKER_TOP)
 
 PASS, FAIL = 0, 0
 
@@ -64,28 +67,12 @@ def test_lid_driven_disk():
         n=(config["Nx"], config["Ny"]),
         cell_type=CellType.quadrilateral, ghost_mode=GhostMode.shared_facet)
 
-    mesh.topology.create_connectivity(1, 2)
-    marker_up = 4
-    boundaries = [(1, lambda x: np.isclose(x[0], 0)),
-                  (2, lambda x: np.isclose(x[0], config["Lx"])),
-                  (3, lambda x: np.isclose(x[1], 0)),
-                  (4, lambda x: np.isclose(x[1], config["Ly"]))]
+    facet_tag = tag_boundaries(mesh, rectangle_boundaries(config["Lx"], config["Ly"]))
 
     # 固定点 (0,0) 用于压力
     def fixed_pt(x):
         return np.logical_and(np.isclose(x[0], 0.0), np.isclose(x[1], 0.0))
     point_loc = dolfinx.mesh.locate_entities_boundary(mesh, 0, fixed_pt)
-
-    facet_indices, facet_markers = [], []
-    fdim = mesh.topology.dim - 1
-    for (mk, loc) in boundaries:
-        facets = locate_entities(mesh, fdim, loc)
-        facet_indices.append(facets)
-        facet_markers.append(np.full_like(facets, mk))
-    facet_indices = np.hstack(facet_indices).astype(np.int32)
-    facet_markers = np.hstack(facet_markers).astype(np.int32)
-    sorted_f = np.argsort(facet_indices)
-    facet_tag = meshtags(mesh, fdim, facet_indices[sorted_f], facet_markers[sorted_f])
 
     # ---- 函数空间 ----
     v_cg2 = element("Lagrange", mesh.topology.cell_name(),
@@ -96,24 +83,17 @@ def test_lid_driven_disk():
 
     # ---- 边界条件 ----
     gdim = mesh.geometry.dim
+    fdim = mesh.topology.dim - 1
 
-    class UpVelocity:
-        def __init__(self, t=0.0):
-            self.t = t
-        def __call__(self, x):
-            values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-            values[0] = 1.0
-            return values
-
+    up_vel = UpVelocity2D()
     u_up = Function(V)
-    up_vel = UpVelocity(0.0)
     u_up.interpolate(up_vel)
-    bcu_up = dirichletbc(u_up, locate_dofs_topological(V, fdim, facet_tag.find(marker_up)))
+    bcu_up = dirichletbc(u_up, locate_dofs_topological(V, fdim, facet_tag.find(MARKER_TOP)))
 
     u0 = np.array((0,) * gdim, dtype=PETSc.ScalarType)
-    bcu_left = dirichletbc(u0, locate_dofs_topological(V, fdim, facet_tag.find(1)), V)
-    bcu_right = dirichletbc(u0, locate_dofs_topological(V, fdim, facet_tag.find(2)), V)
-    bcu_down = dirichletbc(u0, locate_dofs_topological(V, fdim, facet_tag.find(3)), V)
+    bcu_left = dirichletbc(u0, locate_dofs_topological(V, fdim, facet_tag.find(MARKER_LEFT)), V)
+    bcu_right = dirichletbc(u0, locate_dofs_topological(V, fdim, facet_tag.find(MARKER_RIGHT)), V)
+    bcu_down = dirichletbc(u0, locate_dofs_topological(V, fdim, facet_tag.find(MARKER_BOTTOM)), V)
     bcp_pt = dirichletbc(0.0, locate_dofs_topological(Q, 0, point_loc), Q)
     bcu = [bcu_up, bcu_left, bcu_right, bcu_down]
     bcp = [bcp_pt]
