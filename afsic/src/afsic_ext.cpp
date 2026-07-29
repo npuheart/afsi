@@ -146,8 +146,6 @@ NB_MODULE(afsic_ext, m) {
 
     m.def("send_email", &smtp::send_email, "Send an email");
 
-    m.def("coupling", &coupling::coupling, "IB coupling operators");
-
     nb::class_<coupling::IBMesh>(m, "IBMesh")
         .def(nb::init<double, double, double, double, std::int64_t, std::int64_t, uint>(), nb::arg("x0"), nb::arg("x1"), nb::arg("y0"), nb::arg("y1"),
              nb::arg("dim_x"), nb::arg("dim_y"), nb::arg("order"))
