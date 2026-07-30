@@ -164,8 +164,8 @@ class ChorinSolver:
         bs : int
             Block size (gdim)。
         """
-        # ---- Step 1a: solve WITHOUT body force → get ũ ----
-        self.f.x.array[:] = 0.0
+        # ---- Step 1a: solve WITH accumulated body force → get ũ ----
+        # NOTE: do NOT zero self.f here — accumulated force must persist!
         with self.b1.localForm() as loc:
             loc.set(0)
         assemble_vector(self.b1, self.L1)
@@ -176,20 +176,19 @@ class ChorinSolver:
         self.solver1.solve(self.b1, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()
 
-        # ---- Direct Forcing: compute Δf = -ũ/dt, accumulate f += Δf ----
+        # ---- Direct Forcing: compute Δf = -α·ũ/dt, accumulate f += Δf ----
         u_arr = self.u_.x.array
         f_arr = self.f.x.array
         dt_val = self._dt
+        alpha = 0.5  # relaxation factor for stability
         force_sum = [0.0, 0.0]
         for dof in solid_dofs:
             for d in range(bs):
                 idx = dof * bs + d
-                df = -u_arr[idx] / dt_val
-                f_arr[idx] += df              # accumulate, not replace!
-                force_sum[d] += u_arr[idx]    # return the Δf (incremental)
-        self.f.x.scatter_forward()  # sync ghost values before assembly
-
-        # ---- Step 1b: re-solve WITH force → get corrected u* ----
+                df = -alpha * u_arr[idx] / dt_val
+                f_arr[idx] += df
+                force_sum[d] += u_arr[idx]
+        self.f.x.scatter_forward()
 
         # ---- Step 1b: re-solve WITH force → get corrected u* ----
         with self.b1.localForm() as loc:
