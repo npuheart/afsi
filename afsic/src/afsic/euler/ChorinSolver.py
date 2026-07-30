@@ -26,6 +26,7 @@ class ChorinSolver:
         
         mesh = V.mesh
         self.mesh = mesh
+        self._dt = dt_raw  # store raw dt for direct forcing
 
         k = Constant(mesh, PETSc.ScalarType(dt_raw))
         mu = Constant(mesh, PETSc.ScalarType(mu_raw))
@@ -147,10 +148,99 @@ class ChorinSolver:
         self.u_n.x.array[:] = self.u_.x.array[:]
         self.p_n.x.array[:] = self.p_.x.array[:]
 
-    def post_process(self):
-        self.b1.destroy()
-        self.b2.destroy()
-        self.b3.destroy()
-        self.solver1.destroy()
-        self.solver2.destroy()
-        self.solver3.destroy()
+    def solve_one_step_df(self, solid_dofs, bs, force_multiplier=1.0):
+        """Direct Forcing: 经典算法——每步重新计算力，不累加。
+
+        Algorithm (per time step):
+          1. Step 1a: solve with f=0 → ũ (natural tentative velocity)
+          2. Compute f = -force_multiplier * ũ/dt at solid DOFs
+          3. Step 1b: re-solve Step 1 with f → corrected u*
+          4. Steps 2-3: pressure correction + velocity correction → u, p
+          5. Velocity correction: u[solid] = 0 (ensures no-slip)
+          6. u_n = u (carries solid=0 to next step via convection)
+
+        Parameters
+        ----------
+        solid_dofs : np.ndarray (int32)
+            局部 DOF 索引 (block 索引, 不是分量索引)。
+        bs : int
+            Block size (gdim)。
+        force_multiplier : float
+            力放大系数。>1 增强固体对流体的影响。默认 1.0。
+
+        Returns
+        -------
+        list [drag_raw, lift_raw]
+            Σ ũ at solid DOFs (before division by dt/dV).
+        """
+        dt_val = self._dt
+
+        # ---- Step 1a: solve WITHOUT body force → get natural ũ ----
+        self.f.x.array[:] = 0.0
+        self.f.x.scatter_forward()
+        with self.b1.localForm() as loc:
+            loc.set(0)
+        assemble_vector(self.b1, self.L1)
+        apply_lifting(self.b1, [self.a1], [self.bcu])
+        self.b1.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
+                            mode=PETSc.ScatterMode.REVERSE)
+        set_bc(self.b1, self.bcu)
+        self.solver1.solve(self.b1, self.u_.x.petsc_vec)
+        self.u_.x.scatter_forward()
+
+        # ---- Compute fresh force: f = -ũ/dt (classic DF, no relaxation) ----
+        u_arr = self.u_.x.array
+        self.f.x.array[:] = 0.0
+        f_arr = self.f.x.array
+        force_sum = [0.0, 0.0]
+        for dof in solid_dofs:
+            for d in range(bs):
+                idx = dof * bs + d
+                f_arr[idx] = -force_multiplier * u_arr[idx] / dt_val
+                force_sum[d] += u_arr[idx]
+        self.f.x.scatter_forward()
+
+        # ---- Step 1b: re-solve WITH force → corrected u* ----
+        with self.b1.localForm() as loc:
+            loc.set(0)
+        assemble_vector(self.b1, self.L1)
+        apply_lifting(self.b1, [self.a1], [self.bcu])
+        self.b1.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
+                            mode=PETSc.ScatterMode.REVERSE)
+        set_bc(self.b1, self.bcu)
+        self.solver1.solve(self.b1, self.u_.x.petsc_vec)
+        self.u_.x.scatter_forward()
+
+        # ---- Steps 2-3: pressure correction + velocity correction ----
+        with self.b2.localForm() as loc:
+            loc.set(0)
+        assemble_vector(self.b2, self.L2)
+        apply_lifting(self.b2, [self.a2], [self.bcp])
+        self.b2.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
+                            mode=PETSc.ScatterMode.REVERSE)
+        set_bc(self.b2, self.bcp)
+        self.solver2.solve(self.b2, self.p_.x.petsc_vec)
+        self.p_.x.scatter_forward()
+
+        with self.b3.localForm() as loc:
+            loc.set(0)
+        assemble_vector(self.b3, self.L3)
+        apply_lifting(self.b3, [self.a3], [self.bcu])
+        self.b3.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
+                            mode=PETSc.ScatterMode.REVERSE)
+        set_bc(self.b3, self.bcu)
+        self.solver3.solve(self.b3, self.u_.x.petsc_vec)
+        self.u_.x.scatter_forward()
+
+        # ---- Direct velocity correction: u[solid] = 0 ----
+        # Applied after Step 3 to ensure final velocity respects the solid.
+        u_arr = self.u_.x.array
+        for dof in solid_dofs:
+            for d in range(bs):
+                u_arr[dof * bs + d] = 0.0
+
+        # Update previous time step
+        self.u_n.x.array[:] = self.u_.x.array[:]
+        self.p_n.x.array[:] = self.p_.x.array[:]
+
+        return force_sum  # (drag_raw, lift_raw) = Σ ũ / dt * dV
