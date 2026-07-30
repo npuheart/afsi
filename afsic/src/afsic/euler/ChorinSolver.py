@@ -176,17 +176,18 @@ class ChorinSolver:
         self.solver1.solve(self.b1, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()
 
-        # ---- Direct Forcing: compute f = -ũ/dt ----
+        # ---- Direct Forcing: compute Δf = -ũ/dt, accumulate f += Δf ----
         u_arr = self.u_.x.array
-        self.f.x.array[:] = 0.0
         f_arr = self.f.x.array
         dt_val = self._dt
         force_sum = [0.0, 0.0]
         for dof in solid_dofs:
             for d in range(bs):
                 idx = dof * bs + d
-                f_arr[idx] = -u_arr[idx] / dt_val
-                force_sum[d] += u_arr[idx]  # accumulate ũ for force integral
+                df = -u_arr[idx] / dt_val
+                f_arr[idx] += df              # accumulate, not replace!
+                force_sum[d] += u_arr[idx]    # return the Δf (incremental)
+        self.f.x.scatter_forward()  # sync ghost values before assembly
 
         # ---- Step 1b: re-solve WITH force → get corrected u* ----
 
