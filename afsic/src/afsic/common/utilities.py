@@ -1,12 +1,27 @@
 from mpi4py import MPI
 import swanlab, time
+import numpy as np
 from datetime import datetime
 import os
 import requests
 import dolfinx.log
 
-start_time = time.time()
-dt_minimum = 1e-5
+class _Timer:
+    """进程启动计时器 (仅 rank 0 有效)。"""
+    def __init__(self):
+        self._start = time.time()
+        self._dt_min = 1e-5
+
+    @property
+    def elapsed(self):
+        return time.time() - self._start
+
+    @property
+    def dt_minimum(self):
+        return self._dt_min
+
+
+_timer = _Timer()
 
 
 class TimeManager:
@@ -46,13 +61,13 @@ def swanlab_init(project_name, experiment_name, config, api_key="VBxEp1UBe2606KH
 def swanlab_upload(current_time, data_log_1, **params):
     data_log = {}
     data_log["time"] = current_time
-    data_log["timecost"] = time.time() - start_time
+    data_log["timecost"] = _timer.elapsed
     params = params or {}
     data_log.update(params)
     data_log.update(data_log_1)
     if (MPI.COMM_WORLD.rank == 0):
         swanlab.log(
-            data_log, step = int(1+current_time/dt_minimum)
+            data_log, step = int(1+current_time/_timer.dt_minimum)
         )
 
 
@@ -98,3 +113,33 @@ def log(message, log_level=dolfinx.log.LogLevel.INFO):
     comm = MPI.COMM_WORLD
     if comm.rank == 0:
         dolfinx.log.log(log_level, message)
+
+
+def pressure_waveform(t, period, amp, fast_ratio, waveform="sin"):
+    """Return pressure at time t.
+
+    Parameters
+    ----------
+    t : float
+        Current time.
+    period : float
+        Waveform period.
+    amp : float
+        Amplitude.
+    fast_ratio : float
+        Fraction of period for fast phase (0 < fast_ratio < 1).
+    waveform : str
+        'sin' for symmetric sine; 'fast_open' for asymmetric piecewise linear.
+
+    Returns
+    -------
+    float
+        Pressure value at time t.
+    """
+    phase = (t % period) / period
+    if waveform == "sin":
+        return amp * np.sin(2 * np.pi * phase)
+    if phase < fast_ratio:
+        return amp * (phase / fast_ratio)
+    else:
+        return amp * (1.0 - (phase - fast_ratio) / (1.0 - fast_ratio))

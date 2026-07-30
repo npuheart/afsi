@@ -9,13 +9,4 @@ using T = PetscScalar;
 using U = typename dolfinx::scalar_value_t<T>;
 namespace coupling {
 
-
-
-
-int coupling() {
-
-  printf("a\n");
-  return 0;
-}
-
 } // namespace coupling

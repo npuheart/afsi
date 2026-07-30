@@ -1,25 +1,10 @@
-import gmsh
-import os
-import numpy as np
-import matplotlib.pyplot as plt
-import tqdm.autonotebook
-
-from mpi4py import MPI
 from petsc4py import PETSc
 
-from basix.ufl import element
-
-from dolfinx.cpp.mesh import to_type, cell_entity_type
-from dolfinx.fem import (Constant, Function, functionspace,
-                         assemble_scalar, dirichletbc, form, locate_dofs_topological, set_bc)
+from dolfinx.fem import (Constant, Function, form, set_bc)
 from dolfinx.fem.petsc import (apply_lifting, assemble_matrix, assemble_vector,
-                               create_vector, create_matrix, set_bc)
-from dolfinx.graph import adjacencylist
-from dolfinx.geometry import bb_tree, compute_collisions_points, compute_colliding_cells
-from dolfinx.io import (VTXWriter, distribute_entity_data, gmshio)
-from dolfinx.mesh import create_mesh, meshtags_from_entities
-from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
-                 as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
+                               create_vector, create_matrix)
+from ufl import (TestFunction, TrialFunction,
+                 div, dot, dx, inner, lhs, grad, nabla_grad, rhs)
 
 class IPCSSolver:
     def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw):
@@ -56,19 +41,19 @@ class IPCSSolver:
         a1 = form(lhs(F1))
         L1 = form(rhs(F1))
         A1 = create_matrix(a1)
-        b1 = create_vector(L1)
+        b1 = create_vector(V)
         # Pressure update
         a2 = form(dot(grad(p), grad(q)) * dx)
         L2 = form(-rho / k * dot(div(u_s), q) * dx)
         A2 = assemble_matrix(a2, bcs=self.bcp)
         A2.assemble()
-        b2 = create_vector(L2)
+        b2 = create_vector(Q)
         # Velocity update
         a3 = form(rho * dot(u, v) * dx)
         L3 = form(rho * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
         A3 = assemble_matrix(a3)
         A3.assemble()
-        b3 = create_vector(L3)
+        b3 = create_vector(V)
 
         # Solver for step 1
         solver1 = PETSc.KSP().create(mesh.comm)

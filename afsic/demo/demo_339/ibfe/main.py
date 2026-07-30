@@ -1,3 +1,14 @@
+"""Flow past a cylinder — IB-FE immersed boundary method.
+
+Cylinder-only case (no elastic tail).  The cylinder is a Neo-Hookean solid
+disk with extremely high stiffness + penalty fixation to approximate a rigid
+body.  Standard Peskin IB feedback force coupling.
+
+This file is structured identically to demo_402 (Turek FSI with tail) so
+the two cases can be compared side-by-side.  The only structural difference
+is the solid mesh (disk only vs. disk+tail) and SI vs. CGS units.
+"""
+
 from petsc4py import PETSc
 from mpi4py import MPI
 
@@ -11,31 +22,21 @@ from dolfinx.mesh import CellType, GhostMode, locate_entities, meshtags
 from basix.ufl import element
 
 from ufl import (
-    FacetNormal,
-    Identity,
-    Measure,
     SpatialCoordinate,
     TestFunction,
-    TrialFunction,
+    Measure,
     inv,
     ln,
     det,
     as_vector,
-    div,
     dot,
-    ds,
     dx,
     inner,
-    lhs,
     grad,
-    nabla_grad,
-    rhs,
-    sym,
-    system,
 )
 from dolfinx.fem import form, assemble_scalar
 
-from afsic import IPCSSolver, ChorinSolver, TimeManager
+from afsic import ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 from configuration import config
@@ -46,35 +47,6 @@ swanlab_init(
     config,
     api_key="odR9FodGeQojOPlk2sir1",
 )
-
-
-def pressure_waveform(t, period, amp, fast_ratio, waveform="sin"):
-    """Return pressure at time t.
-
-    waveform:
-        'sin'       – symmetric sine
-        'fast_open' – piecewise linear two-segment:
-                      [0, fast_ratio*T]         : 0 -> amp  (fast rise)
-                      [fast_ratio*T, T]         : amp -> 0  (slow fall)
-    """
-    phase = (t % period) / period  # in [0, 1)
-    if waveform == "sin":
-        return amp * np.sin(2 * np.pi * phase)
-    # # fast_open: slow 0→-amp, fast -amp→amp, slow amp→-amp, repeat
-    # s1 = (1.0 - fast_ratio) / 2.0   # phase fraction for first slow segment
-    # s2 = s1 + fast_ratio              # phase fraction at end of fast segment
-    # if phase < s1:
-    #     return -amp * (phase / s1)
-    # elif phase < s2:
-    #     return amp * (-1.0 + 2.0 * (phase - s1) / fast_ratio)
-    # else:
-    #     return amp * (1.0 - (phase - s2) / s1)
-    # fast_open (default asymmetric)
-    if phase < fast_ratio:
-        return amp * (phase / fast_ratio)
-    else:
-        return amp * (1.0 - (phase - fast_ratio) / (1.0 - fast_ratio))
-
 
 ###########################################################################################################
 ##########################################  Fluid #########################################################
@@ -92,10 +64,10 @@ mesh = dolfinx.mesh.create_rectangle(
 mesh.topology.create_connectivity(1, 2)
 marker_inlet, marker_outlet, marker_bottom, marker_top = 14, 12, 11, 13
 boundaries = [
-    (14, lambda x: np.isclose(x[0], 0)),  # inlet (left)
-    (12, lambda x: np.isclose(x[0], config["Lx"])),  # outlet (right)
-    (11, lambda x: np.isclose(x[1], 0)),  # bottom
-    (13, lambda x: np.isclose(x[1], config["Ly"])), # top
+    (14, lambda x: np.isclose(x[0], 0)),                     # inlet (left)
+    (12, lambda x: np.isclose(x[0], config["Lx"])),           # outlet (right)
+    (11, lambda x: np.isclose(x[1], 0)),                      # bottom
+    (13, lambda x: np.isclose(x[1], config["Ly"])),           # top
 ]
 facet_indices, facet_markers = [], []
 fdim = mesh.topology.dim - 1
@@ -120,7 +92,6 @@ Q = functionspace(mesh, s_cg1)
 # Define boundary conditions
 fdim = mesh.topology.dim - 1
 gdim = mesh.geometry.dim
-tdim = mesh.topology.dim
 
 
 # Turek FSI parabolic inlet: u_x(y) = 1.5*Um * y*(Ly-y) / (Ly/2)^2
@@ -179,19 +150,15 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-# Turek FSI: circle (area tag 1, facet tag 3) + elastic tail (area tag 2)
-turek_mesh_path = os.path.join(os.path.dirname(__file__), "./turek_mesh.xdmf")
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, turek_mesh_path, "r") as xdmf:
+# Cylinder disk only (cell tag 1) — NO elastic tail, unlike demo_402
+solid_path = os.path.join(os.path.dirname(__file__), "./cylinder_solid.xdmf")
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, solid_path, "r") as xdmf:
     structure = xdmf.read_mesh(name="mesh")
     structure.topology.create_connectivity(
         structure.topology.dim, structure.topology.dim - 1
     )
     cell_tags = xdmf.read_meshtags(structure, name="cell_tags")
     facet_tags = xdmf.read_meshtags(structure, name="facet_tags")
-
-# Scale from metres to centimetres (geo is in SI units)
-structure.geometry.x[:, 0] *= 100.0
-structure.geometry.x[:, 1] *= 100.0
 
 v_cg2_s = element(
     "Lagrange",
@@ -219,26 +186,25 @@ beta = config["beta"]
 FF = grad(solid_coords)
 J = det(FF)
 
-# Penalty: fix circle boundary (facet tag 3), same as turtle head/tail fixation
+# Penalty: fix entire cylinder (cell tag 1) to approximate a rigid body.
+# Unlike demo_402, there is no flexible tail (cell tag 2), so the penalty
+# is applied over the whole solid domain.
 X0 = SpatialCoordinate(structure)
-dss = Measure("ds", domain=structure, subdomain_data=facet_tags)
 dxx = Measure("dx", domain=structure, subdomain_data=cell_tags)
 x_constraint = solid_coords[0] - X0[0]
 y_constraint = solid_coords[1] - X0[1]
 solid_constraint = as_vector((x_constraint, y_constraint))
 
-# Neo-Hookean: P = mu_s*(F - F^-T) + lambda_s*ln(J)*F^-T
+# Neo-Hookean: P = mu_s * J^(-1) * (F - (I1/2) * F^-T) + lambda_s * ln(J) * F^-T
 I1 = inner(FF, FF)
 P_iso = mu_s * J ** (-2.0 / 2.0) * (FF - (I1 / 2.0) * inv(FF).T)
 P_vol = lambda_s * ln(J) * inv(FF).T
 P_s = P_iso + P_vol
 
-# Circle (facet tag 3, cell tag 1) is fixed via penalty; tail (cell tag 2) deforms freely
+# Cylinder (cell tag 1 only) — elastic stress + penalty fixation
 L_hat = form(
-    -inner(P_s, grad(dVs)) * dxx(1)
-    - inner(P_s, grad(dVs)) * dxx(2)
-    - beta * inner(solid_constraint, dVs) * dxx(1)
-    #  - beta*inner(circum_constraint, dVs)*dss(3)
+    -inner(P_s, grad(dVs)) * dx
+    - beta * inner(solid_constraint, dVs) * dx
 )
 b1 = create_vector(L_hat)
 
@@ -287,6 +253,21 @@ form_F_L2 = form(dot(solid_coords, solid_coords) * dx)
 form_volume = form(det(grad(solid_coords)) * dx)
 
 log.set_log_level(log.LogLevel.INFO)
+
+if MPI.COMM_WORLD.rank == 0:
+    D = 0.1  # cylinder diameter [m]
+    Re = config["rho"] * config["Um"] * D / config["mu"]
+    print(
+        f"IB-FE cylinder (no tail): {config['Nx']}×{config['Ny']}, "
+        f"dt={config['dt']}, Re≈{Re:.0f}"
+    )
+    print(
+        f"  Solid: mu_s={mu_s:.1e}, lambda_s={lambda_s:.1e}, beta={beta:.1e}"
+    )
+
+###########################################################################################################
+##########################################  Time loop  ####################################################
+###########################################################################################################
 for step in range(config["num_steps"]):
     current_time = step * config["dt"]
     inlet_velocity.update(current_time)
@@ -328,5 +309,15 @@ for step in range(config["num_steps"]):
             data_log["solid_force_norm"] = F_L2
             data_log["volume"] = volume
             data_log["inlet_velocity"] = inlet_velocity.scale
-            print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
+            # data_log["|v_s|_max"] = sv_max
+            # data_log["|f_s|_max"] = sf_max
+            # data_log["|disp|_max"] = disp_max
+            # print(
+            #     f"Step {step+1}/{config['num_steps']}, t={current_time:.3f}s, "
+            #     f"u_L2={u_L2:.3f}, |v_s|={sv_max:.2e}, |f_s|={sf_max:.2e}, "
+            #     f"|disp|={disp_max:.2e}"
+            # )
             swanlab_upload(current_time, data_log)
+
+if MPI.COMM_WORLD.rank == 0:
+    print(f"\nDone. Output: {config['output_path']}")

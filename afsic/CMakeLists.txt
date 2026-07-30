@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15...3.26)
 
-project(afsic LANGUAGES CXX)
+project(afsic LANGUAGES C CXX)
 
 if (NOT SKBUILD)
   message(WARNING "\
@@ -55,6 +55,8 @@ nanobind_add_module(
   src/afsic_ext.cpp
 )
 
+# Ensure MPI is found (needed by ADIOS2 -> DOLFINX)
+find_package(MPI REQUIRED COMPONENTS C CXX)
 
 add_subdirectory(src/mail)
 add_subdirectory(src/coupling)
