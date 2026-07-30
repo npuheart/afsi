@@ -148,19 +148,16 @@ class ChorinSolver:
         self.u_n.x.array[:] = self.u_.x.array[:]
         self.p_n.x.array[:] = self.p_.x.array[:]
 
-    def solve_one_step_df(self, solid_dofs, bs):
+    def solve_one_step_df(self, solid_dofs, bs, force_multiplier=1.0):
         """Direct Forcing: 经典算法——每步重新计算力，不累加。
 
         Algorithm (per time step):
           1. Step 1a: solve with f=0 → ũ (natural tentative velocity)
-          2. Compute f = (U_solid - ũ)/dt at solid DOFs (fresh, no accumulation)
+          2. Compute f = -force_multiplier * ũ/dt at solid DOFs
           3. Step 1b: re-solve Step 1 with f → corrected u*
           4. Steps 2-3: pressure correction + velocity correction → u, p
           5. Velocity correction: u[solid] = 0 (ensures no-slip)
           6. u_n = u (carries solid=0 to next step via convection)
-
-        The force f is computed fresh each step and does NOT carry over.
-        The solid effect propagates through u_n (convection) and p_n (pressure).
 
         Parameters
         ----------
@@ -168,6 +165,8 @@ class ChorinSolver:
             局部 DOF 索引 (block 索引, 不是分量索引)。
         bs : int
             Block size (gdim)。
+        force_multiplier : float
+            力放大系数。>1 增强固体对流体的影响。默认 1.0。
 
         Returns
         -------
@@ -197,7 +196,7 @@ class ChorinSolver:
         for dof in solid_dofs:
             for d in range(bs):
                 idx = dof * bs + d
-                f_arr[idx] = -u_arr[idx] / dt_val
+                f_arr[idx] = -force_multiplier * u_arr[idx] / dt_val
                 force_sum[d] += u_arr[idx]
         self.f.x.scatter_forward()
 
