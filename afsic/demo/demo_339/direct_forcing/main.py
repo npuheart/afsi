@@ -163,8 +163,10 @@ for step in range(config['num_steps']):
     # 曳力/升力 (体积力 x,y 分量分别求和)
     drag_local = sum(u_before[dof * bs + 0] for dof in interface_dofs)
     lift_local = sum(u_before[dof * bs + 1] for dof in interface_dofs)
-    drag = comm.allreduce(drag_local, op=MPI.SUM) / config['dt']
-    lift = comm.allreduce(lift_local, op=MPI.SUM) / config['dt']
+    # 体积力积分: F = Σ f_i * dV, dV = dx*dy
+    dV = (config["Lx"] / config["Nx"]) * (config["Ly"] / config["Ny"])
+    drag = comm.allreduce(drag_local, op=MPI.SUM) * dV / config['dt']
+    lift = comm.allreduce(lift_local, op=MPI.SUM) * dV / config['dt']
     drag_history.append((t, drag))
     lift_history.append((t, lift))
 

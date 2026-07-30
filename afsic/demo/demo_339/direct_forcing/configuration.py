@@ -30,8 +30,10 @@ config = {
     "cylinder_cy": 0.2,       # 圆心 y [cm]
     "cylinder_r": 0.05,       # 半径 [cm]
 
-    # --- 曳力/升力探针 ---
-    "D": 0.1,          # 圆柱直径 [cm]
+    # --- 曳力/升力 (CGS: cm·g·s) ---
+    "D": 0.1,          # 圆柱直径 [cm] — 注意: 此处应为几何直径
+    # Re = rho*Um*D/mu = 1*100*0.1/1 = 10
+    # 如需 Re=100，设置 mu=0.1 或 Um=1000
 }
 
 config["num_steps"] = int(config["T"] / config["dt"])
