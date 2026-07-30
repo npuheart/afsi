@@ -36,11 +36,11 @@ void iterate_grid_3D(Grid &grid, Particle &particle, const Kernel &kernel, const
                 index_type node{kernel.base_node[0] + i, kernel.base_node[1] + j, kernel.base_node[2] + k};
 
                 if (node.i >= grid.grid_size.i || node.j >= grid.grid_size.j || node.k >= grid.grid_size.k) {
-                    printf("node out of range : %ld, %ld, %ld\n", node.i, node.j, node.k);
+                    // printf("node out of range : %ld, %ld, %ld\n", node.i, node.j, node.k);
                     continue;
                 }
                 if (node.i < 0 || node.j < 0 || node.k < 0) {
-                    printf("node out of range : %ld, %ld, %ld\n", node.i, node.j, node.k);
+                    // printf("node out of range : %ld, %ld, %ld\n", node.i, node.j, node.k);
                     continue;
                 }
                 auto wi = kernel.w[i];
@@ -71,9 +71,9 @@ struct IBMesh3D {
         dy = (y1 - y0) / (ny - 1);
         dz = (z1 - z0) / (nz - 1);
 
-        printf("order : %d\n", order);
-        printf("mesh size : %ld, %ld, %ld\n", nx, ny, nz);
-        printf("cell size : %f, %f, %f\n", dx, dy, dz);
+        // printf("order : %d\n", order);
+        // printf("mesh size : %ld, %ld, %ld\n", nx, ny, nz);
+        // printf("cell size : %f, %f, %f\n", dx, dy, dz);
 
         auto part = mesh::create_cell_partitioner(mesh::GhostMode::shared_facet);
         mesh_ptr = std::make_shared<mesh::Mesh<U>>(
@@ -138,7 +138,7 @@ struct IBMesh3D {
     }
 
     std::vector<double> evaluate(double x, double y, double z, const std::vector<double> &function) {
-        printf("evaluate at (%f, %f, %f)\n", x, y, z);
+        // printf("evaluate at (%f, %f, %f)\n", x, y, z);
         std::vector<double3> data_from;
         extract_dofs(data_from, function);
 

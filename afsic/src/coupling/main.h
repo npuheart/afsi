@@ -108,9 +108,9 @@ struct IBMesh {
         dx = (x1 - x0) / (nx - 1);
         dy = (y1 - y0) / (ny - 1);
 
-        printf("order : %d\n", order);
-        printf("mesh size : %ld, %ld\n", nx, ny);
-        printf("cell size : %f, %f\n", dx, dy);
+        // printf("order : %d\n", order);
+        // printf("mesh size : %ld, %ld\n", nx, ny);
+        // printf("cell size : %f, %f\n", dx, dy);
 
         auto part = mesh::create_cell_partitioner(mesh::GhostMode::shared_facet);
         mesh_ptr =

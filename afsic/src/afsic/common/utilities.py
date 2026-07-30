@@ -6,8 +6,22 @@ import os
 import requests
 import dolfinx.log
 
-start_time = time.time()
-dt_minimum = 1e-5
+class _Timer:
+    """进程启动计时器 (仅 rank 0 有效)。"""
+    def __init__(self):
+        self._start = time.time()
+        self._dt_min = 1e-5
+
+    @property
+    def elapsed(self):
+        return time.time() - self._start
+
+    @property
+    def dt_minimum(self):
+        return self._dt_min
+
+
+_timer = _Timer()
 
 
 class TimeManager:
@@ -47,13 +61,13 @@ def swanlab_init(project_name, experiment_name, config, api_key="VBxEp1UBe2606KH
 def swanlab_upload(current_time, data_log_1, **params):
     data_log = {}
     data_log["time"] = current_time
-    data_log["timecost"] = time.time() - start_time
+    data_log["timecost"] = _timer.elapsed
     params = params or {}
     data_log.update(params)
     data_log.update(data_log_1)
     if (MPI.COMM_WORLD.rank == 0):
         swanlab.log(
-            data_log, step = int(1+current_time/dt_minimum)
+            data_log, step = int(1+current_time/_timer.dt_minimum)
         )
 
 
