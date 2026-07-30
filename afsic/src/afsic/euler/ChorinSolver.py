@@ -149,13 +149,18 @@ class ChorinSolver:
         self.p_n.x.array[:] = self.p_.x.array[:]
 
     def solve_one_step_df(self, solid_dofs, bs):
-        """Direct Forcing: 同一步内求解 + 修正。
+        """Direct Forcing: 经典算法——每步重新计算力，不累加。
 
-        Algorithm:
-          1. Step 1 with f=0 → get ũ (tentative velocity without solid force)
-          2. f = (U_solid - ũ)/dt at solid DOFs
-          3. Re-solve Step 1 with f → get corrected u*
-          4. Steps 2-3 → get u^{n+1}, p^{n+1}
+        Algorithm (per time step):
+          1. Step 1a: solve with f=0 → ũ (natural tentative velocity)
+          2. Compute f = (U_solid - ũ)/dt at solid DOFs (fresh, no accumulation)
+          3. Step 1b: re-solve Step 1 with f → corrected u*
+          4. Steps 2-3: pressure correction + velocity correction → u, p
+          5. Velocity correction: u[solid] = 0 (ensures no-slip)
+          6. u_n = u (carries solid=0 to next step via convection)
+
+        The force f is computed fresh each step and does NOT carry over.
+        The solid effect propagates through u_n (convection) and p_n (pressure).
 
         Parameters
         ----------
@@ -163,9 +168,17 @@ class ChorinSolver:
             局部 DOF 索引 (block 索引, 不是分量索引)。
         bs : int
             Block size (gdim)。
+
+        Returns
+        -------
+        list [drag_raw, lift_raw]
+            Σ ũ at solid DOFs (before division by dt/dV).
         """
-        # ---- Step 1a: solve WITH accumulated body force → get ũ ----
-        # NOTE: do NOT zero self.f here — accumulated force must persist!
+        dt_val = self._dt
+
+        # ---- Step 1a: solve WITHOUT body force → get natural ũ ----
+        self.f.x.array[:] = 0.0
+        self.f.x.scatter_forward()
         with self.b1.localForm() as loc:
             loc.set(0)
         assemble_vector(self.b1, self.L1)
@@ -176,24 +189,22 @@ class ChorinSolver:
         self.solver1.solve(self.b1, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()
 
-        # ---- Direct Forcing: compute Δf = -α·ũ/dt, accumulate f += Δf ----
+        # ---- Compute fresh force: f = -ũ/dt (classic DF, no relaxation) ----
         u_arr = self.u_.x.array
+        self.f.x.array[:] = 0.0
         f_arr = self.f.x.array
-        dt_val = self._dt
-        alpha = 0.5  # relaxation factor for stability
         force_sum = [0.0, 0.0]
         for dof in solid_dofs:
             for d in range(bs):
                 idx = dof * bs + d
-                df = -alpha * u_arr[idx] / dt_val
-                f_arr[idx] += df
+                f_arr[idx] = -u_arr[idx] / dt_val
                 force_sum[d] += u_arr[idx]
         self.f.x.scatter_forward()
 
-        # ---- Step 1b: re-solve WITH force → get corrected u* ----
+        # ---- Step 1b: re-solve WITH force → corrected u* ----
         with self.b1.localForm() as loc:
             loc.set(0)
-        assemble_vector(self.b1, self.L1)  # L1 includes f now
+        assemble_vector(self.b1, self.L1)
         apply_lifting(self.b1, [self.a1], [self.bcu])
         self.b1.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
                             mode=PETSc.ScatterMode.REVERSE)
