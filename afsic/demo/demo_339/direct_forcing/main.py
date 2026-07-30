@@ -142,31 +142,13 @@ for step in range(config['num_steps']):
     inlet_velocity.update(t)
     u_inlet_func.interpolate(inlet_velocity)
 
-    # 求解 (f=0 → 纯流体，不含固体力)
-    ns_solver.f.x.array[:] = 0.0
-    ns_solver.solve_one_step()
+    # Direct Forcing: 同一步内求解 + 修正 (solve_one_step_df 内部完成)
+    force_sum = ns_solver.solve_one_step_df(interface_dofs, bs)
+    drag_raw, lift_raw = force_sum
 
-    # ---- Direct Forcing: 界面 DOFs 强制 u=0 ----
-    u_arr = ns_solver.u_.x.array
-    u_before = u_arr.copy()
-    for dof in interface_dofs:
-        for d in range(bs):
-            u_arr[dof * bs + d] = 0.0
-
-    # 等效体积力: f = -u_before/dt (用于下一步的动量方程)
-    ns_solver.f.x.array[:] = 0.0
-    f_arr = ns_solver.f.x.array
-    for dof in interface_dofs:
-        for d in range(bs):
-            f_arr[dof * bs + d] = -u_before[dof * bs + d] / config['dt']
-
-    # 曳力/升力 (体积力 x,y 分量分别求和)
-    drag_local = sum(u_before[dof * bs + 0] for dof in interface_dofs)
-    lift_local = sum(u_before[dof * bs + 1] for dof in interface_dofs)
-    # 体积力积分: F = Σ f_i * dV, dV = dx*dy
     dV = (config["Lx"] / config["Nx"]) * (config["Ly"] / config["Ny"])
-    drag = comm.allreduce(drag_local, op=MPI.SUM) * dV / config['dt']
-    lift = comm.allreduce(lift_local, op=MPI.SUM) * dV / config['dt']
+    drag = comm.allreduce(drag_raw, op=MPI.SUM) * dV / config['dt']
+    lift = comm.allreduce(lift_raw, op=MPI.SUM) * dV / config['dt']
     drag_history.append((t, drag))
     lift_history.append((t, lift))
 
