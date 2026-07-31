@@ -206,7 +206,8 @@ L_hat = form(
     -inner(P_s, grad(dVs)) * dx
     - beta * inner(solid_constraint, dVs) * dx
 )
-b1 = create_vector(L_hat)
+# dolfinx 0.10.0: create_vector 需要函数空间而非 Form
+b1 = create_vector(Vs)
 
 ###########################################################################################################
 ##########################################  Interaction  ##################################################

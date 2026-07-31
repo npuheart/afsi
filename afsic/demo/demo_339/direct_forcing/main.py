@@ -182,13 +182,15 @@ for step in range(config['num_steps']):
     ib_interp.fluid_to_solid(ns_solver.u_._cpp_object, solid_vel._cpp_object)
     solid_vel.x.scatter_forward()
 
-    # 2. Force at markers: F_k = -U_k / dt
+    # 2. Force at markers: F_k = -rho * U_k / dt   (SI: 体积力 [N/m^3])
+    #    原 CGS 版本 ρ=1，故无 ρ 因子；SI 下必须乘 ρ 以保证单位一致。
+    rho = config['rho']
     sv_arr = solid_vel.x.array
     sf_arr = solid_force.x.array
     drag_raw, lift_raw = 0.0, 0.0
     for k in range(len(sv_arr) // bs):
         for d in range(bs):
-            sf_arr[k * bs + d] = -sv_arr[k * bs + d] / config['dt']
+            sf_arr[k * bs + d] = -rho * sv_arr[k * bs + d] / config['dt']
             if d == 0:
                 drag_raw += sv_arr[k * bs + d]
             else:
@@ -216,9 +218,9 @@ for step in range(config['num_steps']):
     ns_solver.f.x.array[:] = ff_arr[:]
     ns_solver.f.x.scatter_forward()
 
-    # Drag/Lift
-    drag = comm.allreduce(drag_raw, op=MPI.SUM) * dV / config['dt']
-    lift = comm.allreduce(lift_raw, op=MPI.SUM) * dV / config['dt']
+    # Drag/Lift  (SI: 曳力/升力 [N] = rho * ΣU_k * dV / dt)
+    drag = comm.allreduce(drag_raw, op=MPI.SUM) * rho * dV / config['dt']
+    lift = comm.allreduce(lift_raw, op=MPI.SUM) * rho * dV / config['dt']
     drag_history.append((t, drag))
     lift_history.append((t, lift))
 

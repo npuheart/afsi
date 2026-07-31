@@ -3,7 +3,7 @@
 from mpi4py import MPI
 import gmsh
 import dolfinx
-from dolfinx.io import XDMFFile, gmshio
+from dolfinx.io import XDMFFile, gmsh as gmshio  # dolfinx 0.10.0: gmshio 更名 gmsh
 
 gmsh.initialize()
 gmsh.model.add("cylinder_solid")

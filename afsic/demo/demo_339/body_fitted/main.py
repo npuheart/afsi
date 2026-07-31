@@ -28,7 +28,8 @@ swanlab_init(config['project_name'], config['experiment_name'], config,
 # ==========================================================================
 # Load body-fitted mesh (channel with cylindrical hole) from .msh
 # ==========================================================================
-from dolfinx.io import gmshio
+# dolfinx 0.10.0: gmshio 已更名为 gmsh（见 install.md 兼容性说明）
+from dolfinx.io import gmsh as gmshio
 
 mesh_path = os.path.join(os.path.dirname(__file__), "./channel_hole.msh")
 mesh_data = gmshio.read_from_msh(mesh_path, MPI.COMM_WORLD, gdim=2)
