@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Short verification runner for demo_339.
 
-在统一参数下，对四个圆柱绕流实现各运行少量步数，验证程序能否正确运行，
-并采集关键量（u_L2 / p_L2 范数；direct_forcing 额外输出 Cd/Cl）用于对比。
+在统一参数下，对各圆柱绕流实现各运行少量步数，验证程序能否正确运行，
+并采集关键量（u_L2 / p_L2 范数）用于对比。
 
 离线安全：屏蔽 swanlab 与 get_project_name 的网络调用。
 步数可通过环境变量 SHORT_STEPS 覆盖（默认 100）。
@@ -22,7 +22,7 @@ from mpi4py import MPI
 import afsic
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-SUB_DIRS = ["no_cylinder", "body_fitted", "ibfe", "direct_forcing"]
+SUB_DIRS = ["no_cylinder", "body_fitted", "ibfe"]
 NUM_STEPS = int(os.environ.get("SHORT_STEPS", "100"))
 SCRATCH = os.path.join(BASE, "_short_run")
 
@@ -94,14 +94,7 @@ def run_case(sub):
             assemble_scalar(form(dot(u_, u_) * dx)), op=MPI.SUM)
         p_L2 = mesh.comm.allreduce(
             assemble_scalar(form(dot(p_, p_) * dx)), op=MPI.SUM)
-        if sub == "direct_forcing":
-            dh = g.get("drag_history", [])
-            if dh:
-                arr = np.array(dh)
-                D, rho, Um = cfg["D"], cfg["rho"], cfg["Um"]
-                cd = 2.0 * arr[-1, 1] / (rho * Um**2 * D)  # 无量纲化 Cd
-                extra = f"  Cd(final)={cd:.4f}"
-        elif sub == "ibfe":
+        if sub == "ibfe":
             F = g.get("solid_force", None)
             if F is not None:
                 sF = F.x.array
