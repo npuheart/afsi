@@ -56,9 +56,11 @@ config = {
     "mu_s": 0.05,          # 剪切模量（Lame μ）
     "lambda_s": 0.5,       # 第一 Lame 参数 λ（近不可压缩会体积锁定，可调小）
     "solid_active": True,  # False = 纯方腔无固体（参照，用于对比固体对流体的影响）
-    "clamp_solid": True,   # 质心钳位：防止圆盘被主涡带出域（纯平动修正，不损变形）
+    # 钳位（默认关闭）：质心钳位会把圆盘按在虚拟壁上，流场又往上推 → 卡在角上，
+    # 不是自由体正确行为。默认让圆盘自由公转，触壁时优雅终止（见 main.py）。
+    "clamp_solid": False,
 
-    "out_interval": 40,    # 每 N 步输出一次
+    "out_interval": 1,     # 每 N 步输出一次（1 = 每一时刻都输出；文件较大）
     "write_solid": True,   # 输出固体（参考网格 + 位移场 / 力场）
 }
 
@@ -68,6 +70,9 @@ config["num_steps"] = int(config["T"] / config["dt"])
 if os.environ.get("STEPS"):
     config["num_steps"] = int(os.environ["STEPS"])
     config["T"] = config["num_steps"] * config["dt"]
+if os.environ.get("DT"):
+    config["dt"] = float(os.environ["DT"])
+    config["num_steps"] = int(config["T"] / config["dt"])
 if os.environ.get("NX"):
     config["Nx"] = int(os.environ["NX"])
 if os.environ.get("NY"):
@@ -81,7 +86,7 @@ if os.environ.get("LAMBDA_S"):
 if os.environ.get("SOLID_ACTIVE"):
     config["solid_active"] = (os.environ["SOLID_ACTIVE"].lower() in ("1", "true", "yes", "on"))
 
-# 输出到本 demo 目录的 output/ 下
-config["output_path"] = os.path.join(_demo_dir, "output") + os.sep
+# 输出到本 demo 目录的 output/ 下（可用 OUTPUT_PATH 覆盖，便于并行对比）
+config["output_path"] = os.environ.get("OUTPUT_PATH", os.path.join(_demo_dir, "output") + os.sep)
 os.makedirs(config["output_path"], exist_ok=True)
 config["experiment_name"] = "lid-driven-cavity-elastic-disk"

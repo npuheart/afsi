@@ -393,6 +393,24 @@ for step in range(num_steps):
                     print(f"  [clamp] centroid -> ({_cp[0]:.3f},{_cp[1]:.3f}) "
                           f"(开始钳位)", flush=True)
                 _last_clamp_pos = _cp
+        #    壁面越界检查（自由体公转到壁面时优雅终止，避免域外标记插值 NaN）
+        if not config.get("clamp_solid", True):
+            sc_min_x = float(np.min(solid_coords.x.array[0::2]))
+            sc_max_x = float(np.max(solid_coords.x.array[0::2]))
+            sc_min_y = float(np.min(solid_coords.x.array[1::2]))
+            sc_max_y = float(np.max(solid_coords.x.array[1::2]))
+            if (sc_min_x < -0.5 * h or sc_max_x > Lx + 0.5 * h
+                    or sc_min_y < -0.5 * h or sc_max_y > Ly + 0.5 * h):
+                if rank == 0:
+                    print(f"\n[注意] 圆盘公转触壁/出域 (t={tt:.3f}s, "
+                          f"x∈[{sc_min_x:.3f},{sc_max_x:.3f}], "
+                          f"y∈[{sc_min_y:.3f},{sc_max_y:.3f}])", flush=True)
+                    print("       自由体沿闭合腔涡流线公转，轨道贴着壁面，必然触壁"
+                          "（物理行为）。", flush=True)
+                    print("       若要 5s 内不触壁：加重固体(RHO_S>1，公转慢/不上顶)"
+                          " 或减弱流动(U_lid 调小) 或减小圆盘。", flush=True)
+                failed, fail_t = True, tt
+                break
         ib_interp.evaluate_current_points(solid_coords._cpp_object)
     else:
         # 纯方腔（无固体）参照：无直接力，流体 = 预测步结果
