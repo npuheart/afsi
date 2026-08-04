@@ -10,9 +10,15 @@
 - **动量方程（总拉格朗日，带惯性）**：
   $$\rho_s\frac{\partial^2\mathbf X_s}{\partial t^2}=
   \nabla_X\cdot\mathbf P(\mathbf F)+\mathbf f^{\text{fluid}\to\text{solid}}$$
-- **本构（可压缩 neo-Hookean）**：
+- **本构（可压缩 neo-Hookean + Kelvin-Voigt 粘性）**：
   $$\mathbf P(\mathbf F)=\mu_s(\mathbf F-\mathbf F^{-T})+
   \lambda_s\,\ln(\det\mathbf F)\,\mathbf F^{-T},\qquad \mathbf F=\nabla\mathbf X_s$$
+  $$\sigma^{\text{visc}}=2\,\mu_s^{\text{visc}}\,\operatorname{sym}(\nabla V_s),
+  \qquad \mu_s^{\text{visc}}=\mu_f=0.01 \text{（默认，与 IBFE readme 一致）}$$
+  注：标准 IBFE 常把固体当粘弹性体（弹性 + 与流体相同的粘性）；本仓库 demo_402
+  的 readme 也写明 "the solid is added with the same viscosity with fluid"（但其代码
+  实际只实现了弹性 + 惩罚，未真正加粘性）。本版显式实现了该粘性项，可用
+  `MU_S_VISC` 覆盖（设 0 关闭 = 纯弹性，运动更快）。
 - **无滑移（direct-forcing 约束）**：
   $$\mathbf u(\mathbf X_s)=\frac{\partial\mathbf X_s}{\partial t},\qquad
   \mathbf F_{IBM,l}=\frac{\mathbf V_{s,l}-\mathbf U_l}{\Delta t}$$
@@ -27,8 +33,10 @@
 2) 插值 u* 到固体节点                              → U_l
 3) 弹性内力 F_int = ∫P(F):∇δv dX
 4) 固体推进（added-mass 隐式，稳定）:
-     (M_HRZ + ρ_f·diag(V_node)) V_s^{n+1}
-         = M_HRZ V_s^n + ρ_f·diag(V_node)·U_l − dt·F_int
+     无粘性: (M_HRZ + ρ_f·diag(V_node)) V_s^{n+1}
+                = M_HRZ V_s^n + ρ_f·diag(V_node)·U_l − dt·F_int
+     有粘性: (diag(M_HRZ+ρ_f V_node) + dt·K_visc) V_s^{n+1} = 同上右端
+         （K_visc = ∫2μ_s^visc sym(∇δu):sym(∇δv)；粘性必须隐式，显式会失稳）
      X_s^{n+1} = X_s^n + dt·V_s^{n+1}
 5) 直接力（目标 = 固体速度）:
      F_IBM = (V_s^{n+1} − U_l)/dt · ΔV_l → 扩散 → f_IBM
@@ -82,6 +90,7 @@ ParaView：`solid.xdmf` 用 **Warp by vector**（位移场 `u`）查看圆盘变
 | 弹性圆盘 | $(0.6,0.5),\ r=0.2$ | P2，~433 节点（Delaunay 三角化） |
 | $\rho_s$ | 1.0 | 固体密度（= ρ_f，added-mass 稳定） |
 | $\mu_s$ / $\lambda_s$ | 0.05 / 0.5 | 可压缩 neo-Hookean |
+| $\mu_s^{\text{visc}}$ | 0.01 | Kelvin-Voigt 固体粘性（= 流体 μ；`MU_S_VISC` 覆盖，0=关） |
 
 ## 验证结果（128×128，默认参数）
 
@@ -113,6 +122,35 @@ SOLID_ACTIVE=0 python main.py  # 纯方腔参照
 
 默认取 $\rho_s=1$（轻软体、back-effect 小但演示"随流变形"）；想看强双向耦合用
 `RHO_S` 调大。
+
+## 为什么 DF 圆盘比 IBFE 运动更快（固体粘性）
+
+IBFE（以及本仓库 demo_402 的 readme 表述）把固体当作**粘弹性**体：弹性 + 与流体
+相同的粘性（$\mu_s^{\text{visc}}=\mu_f=0.01$）。direct-forcing 版默认没有固体粘性
+（纯弹性）。本版已实现 Kelvin-Voigt 粘性（`mu_s_visc`，默认 0.01=流体 μ，可关）。
+
+**A/B 实测（$\rho_s=1/\mu_s=0.2$，128×128，5s）：**
+
+| 量 | 无粘性 (visc=0) | 粘性 0.01 | 说明 |
+|----|-----------------|-----------|------|
+| 顶边触壁 (y>0.99) | t=3.14s | t=3.16s | 几乎相同 |
+| 质心 @4.5s | (0.433,0.873) | (0.425,0.872) | 差异 <0.01 |
+| 结局 | **t=4.89s 网格翻转 NaN** | **跑满 5s, det_min=0.70** | 关键差异 |
+
+**结论（修正直觉）：**
+- **$\mu_s^{\text{visc}}=0.01$ 对圆盘"整体运动"几乎无影响**（轨迹重合）。原因：固体
+  粘性阻尼的是**内部变形速率**（偏量应变率 $\operatorname{sym}(\nabla V_s)$），而圆盘
+  主要被主涡**近似刚体地平动/公转**，几乎不产生应变率 → 粘性应力≈0 → 不减速。
+  所以"粘性让固体跟随更慢"在 0.01 这个量级**不成立**。
+- **它真正的作用是稳定性**：抑制变形场高频分量 → 无粘性在 t=4.89s 单元翻转出 NaN
+  （$\det F\to0$），加粘性后**撑过 4.89s 跑满 5s**（det_min 仍 0.70，未翻转）。
+- 因此 **IB 与 DF 触壁时间差（IB 顶部 0.98@5s vs DF >1.0@4.8s）不是由 0.01 固体粘性
+  造成的**，更可能来自分辨率（IB 用 64×64 vs DF 128×128）与固体推进方式
+  （IB 是运动学平流 vs DF 动量方程）等差异。
+
+> 稳定性注意：Kelvin-Voigt 粘性项**必须隐式处理**（并入固体更新 LHS 解小系统）。
+> 显式（forward Euler）处理会在几步内放大高频速度分量导致网格翻转（实测
+> $t\approx0.02$s 即翻）。
 
 ## 已知局限
 

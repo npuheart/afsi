@@ -55,6 +55,11 @@ config = {
     "rho_s": 1.0,          # 固体密度（≥ ρ_f 更稳且更能"挡流"；added-mass 项 = ρ_f）。
     "mu_s": 0.05,          # 剪切模量（Lame μ）
     "lambda_s": 0.5,       # 第一 Lame 参数 λ（近不可压缩会体积锁定，可调小）
+    # 固体粘性（Kelvin-Voigt 粘弹性，默认 = 流体 μ，与 IBFE readme 一致）：
+    # 无固体粘性 → 固体对流动无阻尼、跟随更积极、运动更快/更早触壁。
+    # 加上后阻尼固体变形与跟随，更接近 IBFE 行为。设 0 可关闭。
+    "mu_s_visc": 0.01,
+
     "solid_active": True,  # False = 纯方腔无固体（参照，用于对比固体对流体的影响）
     # 钳位（默认关闭）：质心钳位会把圆盘按在虚拟壁上，流场又往上推 → 卡在角上，
     # 不是自由体正确行为。默认让圆盘自由公转，触壁时优雅终止（见 main.py）。
@@ -81,12 +86,17 @@ if os.environ.get("RHO_S"):
     config["rho_s"] = float(os.environ["RHO_S"])
 if os.environ.get("MU_S"):
     config["mu_s"] = float(os.environ["MU_S"])
+if os.environ.get("MU_S_VISC"):
+    config["mu_s_visc"] = float(os.environ["MU_S_VISC"])
 if os.environ.get("LAMBDA_S"):
     config["lambda_s"] = float(os.environ["LAMBDA_S"])
 if os.environ.get("SOLID_ACTIVE"):
     config["solid_active"] = (os.environ["SOLID_ACTIVE"].lower() in ("1", "true", "yes", "on"))
 
 # 输出到本 demo 目录的 output/ 下（可用 OUTPUT_PATH 覆盖，便于并行对比）
-config["output_path"] = os.environ.get("OUTPUT_PATH", os.path.join(_demo_dir, "output") + os.sep)
+_op = os.environ.get("OUTPUT_PATH")
+if _op is None:
+    _op = os.path.join(_demo_dir, "output")
+config["output_path"] = _op.rstrip("/") + os.sep   # 保证尾部斜杠（否则文件名被拼接错）
 os.makedirs(config["output_path"], exist_ok=True)
 config["experiment_name"] = "lid-driven-cavity-elastic-disk"

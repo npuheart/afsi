@@ -47,7 +47,7 @@ import ufl
 from basix.ufl import element
 from scipy.spatial import Delaunay
 from ufl import (TestFunction, TrialFunction, dot, dx, inner, grad, div,
-                 as_vector, SpatialCoordinate, inv, ln, det)
+                 as_vector, SpatialCoordinate, inv, ln, det, sym)
 
 from afsic import IBMesh, IBInterpolation
 from afsic.common import tag_boundaries, MARKER_LEFT, MARKER_RIGHT, \
@@ -70,6 +70,7 @@ T, dt = config["T"], config["dt"]
 cx0, cy0, r = config["cx"], config["cy"], config["r"]
 D = config["D"]
 mu_s, lambda_s = config["mu_s"], config["lambda_s"]
+mu_s_visc = config.get("mu_s_visc", 0.0)   # 固体粘性（Kelvin-Voigt），默认=流体 μ
 nu = mu / rho
 h = np.sqrt((Lx / Nx) * (Ly / Ny))
 
@@ -202,12 +203,49 @@ ibmesh.build_map(coords_bg._cpp_object)
 ib_interp.evaluate_current_points(solid_coords._cpp_object)
 
 # --- 弹性内力弱形式（总拉格朗日，参考构型积分）F_int = ∫P(F):∇δv dX ---
+# 粘弹性（Kelvin-Voigt）：再加内部粘性应力 σ_visc = 2·μ_s_visc·sym(∇V_s)，
+# 用固体当前速度（显式，V_s^n）→ 阻尼固体变形与对流动的跟随，更接近 IBFE。
 dVs = TestFunction(Vs)
 FF = grad(solid_coords)
 P = mu_s * (FF - inv(FF).T) + lambda_s * ln(det(FF)) * inv(FF).T
 L_int = form(inner(P, grad(dVs)) * dx)
 b_int = create_vector(Vs)
 form_volume = form(det(FF) * dx)
+
+# --- Kelvin-Voigt 固体粘性（隐式，稳定） ---
+# 显式处理粘性应力（forward Euler）会失稳：粘性项=速度的刚度，显式会放大高频分量
+# → 网格翻转。改为隐式：把粘性刚度并入 LHS，每步解一个很小的 SPD 系统
+# （固体 ~1700 dof）：
+#   A_solid = diag(M_HRZ + ρ_f·V_node) + dt·K_visc
+#   右端     = M_HRZ·V_s^n + ρ_f·V_node·U_l − dt·F_el
+# 注意：mu_s_visc=0 时不能构造形式（UFL 会把乘 0 化简为零表达式、丢失网格域）。
+_solid_ksp = None
+b_solid = None
+Vs_new_vec = None
+if mu_s_visc > 0.0:
+    a_visc = form(2.0 * mu_s_visc
+                  * inner(sym(grad(u_trial_s)), sym(grad(dVs))) * dx)
+    A_visc = assemble_matrix(a_visc); A_visc.assemble()
+    A_solid = A_visc.copy(); A_solid.scale(dt)
+    # 加对角质量 M_HRZ + ρ_f·V_node（用对角矩阵 + axpy 避免 setValues 形状问题）
+    A_diag = A_solid.duplicate()
+    A_diag.zeroEntries()
+    _mass_diag = PETSc.Vec().createWithArray(
+        np.ascontiguousarray(M_hrz + added_mass_vec, dtype=np.float64))
+    A_diag.setDiagonal(_mass_diag)
+    A_diag.assemble()
+    A_solid.axpy(1.0, A_diag)
+    A_solid.assemble()
+    _solid_ksp = PETSc.KSP().create(solid_mesh.comm)
+    _solid_ksp.setOperators(A_solid)
+    _solid_ksp.setType(PETSc.KSP.Type.CG)
+    _solid_ksp.getPC().setType(PETSc.PC.Type.JACOBI)
+    _solid_ksp.setTolerances(rtol=1e-10, atol=1e-12)
+    b_solid = create_vector(Vs)
+    Vs_new_vec = Function(Vs)
+    if rank == 0:
+        print(f"  Kelvin-Voigt solid viscosity: mu_s_visc={mu_s_visc:.3g} "
+              f"(implicit, KSP=CG)", flush=True)
 
 # --- 诊断：每个单元 det(F) 最小值（翻转即 det F ≤ 0） ---
 _solid_tdim = solid_mesh.topology.dim
@@ -342,7 +380,7 @@ for step in range(num_steps):
         ib_interp.fluid_to_solid(u_star._cpp_object, fluid_at_solid._cpp_object)
         fluid_at_solid.x.scatter_forward()
         if _chk("U_l", fluid_at_solid): failed, fail_t = True, tt; break
-        #    b) 弹性内力 F_int = ∫P(F):∇δv dX（当前变形）
+        #    b) 弹性内力 F_int = ∫P(F):∇δv dX（当前变形，显式）
         with b_int.localForm() as loc:
             loc.set(0)
         assemble_vector(b_int, L_int)
@@ -350,11 +388,22 @@ for step in range(num_steps):
                           mode=PETSc.ScatterMode.REVERSE)
         F_int = b_int.array.copy()
         #    c) 固体推进（added-mass 隐式稳定）:
-        #       (M_HRZ + ρ_f·V_node) V_s^{n+1} = M_HRZ V_s^n + ρ_f·V_node·U_l - dt·F_int
-        den = M_hrz + added_mass_vec
-        Vs_new = (M_hrz * solid_velocity.x.array
-                  + added_mass_vec * fluid_at_solid.x.array
-                  - dt * F_int) / den
+        #       无粘性: (M_HRZ+ρ_f·V) V_s^{n+1} = M_HRZ V_s^n + ρ_f·V·U_l − dt·F_el
+        #       有粘性: (diag + dt·K_visc) V_s^{n+1} = 同上右端（Kelvin-Voigt 隐式）
+        if mu_s_visc > 0.0:
+            b_solid.array[:] = (M_hrz * solid_velocity.x.array
+                                + added_mass_vec * fluid_at_solid.x.array
+                                - dt * F_int)
+            b_solid.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
+                                mode=PETSc.ScatterMode.REVERSE)
+            _solid_ksp.solve(b_solid, Vs_new_vec.x.petsc_vec)
+            Vs_new_vec.x.scatter_forward()
+            Vs_new = Vs_new_vec.x.array
+        else:
+            den = M_hrz + added_mass_vec
+            Vs_new = (M_hrz * solid_velocity.x.array
+                      + added_mass_vec * fluid_at_solid.x.array
+                      - dt * F_int) / den
         #    d) 直接力: F_IBM = (V_s^{n+1} - U_l)/dt · ΔV_l → 扩散回流体
         solid_force.x.array[:] = (Vs_new - fluid_at_solid.x.array) / dt * vol_hrz
         solid_force.x.scatter_forward()
