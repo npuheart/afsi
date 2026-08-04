@@ -73,6 +73,10 @@ if os.environ.get("NY"):
     config["Ny"] = int(os.environ["NY"])
 if os.environ.get("RHO_S"):
     config["rho_s"] = float(os.environ["RHO_S"])
+if os.environ.get("MU_S"):
+    config["mu_s"] = float(os.environ["MU_S"])
+if os.environ.get("LAMBDA_S"):
+    config["lambda_s"] = float(os.environ["LAMBDA_S"])
 if os.environ.get("SOLID_ACTIVE"):
     config["solid_active"] = (os.environ["SOLID_ACTIVE"].lower() in ("1", "true", "yes", "on"))
 
