@@ -56,6 +56,7 @@ config = {
     "mu_s": 0.05,          # 剪切模量（Lame μ）
     "lambda_s": 0.5,       # 第一 Lame 参数 λ（近不可压缩会体积锁定，可调小）
     "solid_active": True,  # False = 纯方腔无固体（参照，用于对比固体对流体的影响）
+    "clamp_solid": True,   # 质心钳位：防止圆盘被主涡带出域（纯平动修正，不损变形）
 
     "out_interval": 40,    # 每 N 步输出一次
     "write_solid": True,   # 输出固体（参考网格 + 位移场 / 力场）

@@ -306,6 +306,7 @@ def _chk(tag, f):
 
 failed = False
 fail_t = None
+_last_clamp_pos = None   # 钳位日志节流：位置变化超过阈值才打印
 
 # ---------------------------------------------------------------------------
 # 时间循环（分区显式：流体 → 固体 → 力交换 → 投影）
@@ -370,6 +371,28 @@ for step in range(num_steps):
         solid_velocity.x.scatter_forward()
         solid_coords.x.array[:] += dt * Vs_new
         solid_coords.x.scatter_forward()
+        #    质心钳位（纯平动修正，不影响变形/应变）：防止圆盘被主涡带出域，
+        #    顶部标记伸出 y>1 后插值得到垃圾速度 → 单元翻转（t≈4.9s 实测）。
+        if config.get("clamp_solid", True):
+            mgn = r + 2.0 * h
+            cx_now = float(np.mean(solid_coords.x.array[0::2]))
+            cy_now = float(np.mean(solid_coords.x.array[1::2]))
+            dx_cl = min(max(cx_now, mgn), Lx - mgn) - cx_now
+            dy_cl = min(max(cy_now, mgn), Ly - mgn) - cy_now
+            if abs(dx_cl) > 1e-9 or abs(dy_cl) > 1e-9:
+                solid_coords.x.array[0::2] += dx_cl
+                solid_coords.x.array[1::2] += dy_cl
+                solid_coords.x.scatter_forward()
+                _cp = (cx_now + dx_cl, cy_now + dy_cl)
+                # 节流：位置变化 > 0.02 才打印，避免每步刷屏
+                if (rank == 0 and _last_clamp_pos is not None
+                        and abs(_cp[0] - _last_clamp_pos[0]) > 0.02):
+                    print(f"  [clamp] centroid -> ({_cp[0]:.3f},{_cp[1]:.3f})",
+                          flush=True)
+                if rank == 0 and _last_clamp_pos is None:
+                    print(f"  [clamp] centroid -> ({_cp[0]:.3f},{_cp[1]:.3f}) "
+                          f"(开始钳位)", flush=True)
+                _last_clamp_pos = _cp
         ib_interp.evaluate_current_points(solid_coords._cpp_object)
     else:
         # 纯方腔（无固体）参照：无直接力，流体 = 预测步结果
@@ -418,9 +441,23 @@ for step in range(num_steps):
     volume = comm.allreduce(assemble_scalar(form_volume), op=MPI.SUM)
     disp = solid_coords.x.array - np.ravel(ref_coords[:, :2])
     disp_max = float(np.max(np.linalg.norm(disp.reshape(-1, 2), axis=1)))
-    det_min = float(np.min(det_expr.eval(solid_mesh,
-                                         np.arange(len(_solid_mid))))) \
-        if rank == 0 else 0.0
+    # 圆盘质心（诊断：看是否漂到顶盖/壁面等强剪切区）
+    cx_s = float(np.mean(solid_coords.x.array[0::2]))
+    cy_s = float(np.mean(solid_coords.x.array[1::2]))
+    # det(F) 最小值 + 所在单元质心（诊断翻转区域；严重变形时 eval 可能越界，
+    # 用 try 保护，避免打断优雅终止）
+    det_min = 1.0
+    if rank == 0:
+        try:
+            det_vals = det_expr.eval(solid_mesh, np.arange(len(_solid_mid)))
+            det_min = float(np.min(det_vals))
+            if det_min < 0.5:
+                c0 = int(np.argmin(det_vals))
+                print(f"  [warn] det_min={det_min:.3f} @cell {c0}, "
+                      f"centroid=({_solid_mid[c0][0]:.3f},"
+                      f"{_solid_mid[c0][1]:.3f})", flush=True)
+        except Exception as _e:  # noqa: BLE001 诊断失败不中断主循环
+            print(f"  [warn] det_eval failed: {_e}", flush=True)
     det_min = comm.allreduce(det_min, op=MPI.MIN)
 
     if step % out_interval == 0 or step == num_steps - 1:
@@ -444,7 +481,7 @@ for step in range(num_steps):
                   f"u_L2={u_L2:.4f}, p_L2={p_L2:.1f}, "
                   f"Fx={F_x:.4f}, Fy={F_y:+.4f}, "
                   f"|disp|max={disp_max:.5f}, det_min={det_min:.4f}, "
-                  f"vol={volume:.4f}", flush=True)
+                  f"vol={volume:.4f}, C=({cx_s:.3f},{cy_s:.3f})", flush=True)
 
 file_vel.close(); file_pre.close()
 if file_solid is not None:
