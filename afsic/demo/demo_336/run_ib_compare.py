@@ -38,6 +38,8 @@ with open(os.path.join(base, "fsi_paralell.py"), "r", encoding="utf-8") as f:
 # 注入配置覆盖（在源码的 config 字典里替换值）
 src = src.replace('"T": 10.0', f'"T": {T:.1f}')
 src = src.replace('"mu_s": 0.1', '"mu_s": 0.2')      # 用户指定 mu_s=0.2
+# dolfinx 0.10 兼容：create_vector(form) 已废弃，需函数空间（仓库已知坑）
+src = src.replace("b1 = create_vector(L_hat)", "b1 = create_vector(Vs)")
 
 ns = {"__name__": "__main__"}
 exec(compile(src, "fsi_paralell.py", "exec"), ns)
