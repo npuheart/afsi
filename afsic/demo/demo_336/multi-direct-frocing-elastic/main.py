@@ -335,40 +335,49 @@ for step in range(num_steps):
     if _chk("u_star", u_star): failed, fail_t = True, tt; break
 
     # ---- 2) 固体推进（带惯性，added-mass 隐式）+ 直接力约束（每步一次） ----
-    #    a) 流体速度插值到固体节点 → U_l
-    ib_interp.fluid_to_solid(u_star._cpp_object, fluid_at_solid._cpp_object)
-    fluid_at_solid.x.scatter_forward()
-    if _chk("U_l", fluid_at_solid): failed, fail_t = True, tt; break
-    #    b) 弹性内力 F_int = ∫P(F):∇δv dX（当前变形）
-    with b_int.localForm() as loc:
-        loc.set(0)
-    assemble_vector(b_int, L_int)
-    b_int.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
-                      mode=PETSc.ScatterMode.REVERSE)
-    F_int = b_int.array.copy()
-    #    c) 固体推进（added-mass 隐式稳定）:
-    #       (M_HRZ + ρ_f·V_node) V_s^{n+1} = M_HRZ V_s^n + ρ_f·V_node·U_l - dt·F_int
-    den = M_hrz + added_mass_vec
-    Vs_new = (M_hrz * solid_velocity.x.array
-              + added_mass_vec * fluid_at_solid.x.array
-              - dt * F_int) / den
-    #    d) 直接力: F_IBM = (V_s^{n+1} - U_l)/dt · ΔV_l → 扩散回流体
-    solid_force.x.array[:] = (Vs_new - fluid_at_solid.x.array) / dt * vol_hrz
-    solid_force.x.scatter_forward()
-    if _chk("solid_force", solid_force): failed, fail_t = True, tt; break
-    ib_interp.solid_to_fluid(f_ibm._cpp_object, solid_force._cpp_object)
-    f_ibm.x.scatter_forward()
-    if _chk("f_ibm", f_ibm): failed, fail_t = True, tt; break
-    #    e) 流体获得直接力冲量: U = U* + dt·f_IBM
-    u.x.array[:] = u_star.x.array + dt * f_ibm.x.array
-    u.x.scatter_forward()
-    if _chk("u_mid", u): failed, fail_t = True, tt; break
-    #    f) 更新固体状态并重设标记
-    solid_velocity.x.array[:] = Vs_new
-    solid_velocity.x.scatter_forward()
-    solid_coords.x.array[:] += dt * Vs_new
-    solid_coords.x.scatter_forward()
-    ib_interp.evaluate_current_points(solid_coords._cpp_object)
+    #      solid_active=False 时跳过 = 纯方腔（无固体）参照
+    if config["solid_active"]:
+        #    a) 流体速度插值到固体节点 → U_l
+        ib_interp.fluid_to_solid(u_star._cpp_object, fluid_at_solid._cpp_object)
+        fluid_at_solid.x.scatter_forward()
+        if _chk("U_l", fluid_at_solid): failed, fail_t = True, tt; break
+        #    b) 弹性内力 F_int = ∫P(F):∇δv dX（当前变形）
+        with b_int.localForm() as loc:
+            loc.set(0)
+        assemble_vector(b_int, L_int)
+        b_int.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
+                          mode=PETSc.ScatterMode.REVERSE)
+        F_int = b_int.array.copy()
+        #    c) 固体推进（added-mass 隐式稳定）:
+        #       (M_HRZ + ρ_f·V_node) V_s^{n+1} = M_HRZ V_s^n + ρ_f·V_node·U_l - dt·F_int
+        den = M_hrz + added_mass_vec
+        Vs_new = (M_hrz * solid_velocity.x.array
+                  + added_mass_vec * fluid_at_solid.x.array
+                  - dt * F_int) / den
+        #    d) 直接力: F_IBM = (V_s^{n+1} - U_l)/dt · ΔV_l → 扩散回流体
+        solid_force.x.array[:] = (Vs_new - fluid_at_solid.x.array) / dt * vol_hrz
+        solid_force.x.scatter_forward()
+        if _chk("solid_force", solid_force): failed, fail_t = True, tt; break
+        ib_interp.solid_to_fluid(f_ibm._cpp_object, solid_force._cpp_object)
+        f_ibm.x.scatter_forward()
+        if _chk("f_ibm", f_ibm): failed, fail_t = True, tt; break
+        #    e) 流体获得直接力冲量: U = U* + dt·f_IBM
+        u.x.array[:] = u_star.x.array + dt * f_ibm.x.array
+        u.x.scatter_forward()
+        if _chk("u_mid", u): failed, fail_t = True, tt; break
+        #    f) 更新固体状态并重设标记
+        solid_velocity.x.array[:] = Vs_new
+        solid_velocity.x.scatter_forward()
+        solid_coords.x.array[:] += dt * Vs_new
+        solid_coords.x.scatter_forward()
+        ib_interp.evaluate_current_points(solid_coords._cpp_object)
+    else:
+        # 纯方腔（无固体）参照：无直接力，流体 = 预测步结果
+        f_ibm.x.array[:] = 0.0
+        f_ibm.x.scatter_forward()
+        u.x.array[:] = u_star.x.array[:]
+        u.x.scatter_forward()
+        Vs_new = solid_velocity.x.array[:]
 
     # ---- 3) 压力泊松: ∇²p = (2/(3dt))∇·U ----
     L_p = form(-(2.0 / (3.0 * dt)) * inner(div(u), q) * dx)

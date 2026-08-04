@@ -52,9 +52,10 @@ config = {
     # 本版为真正的 direct-forcing：固体带惯性（rho_s），直接力 F_IBM=(V_s-U_l)/dt
     # 强制流体在标记处匹配固体速度，反作用力（added-mass 项）喂回固体动量方程，
     # 固液耦合在固体速度更新中隐式处理 → 稳定、不再像无质量平流版那样短时间翻转。
-    "rho_s": 1.0,          # 固体密度（≥ ρ_f 更稳；added-mass 项 = ρ_f）
+    "rho_s": 1.0,          # 固体密度（≥ ρ_f 更稳且更能"挡流"；added-mass 项 = ρ_f）。
     "mu_s": 0.05,          # 剪切模量（Lame μ）
     "lambda_s": 0.5,       # 第一 Lame 参数 λ（近不可压缩会体积锁定，可调小）
+    "solid_active": True,  # False = 纯方腔无固体（参照，用于对比固体对流体的影响）
 
     "out_interval": 40,    # 每 N 步输出一次
     "write_solid": True,   # 输出固体（参考网格 + 位移场 / 力场）
@@ -70,6 +71,10 @@ if os.environ.get("NX"):
     config["Nx"] = int(os.environ["NX"])
 if os.environ.get("NY"):
     config["Ny"] = int(os.environ["NY"])
+if os.environ.get("RHO_S"):
+    config["rho_s"] = float(os.environ["RHO_S"])
+if os.environ.get("SOLID_ACTIVE"):
+    config["solid_active"] = (os.environ["SOLID_ACTIVE"].lower() in ("1", "true", "yes", "on"))
 
 # 输出到本 demo 目录的 output/ 下
 config["output_path"] = os.path.join(_demo_dir, "output") + os.sep
