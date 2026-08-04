@@ -1,30 +1,30 @@
-"""demo_336 方腔驱动圆盘 — multi-direct-frocing-elastic：弹性固体版求解。
+"""demo_336 方腔驱动圆盘 — multi-direct-frocing-elastic：弹性固体 direct-forcing 版。
 
-在 multi-direct-frocing（mdf 版，afsic/demo/demo_336/multi-direct-frocing）基础上
-**增加固体的推进方程**：圆盘为**弹性固体**（可变形、有本构），而非刚体。
+在 mdf 刚体版基础上增加"固体推进方程"，并采用**真正的 direct-forcing**：
+圆盘为**带惯性的弹性固体**（可压缩 neo-Hookean），流体在标记处被直接力强制匹配
+固体速度（无滑移），反作用力（added-mass 项）喂回固体动量方程。
 
-流体（与 mdf 版相同，AB2 预测 + 压力泊松 + L2 投影）:
+流体（同 mdf 版，AB2 预测 + 压力泊松 + L2 投影）:
   (U* - U^n)/dt + 1.5·(U^n·∇)U^n - 0.5·(U^{n-1}·∇)U^{n-1}
-      = 1.5·ν∇²U* - 0.5·ν∇²U^n + 0.5·∇p^n + f_ibm
+      = 1.5·ν∇²U* - 0.5·ν∇²U^n + 0.5·∇p^n
   ∇²p^{n+1} = (2/(3dt))·∇·U,   U^{n+1} = U - 1.5dt·∇p
 
-固体（弹性，总拉格朗日）:
-  推进方程（运动学平流）:
-    X_s^{n+1} = X_s^n + V_s^n·dt,      V_s^n = 流体速度插值到固体节点
-  本构（可压缩 neo-Hookean 型）:
-    P(F) = μ_s(F - F^{-T}) + λ_s·ln(det F)·F^{-T},   F = ∇X_s
-  节点力（弱形式）:
-    F_solid = -∫ P(F) : ∇δv dx    （对参考构型积分）
+固体（总拉格朗日，带惯性 + neo-Hookean）:
+  动量方程:  ρ_s ∂²X/∂t² = ∇_X·P(F) + f^{fluid→solid}
+  本构:      P(F) = μ_s(F - F^{-T}) + λ_s·ln(det F)·F^{-T},  F = ∇X_s
+  弱形式:    ∫ρ_s a·δv dX + ∫P(F):∇δv dX = ∫f^{fluid→solid}·δv dX
 
-耦合（每步一次，分区显式）:
-  fluid_to_solid(u*, V_s) → 推进固体 → 组装弹性力 →
-  solid_to_fluid(f_ibm, F_solid) → u = u* + dt·f_ibm → 投影
-
-关于"固体与流体是否相对解耦"：是。本方案是**分区显式（staggered）耦合**——
-每步依次求解流体方程、固体方程，只通过界面插值/力扩散交换一次信息，
-不构成把两者联立成一个方程组的 monolithic 求解，故两者"相对解耦"。
-（代价：显式耦合对"重固体"（ρ_s>>ρ_f）存在 added-mass 失稳风险；本 demo
-圆盘质量忽略、密度量级与流体相当，稳定。）
+每步（分区显式，但固液耦合隐式——added-mass 稳定）:
+  1) 流体预测 → u*
+  2) 插值 u* 到固体节点 → U_l
+  3) 弹性内力 F_int = ∫P:∇δv dX
+  4) 固体推进（added-mass 隐式）:
+       (M_s + ρ_f·diag(V_node)) V_s^{n+1} = M_s V_s^n + ρ_f·diag(V_node)·U_l - dt·F_int
+       X_s^{n+1} = X_s^n + dt·V_s^{n+1}
+  5) 直接力约束（目标 = 固体速度）:
+       F_IBM = (V_s^{n+1} - U_l)/dt · ΔV_l,  扩散 → f_IBM
+       u = u* + dt·f_IBM
+  6) 压力泊松 + L2 投影
 
 输出：output/velocity.xdmf、pressure.xdmf、solid.xdmf（参考网格+位移场 u）、
       solid_force.xdmf、forces.csv。
@@ -45,6 +45,7 @@ from dolfinx.fem.petsc import (assemble_matrix, assemble_vector,
 from dolfinx.mesh import CellType, GhostMode
 import ufl
 from basix.ufl import element
+from scipy.spatial import Delaunay
 from ufl import (TestFunction, TrialFunction, dot, dx, inner, grad, div,
                  as_vector, SpatialCoordinate, inv, ln, det)
 
@@ -64,6 +65,7 @@ x0, y0 = config["x0"], config["y0"]
 Lx, Ly = config["Lx"], config["Ly"]
 Nx, Ny = config["Nx"], config["Ny"]
 U_lid, rho, mu = config["U_lid"], config["rho"], config["mu"]
+rho_s = config["rho_s"]
 T, dt = config["T"], config["dt"]
 cx0, cy0, r = config["cx"], config["cy"], config["r"]
 D = config["D"]
@@ -128,26 +130,26 @@ grad_p_expr = Expression(grad(p_n), V.element.interpolation_points)
 # 弹性固体：三角化圆盘网格（参考构型），P2 求解
 # ---------------------------------------------------------------------------
 def make_disk_mesh(r, n_rings, n_circ):
-    """生成三角化圆盘网格（体坐标，相对圆心），返回 (节点坐标, 三角形连接)。"""
-    nodes = [(0.0, 0.0)]
+    """准均匀点分布 + Delaunay 三角化圆盘网格（体坐标，相对圆心）。
+
+    每环点数随半径缩放（保持 ~ 恒定间距），避免圆心处细长三角扇（fan）——
+    那种极细三角对节点抖动极敏感，稍一扰动即翻转（det F<0）导致 NaN。
+    返回 (节点坐标, 三角形连接)。
+    """
+    s = 2.0 * np.pi * r / n_circ          # 目标间距 ≈ 外圈周向间距
+    pts = [(0.0, 0.0)]
     for ring in range(1, n_rings + 1):
         rr = r * ring / n_rings
-        for k in range(n_circ):
-            ang = 2.0 * np.pi * k / n_circ
-            nodes.append((rr * np.cos(ang), rr * np.sin(ang)))
-    cells = []
-    for k in range(n_circ):
-        k2 = (k + 1) % n_circ
-        cells.append((0, 1 + k, 1 + k2))
-    for ring in range(1, n_rings):
-        b1 = 1 + (ring - 1) * n_circ
-        b2 = 1 + ring * n_circ
-        for k in range(n_circ):
-            k2 = (k + 1) % n_circ
-            a, b, c, d = b1 + k, b1 + k2, b2 + k, b2 + k2
-            cells.append((a, b, c))
-            cells.append((c, b, d))
-    return np.array(nodes, dtype=np.float64), np.array(cells, dtype=np.int64)
+        nk = max(6, int(np.round(2.0 * np.pi * rr / s)))
+        for k in range(nk):
+            ang = 2.0 * np.pi * k / nk
+            pts.append((rr * np.cos(ang), rr * np.sin(ang)))
+    pts = np.array(pts)
+    tri = Delaunay(pts)
+    cen = pts[tri.simplices].mean(axis=1)  # 三角形质心
+    keep = np.linalg.norm(cen, axis=1) <= r * 0.9999
+    cells = tri.simplices[keep].astype(np.int64)
+    return pts, cells
 
 
 disk_base, disk_cells = make_disk_mesh(r, config["solid_rings"], config["solid_circ"])
@@ -163,9 +165,31 @@ Vs_io = functionspace(solid_mesh, v_s1)
 solid_coords = Function(Vs, name="solid_coords")
 solid_coords.interpolate(lambda x: np.array([x[0], x[1]]))
 solid_coords.x.scatter_forward()
-solid_velocity = Function(Vs)   # 插值自流体的节点速度
-solid_force = Function(Vs)      # 弹性节点力（供扩散回流体）
+solid_velocity = Function(Vs, name="solid_velocity")  # V_s：固体自身速度（0 起步）
+solid_velocity.x.array[:] = 0.0
+solid_velocity.x.scatter_forward()
+fluid_at_solid = Function(Vs)   # U_l：插值自流体的标记处速度
+solid_force = Function(Vs)      # 直接力 F_IBM·ΔV_l（供扩散回流体）
 ref_coords = Vs.tabulate_dof_coordinates()   # 参考节点坐标（位移 = 当前 - 参考）
+
+# --- 正定集中质量（HRZ）：M_HRZ,i = M_ii·(M_total/Σ_j M_jj)，全 > 0 ---
+# 注：P2 单元的行求和集中会给出顶点对角项≈0/负（实测 769 顶点体积≈0），不能用于
+# 除式；改用一致质量矩阵对角项 + 按总质量缩放（HRZ），保证每节点质量为正。
+dVs = TestFunction(Vs)
+u_trial_s = TrialFunction(Vs)
+a_M = form(rho_s * inner(u_trial_s, dVs) * dx)
+A_M = assemble_matrix(a_M); A_M.assemble()
+diag_vec = create_vector(Vs)
+A_M.getDiagonal(diag_vec)
+_diag = diag_vec.array.copy()
+_M_total = rho_s * (np.pi * r ** 2)            # 固体总质量 = ρ_s·面积
+_sum = float(np.sum(_diag))                     # 单进程（IBM 限制），无需 allreduce
+M_hrz = _diag * (_M_total / _sum)              # 正定集中质量（每分量）
+vol_hrz = M_hrz / rho_s                         # 正节点体积（added-mass 与扩散 ΔV_l 用）
+added_mass_vec = rho * vol_hrz                  # ρ_f·V_node
+if rank == 0:
+    print(f"  HRZ lumped: min M={M_hrz.min():.3e}, max={M_hrz.max():.3e}, "
+          f"ΣM={M_hrz.sum():.4f} (target {_M_total:.4f})")
 
 # ---------------------------------------------------------------------------
 # IBM（标记 = 固体节点；Peskin 4点核，afsic 内置）
@@ -177,13 +201,20 @@ coords_bg.interpolate(lambda x: np.array([x[0], x[1]]))
 ibmesh.build_map(coords_bg._cpp_object)
 ib_interp.evaluate_current_points(solid_coords._cpp_object)
 
-# --- 弹性力弱形式（总拉格朗日，参考构型积分） ---
+# --- 弹性内力弱形式（总拉格朗日，参考构型积分）F_int = ∫P(F):∇δv dX ---
 dVs = TestFunction(Vs)
 FF = grad(solid_coords)
 P = mu_s * (FF - inv(FF).T) + lambda_s * ln(det(FF)) * inv(FF).T
-L_solid = form(-inner(P, grad(dVs)) * dx)
-b_solid = create_vector(Vs)
+L_int = form(inner(P, grad(dVs)) * dx)
+b_int = create_vector(Vs)
 form_volume = form(det(FF) * dx)
+
+# --- 诊断：每个单元 det(F) 最小值（翻转即 det F ≤ 0） ---
+_solid_tdim = solid_mesh.topology.dim
+_solid_mid = dolfinx.mesh.compute_midpoints(
+    solid_mesh, _solid_tdim,
+    np.arange(solid_mesh.topology.index_map(_solid_tdim).size_local))
+det_expr = Expression(det(FF), _solid_mid[:, :2])  # 2D 点构造；eval(mesh, entities)
 
 # ---------------------------------------------------------------------------
 # 流体矩阵（组装一次）
@@ -303,32 +334,41 @@ for step in range(num_steps):
     u_star.x.scatter_forward()
     if _chk("u_star", u_star): failed, fail_t = True, tt; break
 
-    # ---- 2) 固体推进 + 弹性力耦合（每步一次，显式） ----
-    #    a) 流体速度 → 固体节点
-    ib_interp.fluid_to_solid(u_star._cpp_object, solid_velocity._cpp_object)
-    solid_velocity.x.scatter_forward()
-    if _chk("solid_vel", solid_velocity): failed, fail_t = True, tt; break
-    #    b) 推进方程: X_s += V_s·dt
-    solid_coords.x.array[:] += solid_velocity.x.array[:] * dt
-    solid_coords.x.scatter_forward()
-    #    c) 更新标记并组装弹性力
-    ib_interp.evaluate_current_points(solid_coords._cpp_object)
-    with b_solid.localForm() as loc:
+    # ---- 2) 固体推进（带惯性，added-mass 隐式）+ 直接力约束（每步一次） ----
+    #    a) 流体速度插值到固体节点 → U_l
+    ib_interp.fluid_to_solid(u_star._cpp_object, fluid_at_solid._cpp_object)
+    fluid_at_solid.x.scatter_forward()
+    if _chk("U_l", fluid_at_solid): failed, fail_t = True, tt; break
+    #    b) 弹性内力 F_int = ∫P(F):∇δv dX（当前变形）
+    with b_int.localForm() as loc:
         loc.set(0)
-    assemble_vector(b_solid, L_solid)
-    b_solid.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
-                        mode=PETSc.ScatterMode.REVERSE)
-    solid_force.x.array[:] = b_solid.array[:]
+    assemble_vector(b_int, L_int)
+    b_int.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
+                      mode=PETSc.ScatterMode.REVERSE)
+    F_int = b_int.array.copy()
+    #    c) 固体推进（added-mass 隐式稳定）:
+    #       (M_HRZ + ρ_f·V_node) V_s^{n+1} = M_HRZ V_s^n + ρ_f·V_node·U_l - dt·F_int
+    den = M_hrz + added_mass_vec
+    Vs_new = (M_hrz * solid_velocity.x.array
+              + added_mass_vec * fluid_at_solid.x.array
+              - dt * F_int) / den
+    #    d) 直接力: F_IBM = (V_s^{n+1} - U_l)/dt · ΔV_l → 扩散回流体
+    solid_force.x.array[:] = (Vs_new - fluid_at_solid.x.array) / dt * vol_hrz
     solid_force.x.scatter_forward()
     if _chk("solid_force", solid_force): failed, fail_t = True, tt; break
-    #    d) 弹性力扩散回流体（C++ assign_dofs 为"替换"，单次调用即正确）
     ib_interp.solid_to_fluid(f_ibm._cpp_object, solid_force._cpp_object)
     f_ibm.x.scatter_forward()
     if _chk("f_ibm", f_ibm): failed, fail_t = True, tt; break
-    #    e) 流体获得弹性冲量: U = U* + dt·f_ibm
+    #    e) 流体获得直接力冲量: U = U* + dt·f_IBM
     u.x.array[:] = u_star.x.array + dt * f_ibm.x.array
     u.x.scatter_forward()
     if _chk("u_mid", u): failed, fail_t = True, tt; break
+    #    f) 更新固体状态并重设标记
+    solid_velocity.x.array[:] = Vs_new
+    solid_velocity.x.scatter_forward()
+    solid_coords.x.array[:] += dt * Vs_new
+    solid_coords.x.scatter_forward()
+    ib_interp.evaluate_current_points(solid_coords._cpp_object)
 
     # ---- 3) 压力泊松: ∇²p = (2/(3dt))∇·U ----
     L_p = form(-(2.0 / (3.0 * dt)) * inner(div(u), q) * dx)
@@ -369,6 +409,10 @@ for step in range(num_steps):
     volume = comm.allreduce(assemble_scalar(form_volume), op=MPI.SUM)
     disp = solid_coords.x.array - np.ravel(ref_coords[:, :2])
     disp_max = float(np.max(np.linalg.norm(disp.reshape(-1, 2), axis=1)))
+    det_min = float(np.min(det_expr.eval(solid_mesh,
+                                         np.arange(len(_solid_mid))))) \
+        if rank == 0 else 0.0
+    det_min = comm.allreduce(det_min, op=MPI.MIN)
 
     if step % out_interval == 0 or step == num_steps - 1:
         u_io.interpolate(u)
@@ -390,7 +434,8 @@ for step in range(num_steps):
             print(f"Step {step+1}/{num_steps}, t={tt:.3f}s, "
                   f"u_L2={u_L2:.4f}, p_L2={p_L2:.1f}, "
                   f"Fx={F_x:.4f}, Fy={F_y:+.4f}, "
-                  f"|disp|max={disp_max:.5f}, vol={volume:.4f}", flush=True)
+                  f"|disp|max={disp_max:.5f}, det_min={det_min:.4f}, "
+                  f"vol={volume:.4f}", flush=True)
 
 file_vel.close(); file_pre.close()
 if file_solid is not None:
