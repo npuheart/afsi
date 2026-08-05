@@ -258,28 +258,28 @@ class ImmersedFEM:
         coll = geometry.compute_collisions_points(self.bb_tree, xq3)
         own = geometry.compute_colliding_cells(self.msh, coll, xq3)
 
-        # per located point keep the first colliding (owned) background cell
-        n_pts = 0
-        fcell_list = []
-        idx_map = np.full(nc * nq, -1, dtype=np.int64)   # global pt -> compressed idx
-        for i in range(nc * nq):
-            cs = own.links(i)
-            if len(cs) == 0:
-                continue
-            fcell_list.append(cs[0])
-            idx_map[i] = n_pts
-            n_pts += 1
+        # per located point keep the first colliding (owned) background cell.
+        # Vectorised through the AdjacencyList offsets/array (no Python loop):
+        #   own.array[offsets[i]] is the first colliding cell of point i.
+        n_pts_all = nc * nq
+        offs = own.offsets
+        nlinks = offs[1:] - offs[:-1]
+        has = nlinks > 0
+        fcell_raw = np.full(n_pts_all, -1, dtype=np.int64)
+        fcell_raw[has] = own.array[offs[:-1][has]]
+        sel = np.flatnonzero(has)                                           # global pt indices found
+        n_pts = sel.size
         if n_pts == 0:
             self.interaction = []
             return self.interaction
-        n_miss = nc * nq - n_pts
+        n_miss = n_pts_all - n_pts
         if n_miss > 0 and rank == 0:
             self.msg(f"    [warn] {n_miss} solid quadrature point(s) outside the "
                      "background mesh (disk touching a wall?) -- skipped")
-        fcell_all = np.asarray(fcell_list, dtype=np.int64)                  # (n_pts,)
-        sel = np.flatnonzero(idx_map >= 0)                                  # global pt indices found
+        fcell_found = fcell_raw[sel]                                        # (n_pts,)
         xq_found = xq_all[sel]
-        fcell_found = fcell_all
+        idx_map = np.full(n_pts_all, -1, dtype=np.int64)                    # global pt -> compressed idx
+        idx_map[sel] = np.arange(n_pts)
 
         # reference coordinates, vectorised with the precomputed cell Jacobians
         xi_all = np.einsum("pij,pj->pi", self.f_Jinv[fcell_found],
@@ -313,32 +313,30 @@ class ImmersedFEM:
     # ------------------------------------------------------------------
     def assemble_mixed_mass(self):
         """Mfs(i,j) = int_Omega_s phi_i_bg(x) phi_j_s(X) dX (same-component
-        pairs only).  Vectorised over the located solid quadrature points."""
+        pairs only).  Vectorised across ALL located solid quadrature points at
+        once (no per-cell Python loop); the triplet->csr merge is the only
+        remaining serial part."""
         bs = self.bs_u
-        rows0, cols0, vals = [], [], []
-        for cc in self.interaction:
-            npt = len(cc["q_idx"])
-            if npt == 0:
-                continue
-            q_idx = cc["q_idx"]
-            s_bdofs = cc["s_bdofs"]
-            f_bdofs = np.stack([self.V.dofmap.cell_dofs(c) for c in cc["f_cells"]])
-            f_phi_k = cc["f_phi"]                  # (npt, ndofs_f)
-            s_phi_k = self.s_phi[q_idx]            # (npt, ndofs_s)
-            w = cc["JxW_s"][q_idx]                 # (npt,)
-            # per-point weight matrix  V[p,i,j] = f_phi[p,i] * s_phi[p,j] * w[p]
-            V = f_phi_k[:, :, None] * s_phi_k[:, None, :] * w[:, None, None]
-            I0 = (f_bdofs * bs)[:, :, None]        # (npt, ndofs_f, 1)  block rows
-            C0 = (s_bdofs * bs)[None, None, :]     # (1, 1, ndofs_s)    block cols
-            rows0.append(np.broadcast_to(I0, V.shape).ravel())
-            cols0.append(np.broadcast_to(C0, V.shape).ravel())
-            vals.append(V.ravel())
-        if not vals:
+        parts = [cc for cc in self.interaction if len(cc["q_idx"]) > 0]
+        if not parts:
             Mfs = coo_matrix((self.n_u, self.n_s)).tocsr()
         else:
-            r = np.concatenate(rows0)
-            c = np.concatenate(cols0)
-            v = np.concatenate(vals)
+            q_idx = np.concatenate([cc["q_idx"] for cc in parts])
+            f_bdofs = self.V.dofmap.list[np.concatenate(
+                [cc["f_cells"] for cc in parts])]                  # (npts, ndofs_f)
+            s_bdofs = np.concatenate([np.broadcast_to(
+                cc["s_bdofs"], (len(cc["q_idx"]), cc["s_bdofs"].size))
+                for cc in parts])                                   # (npts, ndofs_s)
+            f_phi_k = np.concatenate([cc["f_phi"] for cc in parts])
+            s_phi_k = self.s_phi[q_idx]
+            w = np.concatenate([cc["JxW_s"][cc["q_idx"]] for cc in parts])
+            # per-point weight matrix  V[p,i,j] = f_phi[p,i] * s_phi[p,j] * w[p]
+            V = f_phi_k[:, :, None] * s_phi_k[:, None, :] * w[:, None, None]
+            I0 = (f_bdofs * bs)[:, :, None]        # (npts, ndofs_f, 1)  block rows
+            C0 = (s_bdofs * bs)[:, None, :]        # (npts, 1, ndofs_s)  block cols
+            r = np.broadcast_to(I0, V.shape).ravel()
+            c = np.broadcast_to(C0, V.shape).ravel()
+            v = V.ravel()
             # only same-component pairs couple (comp 0 and comp 1, same weights)
             r2 = np.concatenate([r, r + 1])
             c2 = np.concatenate([c, c + 1])
@@ -379,8 +377,7 @@ class ImmersedFEM:
                     continue
                 q_idx_list.append(cc["q_idx"])
                 s_bdofs_list.append(np.tile(cc["s_bdofs"], (npt, 1)))
-                f_bdofs_list.append(np.stack(
-                    [self.V.dofmap.cell_dofs(c) for c in cc["f_cells"]]))
+                f_bdofs_list.append(self.V.dofmap.list[cc["f_cells"]])
                 f_gx_list.append(cc["f_gx"])
                 w_list.append(cc["JxW_s"][cc["q_idx"]])
             if not q_idx_list:
@@ -411,10 +408,10 @@ class ImmersedFEM:
         # ---- f_el (scatter by fluid dof), vectorised over (i, ci) ----
         #   contr[p,i,ci] = sum_a PeFT[p,ci,a] * f_gx[p,i,a] * w[p]
         contr = np.einsum("pca,pia->pic", PeFT, f_gx) * w[:, None, None]
-        f_el = np.zeros(self.n_u)
-        np.add.at(f_el,
-                  (f_bdofs * bs)[:, :, None] + np.arange(2)[None, None, :],
-                  -contr)
+        # scatter with bincount (fast, no np.add.at atomics)
+        idx = (f_bdofs * bs)[:, :, None] + np.arange(2)[None, None, :]
+        f_el = np.bincount(idx.ravel(), weights=(-contr).ravel(),
+                           minlength=self.n_u).astype(np.float64)
         if not tangent:
             return f_el, None
 

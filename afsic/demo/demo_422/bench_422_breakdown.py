@@ -9,8 +9,9 @@ os.environ.setdefault("NY", "64")
 os.environ.setdefault("SOLID_H", "0.0125")
 os.environ.setdefault("STEPS", "3")
 
-from main import make_config, ImmersedFEM
-import main as M
+from config import make_config
+from immersed import ImmersedFEM
+import linops as M
 
 cfg = make_config()
 cfg["num_steps"] = 3
