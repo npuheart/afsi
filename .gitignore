@@ -19,3 +19,7 @@ data
 
 afsic/demo/demo_337/mesh
 afsic/demo/demo_337/mesh-90
+
+# 方腔驱动圆盘：根目录测试输出（用户手动复制的结果数据，不入库）
+/df64/
+/df64_10s/
