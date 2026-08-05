@@ -119,11 +119,17 @@ class ImmersedFEM:
         Bt.assemble()
         Mp = assemble_matrix(fem.form(q * p * ufl.dx))
         Mp.assemble()
+        # pressure Laplacian (for the Cahouet-Chabard Schur complement in the
+        # amg fluid-saddle path):  L_p[i,j] = int grad p_i . grad q_j
+        Lp = assemble_matrix(
+            fem.form(ufl.inner(ufl.grad(p), ufl.grad(q)) * ufl.dx))
+        Lp.assemble()
 
         self.K = petsc_to_scipy(K)
         self.B = petsc_to_scipy(B)
         self.Bt = petsc_to_scipy(Bt)
         self.Mp = petsc_to_scipy(Mp)
+        self.Lp = petsc_to_scipy(Lp)
         self.K_ilu = None
 
     def _assemble_solid_mass(self):
@@ -739,7 +745,9 @@ class ImmersedFEM:
             if cfg["fluid_solver"] == "amg":
                 Kbc = self._zero_bc(self.K, self.bc_vel)
                 self._fluid_pre_lu = IterativeFluidSaddle(
-                    Kbc, self.B, self.Bt, s11)
+                    Kbc, self.B, self.Bt, s11,
+                    Mp=self.Mp, Lp=self.Lp,
+                    rho=cfg["rho_f"], eta=cfg["eta_f"], dt=cfg["dt"])
             else:
                 F = bmat([[self.K, self.Bt], [self.B, s11]], format="csr")
                 F = self.apply_bc(F)         # velocity BCs + pressure pin

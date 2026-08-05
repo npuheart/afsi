@@ -109,7 +109,8 @@ class IterativeFluidSaddle:
     which is exactly the 3D route: no MUMPS anywhere, only AMG + Krylov.
     Provides the same ``solve(b)`` interface as ``MumpsFactor``."""
 
-    def __init__(self, K, B, Bt, s11=None, comm=comm, **kw):
+    def __init__(self, K, B, Bt, s11=None, comm=comm, Mp=None, Lp=None,
+                 rho=1.0, eta=0.01, dt=0.01, **kw):
         from scipy.sparse import bmat, diags, csr_matrix
         self.n_u = K.shape[0]
         self.n_p = B.shape[0]
@@ -118,21 +119,46 @@ class IterativeFluidSaddle:
         self.F = bmat([[K, Bt], [B, s11]], format="csr")
         # velocity block: GAMG solve (K already has the velocity BCs)
         self.ksp_K = GAMGSolver(K, comm=comm)
-        # pressure Schur complement approximation  S_p ~ B diag(K)^{-1} B^T + s11
-        dKinv = 1.0 / K.diagonal()
-        Sp = (B @ diags(dKinv) @ Bt).tocsr() + s11.tocsr()
-        self.ksp_Sp = GAMGSolver(Sp, comm=comm)
+        # pressure Schur complement:
+        #   default : S_p ~ B diag(K)^{-1} B^T + s11 (Elman/Silvester/Wathen)
+        #   if Lp given : Cahouet-Chabard  S_p^{-1} ~ (1/eta) M_p^{-1}
+        #                 + (rho/dt) L_p^{-1}, robust in both dt and viscosity
+        #                 (captures the mu L half that B diag(K)^{-1} B^T misses)
+        self._cc = Lp is not None
+        if self._cc:
+            self._dMp = 1.0 / Mp.diagonal()          # lumped M_p^{-1}
+            self._rho, self._eta, self._dt = rho, eta, dt
+            Lp_pin = Lp.tolil()
+            Lp_pin[0, :] = 0.0
+            Lp_pin[:, 0] = 0.0
+            Lp_pin[0, 0] = 1.0
+            self.ksp_Sp = GAMGSolver(Lp_pin.tocsr(), comm=comm)
+        else:
+            dKinv = 1.0 / K.diagonal()
+            Sp = (B @ diags(dKinv) @ Bt).tocsr() + s11.tocsr()
+            self.ksp_Sp = GAMGSolver(Sp, comm=comm)
         self._comm = comm
 
     def solve(self, b):
         n_u, n_p = self.n_u, self.n_p
         b = np.ascontiguousarray(b, dtype=float)
 
-        def p_inv(r):
-            r = np.asarray(r, dtype=float)
-            u = self.ksp_K.solve(r[:n_u])
-            p = self.ksp_Sp.solve(r[n_u:])
-            return np.concatenate([u, p])
+        if self._cc:
+            dMp, rho, eta, dt = self._dMp, self._rho, self._eta, self._dt
+            kspS = self.ksp_Sp
+
+            def p_inv(r):
+                r = np.asarray(r, dtype=float)
+                u = self.ksp_K.solve(r[:n_u])
+                p = (1.0 / eta) * (dMp * r[n_u:]) \
+                    + (rho / dt) * kspS.solve(r[n_u:])
+                return np.concatenate([u, p])
+        else:
+            def p_inv(r):
+                r = np.asarray(r, dtype=float)
+                u = self.ksp_K.solve(r[:n_u])
+                p = self.ksp_Sp.solve(r[n_u:])
+                return np.concatenate([u, p])
 
         x, info = fgmres(self.F, b, M=p_inv, rtol=1e-8, atol=0.0,
                          restart=50, maxiter=500)
