@@ -338,17 +338,24 @@ class ImmersedFEM:
         # physical gradient:  grad_x phi = grad_xi phi @ J^{-1}
         f_gx = np.einsum("pij,pjk->pik", f_gphi, self.f_Jinv[fcell_found])
 
-        # group by solid cell (uniform nq points per cell)
+        # group by solid cell (uniform nq points per cell); the found points
+        # are compressed once globally, then sliced per cell (avoids repeated
+        # O(n_pts) fancy indexing inside the per-cell loop)
+        xq_comp = xq_all[sel]
+        fc_comp = fcell_found
+        fp_comp = f_phi
+        fg_comp = f_gx
         inter = []
         for ci, cc in enumerate(self.solid_cells):
             i0, i1 = ci * nq, (ci + 1) * nq
-            cm = idx_map[i0:i1]                                            # compressed idx per local pt (-1 = missed)
+            cm = idx_map[i0:i1]                      # compressed idx per local pt (-1 = missed)
             m = cm >= 0
-            cc["q_idx"] = np.flatnonzero(m).astype(np.int64)               # local quad idx found
-            cc["xq"] = xq_all[i0:i1][m]
-            cc["f_cells"] = fcell_found[cm[m]]
-            cc["f_phi"] = f_phi[cm[m]]
-            cc["f_gx"] = f_gx[cm[m]]
+            loc = cm[m]                              # positions in the compressed arrays
+            cc["q_idx"] = np.flatnonzero(m).astype(np.int64)   # local quad idx found
+            cc["xq"] = xq_comp[loc]
+            cc["f_cells"] = fc_comp[loc]
+            cc["f_phi"] = fp_comp[loc]
+            cc["f_gx"] = fg_comp[loc]
             inter.append(cc)
         self.interaction = inter
         return inter
