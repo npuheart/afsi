@@ -64,6 +64,83 @@ class MumpsFactor:
         return np.column_stack([self.solve(b[:, k]) for k in range(b.shape[1])])
 
 
+class GAMGSolver:
+    """PETSc GMRES + GAMG (algebraic multigrid) solve of a scipy csr matrix.
+
+    Used as an APPROXIMATE inverse inside a flexible preconditioner: only a
+    loose tolerance (rtol=1e-2 by default) is enforced, because the outer
+    Krylov (FGMRES) absorbs the approximation error.  No direct factorisation
+    anywhere -- this is the scalable (large/3D) replacement for MUMPS on the
+    fluid blocks.  KSP and PETSc vectors are reused between solves."""
+
+    def __init__(self, A, rtol=1e-2, max_it=100, comm=comm):
+        self._n = A.shape[0]
+        self._ksp = PETSc.KSP().create(comm)
+        self._Ap = scipy_to_petsc(A, comm)
+        self._ksp.setOperators(self._Ap)
+        self._ksp.setType("gmres")
+        pc = self._ksp.getPC()
+        pc.setType("gamg")
+        self._ksp.setFromOptions()
+        self._ksp.setTolerances(rtol=rtol, atol=1e-30, max_it=max_it)
+        self._ksp.setUp()
+        self._pb = PETSc.Vec().createMPI(size=self._n, comm=comm)
+        self._x = PETSc.Vec().createMPI(size=self._n, comm=comm)
+
+    def solve(self, b):
+        b = np.ascontiguousarray(b, dtype=float)
+        self._pb.array[:] = b
+        self._ksp.solve(self._pb, self._x)
+        return self._x.array.copy()
+
+
+class IterativeFluidSaddle:
+    """Fluid Stokes saddle  F = [[K, B^T],[B, s11]]  solved WITHOUT any direct
+    factorisation: outer FGMRES preconditioned block-diagonally by
+        P_f^{-1} = diag( K_amg^{-1},  S_p_amg^{-1} )
+    where
+      * K_amg^{-1}  : GAMG solve of the velocity block K (BCs applied),
+      * S_p_amg^{-1}: GAMG solve of the pressure Schur complement
+        S_p = B diag(K)^{-1} B^T (+ the s11 stabilisation), the
+        Elman/Silvester/Wathen-style approximation of B K^{-1} B^T.
+
+    The inner K / S_p solves are APPROXIMATE (loose rtol), so the preconditioner
+    changes between iterations -> the outer solver must be FGMRES (flexible),
+    which is exactly the 3D route: no MUMPS anywhere, only AMG + Krylov.
+    Provides the same ``solve(b)`` interface as ``MumpsFactor``."""
+
+    def __init__(self, K, B, Bt, s11=None, comm=comm, **kw):
+        from scipy.sparse import bmat, diags, csr_matrix
+        self.n_u = K.shape[0]
+        self.n_p = B.shape[0]
+        if s11 is None:
+            s11 = csr_matrix((self.n_p, self.n_p))
+        self.F = bmat([[K, Bt], [B, s11]], format="csr")
+        # velocity block: GAMG solve (K already has the velocity BCs)
+        self.ksp_K = GAMGSolver(K, comm=comm)
+        # pressure Schur complement approximation  S_p ~ B diag(K)^{-1} B^T + s11
+        dKinv = 1.0 / K.diagonal()
+        Sp = (B @ diags(dKinv) @ Bt).tocsr() + s11.tocsr()
+        self.ksp_Sp = GAMGSolver(Sp, comm=comm)
+        self._comm = comm
+
+    def solve(self, b):
+        n_u, n_p = self.n_u, self.n_p
+        b = np.ascontiguousarray(b, dtype=float)
+
+        def p_inv(r):
+            r = np.asarray(r, dtype=float)
+            u = self.ksp_K.solve(r[:n_u])
+            p = self.ksp_Sp.solve(r[n_u:])
+            return np.concatenate([u, p])
+
+        x, info = fgmres(self.F, b, M=p_inv, rtol=1e-8, atol=0.0,
+                         restart=50, maxiter=500)
+        if info != 0:
+            raise RuntimeError(f"fluid saddle FGMRES did not converge (info={info})")
+        return x
+
+
 def affine_jacobian(verts):
     """Jacobian of an affine triangle  J[i][j] = dx_i/dxi_j  (columns = edges).
     verts: (3, 2) vertex coordinates (reference (0,0),(1,0),(0,1))."""

@@ -671,17 +671,34 @@ class ImmersedFEM:
     # by the Krylov space.
     # ------------------------------------------------------------------
     def _build_block_preconditioner(self):
-        """Constant block preconditioner P^{-1}: factors of the fluid Stokes
-        block (with BCs) and the solid mass matrix, built once."""
+        """Constant block preconditioner P^{-1}: the fluid Stokes block
+        [K Bt; B s11] and the solid mass matrix M_s, built once.
+
+        Fluid solver is pluggable:
+          * ``fluid_solver == "mumps"`` (default): direct LU factor of the
+            saddle -- fast in 2D.
+          * ``fluid_solver == "amg"``: NO direct factorisation -- FGMRES +
+            block-diagonal preconditioner, velocity block K and the pressure
+            Schur complement S_p = B diag(K)^{-1} B^T each solved with PETSc
+            GAMG.  Slower in 2D but the 3D-scalable route (MUMPS infeasible in
+            3D).  The solid block M_ww = (1/dt) M_s is tiny and CONSTANT, so it
+            is always solved exactly with one MUMPS factor (direction 3).
+        """
         if getattr(self, "_fluid_pre_lu", None) is None:
+            from linops import IterativeFluidSaddle
             cfg = self.cfg
             s11 = cfg["p_stab"] * self.Mp if cfg["p_stab"] > 0.0 else None
-            F = bmat([[self.K, self.Bt], [self.B, s11]], format="csr")
-            F = self.apply_bc(F)                 # velocity BCs + pressure pin
-            self._fluid_pre_lu = MumpsFactor(F)
+            if cfg["fluid_solver"] == "amg":
+                Kbc = self._zero_bc(self.K, self.bc_vel)
+                self._fluid_pre_lu = IterativeFluidSaddle(
+                    Kbc, self.B, self.Bt, s11)
+            else:
+                F = bmat([[self.K, self.Bt], [self.B, s11]], format="csr")
+                F = self.apply_bc(F)         # velocity BCs + pressure pin
+                self._fluid_pre_lu = MumpsFactor(F)
             self._Ms_pre_lu = MumpsFactor(self.M_s)
-            self.msg("    [fgmres] built block preconditioner "
-                     f"(fluid {F.shape[0]}x{F.shape[0]} + M_s {self.n_s}x{self.n_s})")
+            self.msg(f"    [fgmres] built block preconditioner "
+                     f"(fluid {cfg['fluid_solver']} + M_s {self.n_s}x{self.n_s})")
         return self._fluid_pre_lu, self._Ms_pre_lu
 
     def _block_gmres_solve(self, A, rhs, rtol=1e-8, maxiter=300):

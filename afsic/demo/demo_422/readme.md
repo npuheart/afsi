@@ -93,7 +93,8 @@ python main.py --steps 10 --nx 16   # 快速冒烟测试
 | `PIN` | 0 | 1=钉住圆盘中心（准静态演示） |
 | `SCHEME` | 0 | 0=单块 3×3；3=约化 2×2（精确 Schur 消去 W） |
 | `FROZEN` | 2 | 冻结 Jacobian 准 Newton：0=完全 Newton（每迭代分解）；1=每步分解一次；2=跨步复用（默认，停滞自适应重分解+失败回退） |
-| `LINEAR_SOLVER` | direct | monolithic 线性求解器：`direct`=MUMPS 直接分解（默认）；`gmres`=GMRES + 块 LDU 预条件（见下） |
+| `LINEAR_SOLVER` | direct | monolithic 线性求解器：`direct`=MUMPS 直接分解（默认）；`gmres`=FGMRES(50) + 块 LDU 预条件（见下） |
+| `FLUID_SOLVER` | mumps | gmres 模式下流体鞍点求解器：`mumps`=直接分解（2D 快，默认）；`amg`=GAMG（K 与压力 Schur 补 S_p 都用 AMG，**3D 可扩展路径**，无直接分解） |
 | `OUT` | 10 | 输出间隔（步） |
 | `OUTPUT` | output | 输出目录 |
 
@@ -223,7 +224,7 @@ dt=0.1 时快 ~1.5×）。随 μ_s 增大，**当前直接法的隐式每步成�
 
 全部稳定（隐式）；跨步冻结使 MUMPS 分解摊销，单步成本近似随网格线性增长。
 
-## 块预条件迭代求解器（LINEAR_SOLVER=gmres，概念验证）
+## 块预条件迭代求解器（LINEAR_SOLVER=gmres，FGMRES(50) + 块 LDU）
 
 monolithic Jacobian
 
@@ -237,24 +238,42 @@ L=\begin{bmatrix}I&0&-A_{uW}\,(\tfrac{\Delta t}{M_s})\\ 0&I&0\\0&0&I\end{bmatrix
 \tilde D=\mathrm{diag}(\begin{bmatrix}K&B^T\\B&s_{11}\end{bmatrix},\ \tfrac{1}{\Delta t}M_s),\quad
 U=\begin{bmatrix}I&0&0\\0&I&0\\ -(\tfrac{\Delta t}{M_s})M_{fs}^T&0&I\end{bmatrix}$$
 
-流体 Stokes 块与固体质量块**都是常数**，各用 MUMPS 分解一次；每次 Krylov 迭代
-= 1 次流体回代 + 2 次 $M_s$ 回代 + 2 个耦合 matvec，**不做任何 monolithic 分解**。
+外层用 **FGMRES(50)（右预条件、柔性）** 而非左 GMRES（scipy 无 FGMRES，本实现
+自写：存预条件向量 $z_j=Mv_j$、Givens 旋转增量跟踪残差、可提前终止）。柔性
+预条件的价值：流体鞍点内部的迭代/AMG 求解每次应用略不相同，FGMRES 保持稳定。
+流体 Stokes 块与固体质量块都是常数；每次 Krylov 迭代 = 1 次流体鞍点求解 +
+2 次 $M_s$ 回代 + 2 个耦合 matvec，**不做任何 monolithic 分解**。
 
-32×32 实测（块对角 vs 块 LDU，GMRES 收敛到 rtol=1e-8 的迭代数）：
+**流体鞍点求解器可插拔**（`FLUID_SOLVER`）：
 
-| μ_s | 块对角 | 块 LDU |
+* `mumps`（默认，2D 快）：流体鞍点 $[K\ B^T;\ B\ s_{11}]$ 一次 MUMPS 分解。
+* `amg`（**3D 可扩展路径，无任何直接分解**）：流体鞍点用内层 FGMRES + 块对角
+  预条件，**速度块 $K$ 与压力 Schur 补 $S_p = B\,\mathrm{diag}(K)^{-1}B^T$ 各
+  用 PETSc GAMG 求解**（Elman/Silvester/Wathen 风格）。$K$、$S_p$ 只解到松
+  容差（预条件的一部分），外层 FGMRES 吸收误差。
+* **固体块 $M_{ww}=(1/dt)M_s$ 始终精确处理**：小且常数，MUMPS 分解一次。
+
+32×32 实测（块对角 vs 块 LDU，收敛到 rtol=1e-8 的迭代数）：
+
+| μ_s | 块对角 | 块 LDU (FGMRES) |
 |---|---|---|
 | 0.1 | 6 | **4** |
-| 10 | 12 | **8** |
+| 10 | 12 | **~4** |
 
-解与 MUMPS 直接法一致（≤1e-9，即 GMRES 容差水平）。**诚实结论**：LDU 在中低
-μ_s 稳定减少迭代，但在 μ_s=100 下预条件残差**停滞在 ~3e-3 相对水平**（无法到
-1e-8）。原因：本算例的 (1,3) 耦合块是**随 μ_s 缩放的弹性刚度** $-A_{uW}$，
-被丢弃的 $A_{uW}\frac{\Delta t}{M_s}M_{fs}^T\sim \mu_s\frac{\Delta t}{\rho_s}$，
-在大 μ_s 下相对流体算子 $K$ 不再是小量——而大规模 FSI 文档里被丢的 $A_s$
-是纯几何插值（不随刚度缩放），所以文档的"丢二阶修正"只在弱耦合成立。要让
-隐式每步成本真正与 μ_s 无关，需要在预条件中显式处理弹性刚度（如把
-$A_{uW}$ 并入 Schur 块的块三角预条件），这超出了本 demo 的 LDU 范围。
+解与 MUMPS 直接法一致（≤1e-9）。`FLUID_SOLVER=amg` 端到端（16×16, μ_s=10）：
+Newton 3 次收敛，**解与 mumps 版一致到 6.4e-12**（机器精度）。2D 下 AMG 路径
+因多层迭代 + Python 开销比 MUMPS 慢（预期，仅验证 3D 正确性）；3D 下 MUMPS
+不可行而 AMG+Krylov 可行。
+
+**诚实结论**：LDU 在中低 μ_s 稳定减少迭代，但在 μ_s=100 下预条件残差**停滞在
+~3e-3 相对水平**（无法到 1e-8）。原因：本算例的 (1,3) 耦合块是**随 μ_s 缩放的
+弹性刚度** $-A_{uW}$，被丢弃的 $A_{uW}\frac{\Delta t}{M_s}M_{fs}^T\sim
+\mu_s\frac{\Delta t}{\rho_s}$，在大 μ_s 下相对流体算子 $K$ 不再是小量——而大
+规模 FSI 文档里被丢的 $A_s$ 是纯几何插值（不随刚度缩放），所以文档的"丢二阶
+修正"只在弱耦合成立。要让隐式每步成本真正与 μ_s 无关，需要在预条件中显式
+处理弹性刚度（如把 $A_{uW}$ 并入 Schur 块的块三角预条件），这超出了本 demo
+的 LDU 范围。
+
 
 **从大规模分析中真正可借鉴、可迁移到 3D 的**：
 1. **FGMRES(50)+块 LDU**：预条件随 Jacobian 变化用 FGMRES（右预条件）比

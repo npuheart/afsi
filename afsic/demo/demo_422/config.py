@@ -64,6 +64,15 @@ def make_config():
         #              solve itself is iterative (AMG/Krylov, the 3D route);
         #              no monolithic factorisation at all.
         "linear_solver": _env("LINEAR_SOLVER", "direct"),
+        # how the fluid Stokes block [K Bt; B s11] is solved inside the
+        # block-LDU preconditioner (only used with LINEAR_SOLVER=gmres):
+        #   "mumps" : sparse direct LU (default; fast in 2D)
+        #   "amg"   : NO direct factorisation -- FGMRES + block-diagonal
+        #             preconditioner, velocity block K and the pressure Schur
+        #             complement S_p = B diag(K)^{-1} B^T both solved with
+        #             PETSc GAMG.  Slower in 2D, but the scalable 3D route:
+        #             MUMPS is infeasible in 3D, AMG + Krylov is not.
+        "fluid_solver": _env("FLUID_SOLVER", "mumps"),
     }
     cfg["num_steps"] = int(_env("STEPS", int(cfg["T"] / cfg["dt"])))
     out = _env("OUTPUT", "output")
