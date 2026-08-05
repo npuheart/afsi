@@ -674,14 +674,33 @@ class ImmersedFEM:
                      [-self.MfsT_csr, None, (1.0 / cfg["dt"]) * self.M_s]],
                     format="csr")
 
+    @staticmethod
+    def _zero_bc(A, bc):
+        """Zero the BC rows/columns of a scipy CSR matrix and set diag=1 for
+        the BC dofs.  CSR-only (no LIL round-trip, which is O(N^2)-ish and the
+        dominant cost at 64x64); bc must be the expanded global dofs."""
+        A = A.tocsr().copy()
+        is_bc = np.zeros(A.shape[0], dtype=bool)
+        is_bc[bc] = True
+        # zero entries lying in BC columns (vectorised)
+        A.data[is_bc[A.indices]] = 0.0
+        # zero BC rows
+        indptr = A.indptr
+        for i in bc:
+            A.data[indptr[i]:indptr[i + 1]] = 0.0
+        # set diag = 1 for BC dofs
+        for i in bc:
+            sl = slice(indptr[i], indptr[i + 1])
+            pos = np.flatnonzero(A.indices[sl] == i)
+            if pos.size:
+                A.data[indptr[i] + pos[0]] = 1.0
+            else:
+                A[i, i] = 1.0
+        return A
+
     def apply_bc(self, A):
         """Homogeneous increments at the velocity boundary + pinned pressure."""
-        bc = self.bc_all
-        A = A.tolil()
-        A[bc, :] = 0.0
-        A[:, bc] = 0.0
-        A[bc, bc] = 1.0
-        return A.tocsr()
+        return self._zero_bc(A, self.bc_all)
 
     # ------------------------------------------------------------------
     # One time step of the monolithic scheme (backward Euler + Newton)
@@ -796,11 +815,7 @@ class ImmersedFEM:
         """Homogeneous BCs for the reduced 2x2 system (velocity + pinned p)."""
         bc = np.unique(np.concatenate([self.bc_vel, self.bc_pin]))
         self.bc2_all = bc
-        A2 = A2.tolil()
-        A2[bc, :] = 0.0
-        A2[:, bc] = 0.0
-        A2[bc, bc] = 1.0
-        return A2.tocsr()
+        return self._zero_bc(A2, bc)
 
     # ------------------------------------------------------------------
     # Coupling self-checks (like a.cpp::verify_coupling): project the linear
