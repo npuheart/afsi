@@ -680,16 +680,17 @@ class ImmersedFEM:
             F = self.apply_bc(F)                 # velocity BCs + pressure pin
             self._fluid_pre_lu = MumpsFactor(F)
             self._Ms_pre_lu = MumpsFactor(self.M_s)
-            self.msg("    [gmres] built block preconditioner "
+            self.msg("    [fgmres] built block preconditioner "
                      f"(fluid {F.shape[0]}x{F.shape[0]} + M_s {self.n_s}x{self.n_s})")
         return self._fluid_pre_lu, self._Ms_pre_lu
 
     def _block_gmres_solve(self, A, rhs, rtol=1e-8, maxiter=300):
-        """Solve A x = rhs with GMRES + a block-LDU preconditioner.
+        """Solve A x = rhs with FGMRES(50) + a block-LDU preconditioner.
 
         The monolithic Jacobian
             A = [[K, Bt, -A_uW], [B, s11, 0], [-Mfs^T, 0, (1/dt) M_s]]
-        is preconditioned by the approximate block LDU factorisation
+        is preconditioned (RIGHT preconditioning) by the approximate block LDU
+        factorisation
             P = L D U,   D = diag([K Bt; B s11], (1/dt) M_s),
             L = [[I,0,A_s M_ww^{-1}],[0,I,0],[0,0,I]],
             U = [[I,0,0],[0,I,0],[-M_ww^{-1} M_wu,0,I]],
@@ -698,11 +699,17 @@ class ImmersedFEM:
         dropped, as in the literature for monolithic FSI), so P^{-1}A stays
         close to the identity even when the coupling (e.g. a stiff solid) is
         strong.  The fluid saddle [K Bt; B s11] and the solid mass M_s are
-        CONSTANT and each factorised once; per GMRES iteration the cost is
+        CONSTANT and each factorised once; per iteration the cost is
         1 fluid saddle solve + 2 M_ww^{-1} + 2 coupling matvecs.  This is the
         scalable (large/3D) path: no monolithic factorisation at all.
+
+        FGMRES (flexible, right-preconditioned) is used instead of plain GMRES
+        because the preconditioner may itself use an iterative inner solve
+        (e.g. an AMG / Krylov solve of the fluid block, the 3D route):
+        flexible preconditioning stays stable when P^{-1} changes between
+        iterations.  ``restart=50`` matches the recommended FGMRES(50).
         """
-        from scipy.sparse.linalg import LinearOperator, gmres
+        from linops import fgmres
         n_u, n_p, n_s = self.n_u, self.n_p, self.n_s
         fl, ms = self._build_block_preconditioner()
         dt = self.cfg["dt"]
@@ -723,11 +730,10 @@ class ImmersedFEM:
             zw = zw0 + Minv(M_wu @ zu)                   # U^{-1}
             return np.concatenate([zu_zp, zw])
 
-        P = LinearOperator((self.N, self.N), matvec=p_inv, dtype=float)
-        x, info = gmres(A, rhs, M=P, rtol=rtol, atol=1e-14,
-                        maxiter=maxiter, restart=100)
+        x, info = fgmres(A, rhs, M=p_inv, rtol=rtol, atol=1e-14,
+                         restart=50, maxiter=maxiter)
         if info != 0:
-            raise RuntimeError(f"GMRES did not converge (info={info})")
+            raise RuntimeError(f"FGMRES did not converge (info={info})")
         return x
 
     # ------------------------------------------------------------------

@@ -53,14 +53,16 @@ def make_config():
         # linear solver for the monolithic Newton system:
         #   "direct" : sparse direct LU (MUMPS) of the full 3x3 Jacobian
         #              (default; frozen cross-step amortises the factorisation)
-        #   "gmres"  : GMRES with a block-LDU preconditioner: the fluid Stokes
-        #              block [K Bt; B s11] and the solid mass M_s are CONSTANT
-        #              and factorised once; the coupling blocks (-A_uW, -Mfs^T)
-        #              of the current Jacobian are kept in L and U (only the
-        #              2nd-order correction A_uW (dt/M_s) Mfs^T is dropped).
-        #              Per iteration: 1 fluid solve + 2 M_s backsolves + 2
-        #              coupling matvecs.  Scales to large/3D problems; no
-        #              monolithic factorisation at all.
+        #   "gmres"  : FGMRES(50) with a block-LDU preconditioner (RIGHT
+        #              preconditioned): the fluid Stokes block [K Bt; B s11]
+        #              and the solid mass M_s are CONSTANT and factorised
+        #              once; the coupling blocks (-A_uW, -Mfs^T) of the current
+        #              Jacobian are kept in L and U (only the 2nd-order
+        #              correction A_uW (dt/M_s) Mfs^T is dropped).  Per
+        #              iteration: 1 fluid solve + 2 M_s backsolves + 2 coupling
+        #              matvecs.  FGMRES (flexible) stays stable when the fluid
+        #              solve itself is iterative (AMG/Krylov, the 3D route);
+        #              no monolithic factorisation at all.
         "linear_solver": _env("LINEAR_SOLVER", "direct"),
     }
     cfg["num_steps"] = int(_env("STEPS", int(cfg["T"] / cfg["dt"])))

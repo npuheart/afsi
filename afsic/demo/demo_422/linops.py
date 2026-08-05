@@ -77,3 +77,100 @@ def affine_reference_coords(verts, x):
     J = affine_jacobian(verts)
     v0 = verts[0]
     return np.linalg.solve(J, x - v0)
+
+
+def fgmres(A, b, M=None, x0=None, rtol=1e-8, atol=0.0, restart=50,
+           maxiter=None, callback=None):
+    """Flexible GMRES (FGMRES) with RIGHT preconditioning.
+
+    Unlike (left-)GMRES, FGMRES stores the PRECONDITIONED vectors z_j = M v_j
+    and solves in span{z_1,...,z_m}, so the preconditioner M may VARY from
+    iteration to iteration (flexible preconditioning).  This is the right
+    choice when the preconditioner itself uses an iterative inner solve (e.g.
+    an AMG / Krylov solve of the fluid block), where each application is only
+    approximately the same operator.
+
+    A : matvec callable / scipy csr / LinearOperator (square)
+    M : matvec callable (the preconditioner, applied to vectors) or None
+    Uses Givens rotations to track the residual incrementally (so convergence
+    is detected mid-restart, like standard GMRES) and terminates early.
+    Returns (x, info); info = 0 converged, >0 iterations exhausted.
+    """
+    n = b.shape[0]
+    b = np.asarray(b, dtype=float)
+    if M is None:
+        M = lambda v: v
+    if x0 is None:
+        x0 = np.zeros(n)
+    if maxiter is None:
+        maxiter = 100 * (n // max(restart, 1) + 1)
+    x = np.asarray(x0, dtype=float).copy()
+    r = b - A @ x
+    beta = float(np.linalg.norm(r))
+    normb = float(np.linalg.norm(b))
+    tol = max(rtol * (normb if normb > 0 else 1.0), atol)
+    if beta <= tol:
+        return x, 0
+    it = 0
+    while beta > tol and it < maxiter:
+        m = min(restart, maxiter - it)
+        V = np.zeros((n, m + 1))
+        Z = np.zeros((n, m))
+        H = np.zeros((m + 1, m))
+        cs = np.zeros(m)
+        sn = np.zeros(m)
+        g = np.zeros(m + 1)
+        V[:, 0] = r / beta
+        g[0] = beta
+        happy = 0
+        for j in range(m):
+            it += 1
+            zj = np.asarray(M(V[:, j]), dtype=float)
+            Z[:, j] = zj
+            w = A @ zj
+            # modified Gram-Schmidt + one reorthogonalisation pass
+            for i in range(j + 1):
+                H[i, j] = V[:, i] @ w
+                w = w - H[i, j] * V[:, i]
+            for i in range(j + 1):
+                h2 = V[:, i] @ w
+                H[i, j] += h2
+                w = w - h2 * V[:, i]
+            hn = float(np.linalg.norm(w))
+            H[j + 1, j] = hn
+            # apply previous Givens rotations to the new column
+            for i in range(j):
+                temp = cs[i] * H[i, j] + sn[i] * H[i + 1, j]
+                H[i + 1, j] = -sn[i] * H[i, j] + cs[i] * H[i + 1, j]
+                H[i, j] = temp
+            # new rotation (H[j+1,j] -> 0)
+            if hn > 0.0:
+                rot = np.hypot(H[j, j], hn)
+                cs[j] = H[j, j] / rot
+                sn[j] = hn / rot
+                H[j, j] = rot
+                H[j + 1, j] = 0.0
+            else:
+                cs[j] = 1.0
+                sn[j] = 0.0
+            # update the residual vector g
+            g[j + 1] = -sn[j] * g[j]
+            g[j] = cs[j] * g[j]
+            rnorm = abs(g[j + 1])
+            happy = j + 1
+            if rnorm <= tol:
+                break
+            if hn == 0.0:            # happy breakdown: exact in this subspace
+                break
+            V[:, j + 1] = w / hn
+        # solve the (rotated, upper-triangular) least squares: H y = g
+        y = np.zeros(happy)
+        for i in range(happy - 1, -1, -1):
+            y[i] = (g[i] - H[i, i + 1:happy] @ y[i + 1:happy]) / H[i, i]
+        x = x + Z[:, :happy] @ y
+        r = b - A @ x
+        beta = float(np.linalg.norm(r))
+        if callback is not None:
+            callback(it, beta)
+    info = 0 if beta <= tol else it
+    return x, info
