@@ -48,7 +48,10 @@ def make_config():
         # iteration).  The converged solution is unchanged (frozen Jacobian =
         # modified Newton); refactorise adaptively on stall.  0 = full Newton
         # (factorise every iteration), 1 = per-step frozen, 2 = cross-step
-        # frozen (reuse the factor for many steps; refactorise on demand).
+        # frozen (reuse the factor for many steps; refactorise on demand),
+        # 3 = frozen factor used as a RIGHT PRECONDITIONER for FGMRES on the
+        # current Jacobian (the factor is only an accelerator, so it never
+        # goes stale -> no restart; factor can be reused for very many steps).
         "frozen": int(_env("FROZEN", 2)),
         # linear solver for the monolithic Newton system:
         #   "direct" : sparse direct LU (MUMPS) of the full 3x3 Jacobian

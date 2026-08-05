@@ -92,7 +92,7 @@ python main.py --steps 10 --nx 16   # 快速冒烟测试
 | `RHO_S` | 1.0 | 固体密度 |
 | `PIN` | 0 | 1=钉住圆盘中心（准静态演示） |
 | `SCHEME` | 0 | 0=单块 3×3；3=约化 2×2（精确 Schur 消去 W） |
-| `FROZEN` | 2 | 冻结 Jacobian 准 Newton：0=完全 Newton（每迭代分解）；1=每步分解一次；2=跨步复用（默认，停滞自适应重分解+失败回退） |
+| `FROZEN` | 2 | 冻结 Jacobian 准 Newton：0=完全 Newton（每迭代分解）；1=每步分解一次；2=跨步复用（默认，停滞自适应重分解+失败回退）；3=**冻结因子当 FGMRES 右预条件**（对当前 Jacobian 解，因子只加速不失效→无 restart、可长期复用，线性解少 ~3×） |
 | `LINEAR_SOLVER` | direct | monolithic 线性求解器：`direct`=MUMPS 直接分解（默认）；`gmres`=FGMRES(50) + 块 LDU 预条件（见下） |
 | `FLUID_SOLVER` | mumps | gmres 模式下流体鞍点求解器：`mumps`=直接分解（2D 快，默认）；`amg`=GAMG（K 与压力 Schur 补 S_p 都用 AMG，**3D 可扩展路径**，无直接分解） |
 | `OUT` | 10 | 输出间隔（步） |

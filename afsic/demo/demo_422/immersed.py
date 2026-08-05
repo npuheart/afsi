@@ -593,12 +593,15 @@ class ImmersedFEM:
         # as full Newton, so the implicit (stable) solution is unchanged, but it
         # avoids (n_it-1) expensive MUMPS factorisations.  FROZEN=1 factorises
         # once per step; FROZEN=2 (default) reuses the factor across steps and
-        # only refactorises on demand (stall / failed convergence), so the
-        # factorisation cost is amortised over many steps.  FROZEN=0 restores
-        # the original full Newton.
+        # only refactorises on demand (stall / failed convergence).  FROZEN=0
+        # restores the original full Newton.  FROZEN=3 uses the frozen factor
+        # as a RIGHT PRECONDITIONER for FGMRES on the CURRENT Jacobian: the
+        # factor only accelerates the Krylov solve (it is never required to be
+        # an accurate inverse), so it does not go stale and can be reused for
+        # very many steps without restart.
         frozen = cfg["frozen"]
         lu = None
-        if frozen == 2 and getattr(self, "_lu_cache", None) is not None:
+        if frozen in (2, 3) and getattr(self, "_lu_cache", None) is not None:
             lu = self._lu_cache
             self.msg("    [mono] reusing frozen Jacobian factor")
         elif frozen >= 1:
@@ -606,7 +609,7 @@ class ImmersedFEM:
                                             tangent=True)
             lu = MumpsFactor(self.apply_bc(self.build_monolithic(A_uW)))
             self.msg("    [mono] factorised Jacobian (frozen)")
-            if frozen == 2:
+            if frozen in (2, 3):
                 self._lu_cache = lu
         else:
             self._lu_cache = None
@@ -629,7 +632,28 @@ class ImmersedFEM:
             rhs[self.n_u + self.n_p:] = -R_W
             rhs[self.bc_all] = 0.0
 
-            dX = lu.solve(rhs)
+            if frozen == 3:
+                # frozen factor as RIGHT preconditioner for FGMRES on the
+                # CURRENT Jacobian (preconditioner never goes stale -> no
+                # restart, factor reused for many steps).
+                from linops import fgmres
+                A_k = self.apply_bc(
+                    self.build_monolithic(self.assemble_elastic(W)[1]))
+                dX, _info = fgmres(A_k, rhs, M=lu.solve, rtol=1e-8,
+                                   atol=1e-14, restart=50, maxiter=100)
+                if _info != 0:
+                    self.msg(f"    [mono] fgmres did not converge (info={_info}) "
+                             "-- refactoring")
+                    _, A_uW = self.assemble_elastic(
+                        self.X[self.n_u + self.n_p:], tangent=True)
+                    lu = MumpsFactor(
+                        self.apply_bc(self.build_monolithic(A_uW)))
+                    self._lu_cache = lu
+                    refactored = True
+                    dX, _info = fgmres(A_k, rhs, M=lu.solve, rtol=1e-8,
+                                       atol=1e-14, restart=50, maxiter=100)
+            else:
+                dX = lu.solve(rhs)
             dX[self.bc_all] = 0.0
             self.X += dX
 
@@ -640,8 +664,8 @@ class ImmersedFEM:
             if dX_norm < cfg["newton_rtol"] * (1.0 + np.linalg.norm(self.X)):
                 converged = True
                 break
-            # adaptive refactorisation on stagnation (frozen mode only)
-            if (frozen >= 1 and it > 0 and dX_prev is not None
+            # adaptive refactorisation on stagnation (frozen modes only)
+            if (frozen in (1, 2) and it > 0 and dX_prev is not None
                     and dX_norm > 0.5 * dX_prev):
                 _, A_uW = self.assemble_elastic(
                     self.X[self.n_u + self.n_p:], tangent=True)
