@@ -141,10 +141,20 @@ def make_config():
         # Newton
         "n_newton_max": 8,
         "newton_rtol": 1e-9,
+        "refactor_iter": 4,            # frozen mode: refactorise if Newton needs
+                                       # more than this many corrections (keeps
+                                       # the factor fresh at large dt)
         "pin_center": int(_env("PIN", 0)) == 1,   # pin disk centre (quasi-static)
         # solver
         "scheme": int(_env("SCHEME", 0)),         # 0 monolithic | 3 reduced 2x2
         "p_stab": 1e-8,                           # eps*M_p on the (1,1) block
+        # quasi-Newton: factorise the monolithic Jacobian ONCE and reuse it for
+        # all Newton corrections (only the elastic FORCE is re-evaluated per
+        # iteration).  The converged solution is unchanged (frozen Jacobian =
+        # modified Newton); refactorise adaptively on stall.  0 = full Newton
+        # (factorise every iteration), 1 = per-step frozen, 2 = cross-step
+        # frozen (reuse the factor for many steps; refactorise on demand).
+        "frozen": int(_env("FROZEN", 2)),
     }
     cfg["num_steps"] = int(_env("STEPS", int(cfg["T"] / cfg["dt"])))
     out = _env("OUTPUT", "output")
@@ -296,6 +306,7 @@ class ImmersedFEM:
         self.interaction = None
         self.Mfs = None
         self.MfsT_csr = None
+        self._gather_cache = None   # flattened elastic gather (per interaction)
 
         # ---- boundary data ----
         self._setup_boundary()
@@ -388,6 +399,15 @@ class ImmersedFEM:
         self.solid_cells = cells
         self.f_geom_x = self.msh.geometry.x
         self.f_geom_dofs = self.msh.geometry.dofmap
+        # precompute the affine Jacobian inverse + v0 for ALL background cells
+        # (constant; lets compute_interaction/reference coords be vectorised)
+        n_bg = self.msh.topology.index_map(self.msh.topology.dim).size_local
+        fverts = self.f_geom_x[self.f_geom_dofs[:n_bg]][:, :, :2]  # (n_bg, 3, 2)
+        self.f_v0 = fverts[:, 0].copy()                              # (n_bg, 2)
+        e1 = fverts[:, 1] - self.f_v0
+        e2 = fverts[:, 2] - self.f_v0
+        fJ = np.stack([e1, e2], axis=-1)                             # (n_bg, 2, 2) cols = edges
+        self.f_Jinv = np.linalg.inv(fJ)
         # bounding box tree of the fluid mesh (for locating solid points)
         self.bb_tree = geometry.bb_tree(self.msh, self.msh.topology.dim)
 
@@ -442,81 +462,76 @@ class ImmersedFEM:
 
         Solid points that lie outside the background mesh (e.g. when the disk
         reaches a wall) are skipped with a warning, exactly as in a.cpp: their
-        quadrature weight is dropped from the coupling."""
+        quadrature weight is dropped from the coupling.
 
-        # Build all current physical quadrature points (batched) and locate them
-        inter = []
-        xq_all = np.zeros((0, 2))
-        cell_slices = []
-        for ci, cc in enumerate(self.solid_cells):
-            Xq = cc["Xq"]
-            Wq = np.zeros_like(Xq)
-            s_bdofs = cc["s_bdofs"]
-            for c in range(2):
-                Wq[:, c] = np.sum(W[s_bdofs * 2 + c][None, :] * self.s_phi, axis=1)
-            xq = Xq + Wq
-            cell_slices.append((len(xq_all), len(xq_all) + len(xq)))
-            xq_all = np.vstack([xq_all, xq])
-        if len(xq_all) == 0:
+        Vectorised: all solid cells share the same quadrature points, so the
+        deformed points, the reference-coordinate mapping and the physical
+        gradients are computed in one batched pass (precomputed per-cell
+        affine Jacobian inverses)."""
+
+        self._gather_cache = None   # invalidate the cached elastic gather
+        nc = len(self.solid_cells)
+        if nc == 0:
             self.interaction = []
             return self.interaction
+        nq = len(self.qw)
+        s_bdofs_all = np.stack([cc["s_bdofs"] for cc in self.solid_cells])  # (nc, ndofs_s)
+        Xq_all = np.stack([cc["Xq"] for cc in self.solid_cells])            # (nc, nq, 2)
+
+        # deformed quadrature points  xq = Xq + W(Xq), batched
+        W_cell = np.stack([W[s_bdofs_all * 2 + c] for c in range(2)], axis=2)  # (nc, ndofs_s, 2)
+        Wq = np.einsum("nkc,qk->nqc", W_cell, self.s_phi)                   # (nc, nq, 2)
+        xq_all = (Xq_all + Wq).reshape(nc * nq, 2)
 
         xq3 = np.hstack([xq_all, np.zeros((len(xq_all), 1))])
         coll = geometry.compute_collisions_points(self.bb_tree, xq3)
         own = geometry.compute_colliding_cells(self.msh, coll, xq3)
 
-        # keep only the points that were located (skip the rest, with a warning)
-        found = np.array([len(own.links(i)) > 0 for i in range(len(xq_all))])
-        n_miss = int((~found).sum())
-        if n_miss > 0 and rank == 0:
-            self.msg(f"    [warn] {n_miss} solid quadrature point(s) outside the "
-                     "background mesh (disk touching a wall?) -- skipped")
-
-        # reference coordinates + background basis tabulation per located point
-        n_pts = int(found.sum())
+        # per located point keep the first colliding (owned) background cell
+        n_pts = 0
+        fcell_list = []
+        idx_map = np.full(nc * nq, -1, dtype=np.int64)   # global pt -> compressed idx
+        for i in range(nc * nq):
+            cs = own.links(i)
+            if len(cs) == 0:
+                continue
+            fcell_list.append(cs[0])
+            idx_map[i] = n_pts
+            n_pts += 1
         if n_pts == 0:
             self.interaction = []
             return self.interaction
-        xi_all = np.zeros((n_pts, 2))
-        fcell_all = np.zeros(n_pts, dtype=np.int64)
-        glob2loc = []  # (original point index -> compressed index)
-        comp = 0
-        for i in range(len(xq_all)):
-            if not found[i]:
-                continue
-            cs = own.links(i)
-            c = cs[0]
-            verts = self.f_geom_x[self.f_geom_dofs[c]][:, :2]
-            xi_all[comp] = affine_reference_coords(verts, xq_all[i])
-            fcell_all[comp] = c
-            glob2loc.append(i)
-            comp += 1
-        xq_found = xq_all[glob2loc]
+        n_miss = nc * nq - n_pts
+        if n_miss > 0 and rank == 0:
+            self.msg(f"    [warn] {n_miss} solid quadrature point(s) outside the "
+                     "background mesh (disk touching a wall?) -- skipped")
+        fcell_all = np.asarray(fcell_list, dtype=np.int64)                  # (n_pts,)
+        sel = np.flatnonzero(idx_map >= 0)                                  # global pt indices found
+        xq_found = xq_all[sel]
+        fcell_found = fcell_all
+
+        # reference coordinates, vectorised with the precomputed cell Jacobians
+        xi_all = np.einsum("pij,pj->pi", self.f_Jinv[fcell_found],
+                           xq_found - self.f_v0[fcell_found])              # (n_pts, 2)
 
         # background basis values + reference gradients at the located points
         ftab = self.f_bxe.tabulate(1, xi_all)
-        f_phi = ftab[0][:, :, 0]                                    # (npts, ndofs_f)
-        f_gphi = np.stack([ftab[1][:, :, 0], ftab[2][:, :, 0]], axis=2)  # (npts, ndofs_f, 2)
-
+        f_phi = ftab[0][:, :, 0]                                           # (n_pts, ndofs_f)
+        f_gphi = np.stack([ftab[1][:, :, 0], ftab[2][:, :, 0]], axis=2)    # (n_pts, ndofs_f, 2)
         # physical gradient:  grad_x phi = grad_xi phi @ J^{-1}
-        f_gx = np.zeros_like(f_gphi)
-        for i in range(n_pts):
-            c = fcell_all[i]
-            verts = self.f_geom_x[self.f_geom_dofs[c]][:, :2]
-            Jinv = np.linalg.inv(affine_jacobian(verts))
-            f_gx[i] = f_gphi[i] @ Jinv
+        f_gx = np.einsum("pij,pjk->pik", f_gphi, self.f_Jinv[fcell_found])
 
-        # group by solid cell (only the located quadrature points of each cell)
+        # group by solid cell (uniform nq points per cell)
+        inter = []
         for ci, cc in enumerate(self.solid_cells):
-            i0, i1 = cell_slices[ci]
-            # local (within-cell) quadrature indices of the located points
-            q_idx = [g - i0 for g in glob2loc if i0 <= g < i1]
-            cc["q_idx"] = np.asarray(q_idx, dtype=np.int64)
-            mask = (np.asarray(glob2loc) >= i0) & (np.asarray(glob2loc) < i1)
-            cc["xq"] = xq_found[mask]
-            cc["f_cells"] = fcell_all[mask]
-            cc["f_phi"] = f_phi[mask]
-            cc["f_gx"] = f_gx[mask]
+            i0, i1 = ci * nq, (ci + 1) * nq
+            cm = idx_map[i0:i1]                                            # compressed idx per local pt (-1 = missed)
+            m = cm >= 0
+            cc["q_idx"] = np.flatnonzero(m).astype(np.int64)               # local quad idx found
+            cc["xq"] = xq_all[i0:i1][m]
+            cc["f_cells"] = fcell_found[cm[m]]
+            cc["f_phi"] = f_phi[cm[m]]
+            cc["f_gx"] = f_gx[cm[m]]
             inter.append(cc)
         self.interaction = inter
         return inter
@@ -529,7 +544,7 @@ class ImmersedFEM:
         """Mfs(i,j) = int_Omega_s phi_i_bg(x) phi_j_s(X) dX (same-component
         pairs only).  Vectorised over the located solid quadrature points."""
         bs = self.bs_u
-        rows, cols, vals = [], [], []
+        rows0, cols0, vals = [], [], []
         for cc in self.interaction:
             npt = len(cc["q_idx"])
             if npt == 0:
@@ -537,27 +552,27 @@ class ImmersedFEM:
             q_idx = cc["q_idx"]
             s_bdofs = cc["s_bdofs"]
             f_bdofs = np.stack([self.V.dofmap.cell_dofs(c) for c in cc["f_cells"]])
-            f_phi_k = cc["f_phi"]                  # (npts, ndofs_f)
-            s_phi_k = self.s_phi[q_idx]            # (npts, ndofs_s)
-            w = cc["JxW_s"][q_idx]                 # (npts,)
-            for i in range(f_bdofs.shape[1]):
-                fv = f_phi_k[:, i]
-                if not np.any(fv):
-                    continue
-                for j in range(len(s_bdofs)):
-                    sv = s_phi_k[:, j]
-                    if not np.any(sv):
-                        continue
-                    # only same-component pairs couple (ci == cj)
-                    rows.append(f_bdofs[:, i] * bs + 0)
-                    cols.append(np.full(npt, s_bdofs[j] * bs + 0))
-                    vals.append(fv * sv * w)
-                    rows.append(f_bdofs[:, i] * bs + 1)
-                    cols.append(np.full(npt, s_bdofs[j] * bs + 1))
-                    vals.append(fv * sv * w)
-        Mfs = coo_matrix((np.concatenate(vals),
-                          (np.concatenate(rows), np.concatenate(cols))),
-                         shape=(self.n_u, self.n_s)).tocsr()
+            f_phi_k = cc["f_phi"]                  # (npt, ndofs_f)
+            s_phi_k = self.s_phi[q_idx]            # (npt, ndofs_s)
+            w = cc["JxW_s"][q_idx]                 # (npt,)
+            # per-point weight matrix  V[p,i,j] = f_phi[p,i] * s_phi[p,j] * w[p]
+            V = f_phi_k[:, :, None] * s_phi_k[:, None, :] * w[:, None, None]
+            I0 = (f_bdofs * bs)[:, :, None]        # (npt, ndofs_f, 1)  block rows
+            C0 = (s_bdofs * bs)[None, None, :]     # (1, 1, ndofs_s)    block cols
+            rows0.append(np.broadcast_to(I0, V.shape).ravel())
+            cols0.append(np.broadcast_to(C0, V.shape).ravel())
+            vals.append(V.ravel())
+        if not vals:
+            Mfs = coo_matrix((self.n_u, self.n_s)).tocsr()
+        else:
+            r = np.concatenate(rows0)
+            c = np.concatenate(cols0)
+            v = np.concatenate(vals)
+            # only same-component pairs couple (comp 0 and comp 1, same weights)
+            r2 = np.concatenate([r, r + 1])
+            c2 = np.concatenate([c, c + 1])
+            v2 = np.concatenate([v, v])
+            Mfs = coo_matrix((v2, (r2, c2)), shape=(self.n_u, self.n_s)).tocsr()
         self.Mfs = Mfs
         self.MfsT_csr = Mfs.T.tocsr()
         return Mfs
@@ -569,79 +584,96 @@ class ImmersedFEM:
     # The background test functions come from a frozen interaction (geometry
     # = W^n); only F = I + grad_X W follows the current Newton iterate W.
     # ------------------------------------------------------------------
-    def assemble_elastic(self, W):
-        """Incompressible neo-Hookean elastic force and its tangent (mixed
-        stiffness), vectorised over the located solid quadrature points:
+    def assemble_elastic(self, W, tangent=True):
+        """Incompressible neo-Hookean elastic force and (optionally) its tangent
+        (mixed stiffness), vectorised over the located solid quadrature points:
             f_el,i = - int (P F^T) : grad_x phi_i dX,   P = mu (F - F^{-T})
             A_uW(i,j) = d f_el,i / dW_j
+        With ``tangent=False`` only the (cheap) force f_el is returned and the
+        tangent is skipped -- used by the frozen-Jacobian quasi-Newton, which
+        needs the exact force every iteration but the tangent only once per
+        step.
         """
         mu_s = self.cfg["mu_s"]
         bs = self.bs_u
-        # ---- gather per-point data (flattened across solid cells) ----
-        q_idx_list, s_bdofs_list, f_bdofs_list, f_gx_list, w_list = [], [], [], [], []
-        for cc in self.interaction:
-            npt = len(cc["q_idx"])
-            if npt == 0:
-                continue
-            q_idx_list.append(cc["q_idx"])
-            s_bdofs_list.append(np.tile(cc["s_bdofs"], (npt, 1)))
-            f_bdofs_list.append(np.stack(
-                [self.V.dofmap.cell_dofs(c) for c in cc["f_cells"]]))
-            f_gx_list.append(cc["f_gx"])
-            w_list.append(cc["JxW_s"][cc["q_idx"]])
-        if not q_idx_list:
-            return np.zeros(self.n_u), coo_matrix(
-                (self.n_u, self.n_s), dtype=float).tocsr()
-        q_idx = np.concatenate(q_idx_list)
-        s_bdofs = np.concatenate(s_bdofs_list)     # (npts, ndofs_s)
-        f_bdofs = np.concatenate(f_bdofs_list)     # (npts, ndofs_f)
-        f_gx = np.concatenate(f_gx_list)           # (npts, ndofs_f, 2)
-        w = np.concatenate(w_list)                 # (npts,)
+        # ---- gather per-point data (flattened across solid cells), cached
+        #      per interaction so the per-Newton-iteration force is cheap ----
+        g = self._gather_cache
+        if g is None:
+            q_idx_list, s_bdofs_list = [], []
+            f_bdofs_list, f_gx_list, w_list = [], [], []
+            for cc in self.interaction:
+                npt = len(cc["q_idx"])
+                if npt == 0:
+                    continue
+                q_idx_list.append(cc["q_idx"])
+                s_bdofs_list.append(np.tile(cc["s_bdofs"], (npt, 1)))
+                f_bdofs_list.append(np.stack(
+                    [self.V.dofmap.cell_dofs(c) for c in cc["f_cells"]]))
+                f_gx_list.append(cc["f_gx"])
+                w_list.append(cc["JxW_s"][cc["q_idx"]])
+            if not q_idx_list:
+                return np.zeros(self.n_u), coo_matrix(
+                    (self.n_u, self.n_s), dtype=float).tocsr()
+            q_idx = np.concatenate(q_idx_list)
+            s_bdofs = np.concatenate(s_bdofs_list)     # (npts, ndofs_s)
+            f_bdofs = np.concatenate(f_bdofs_list)     # (npts, ndofs_f)
+            f_gx = np.concatenate(f_gx_list)           # (npts, ndofs_f, 2)
+            w = np.concatenate(w_list)                 # (npts,)
+            s_phi_k = self.s_phi[q_idx]                # (npts, ndofs_s)
+            s_gphi_k = self.s_gphi[q_idx]              # (npts, ndofs_s, 2)
+            g = (q_idx, s_bdofs, f_bdofs, f_gx, w, s_phi_k, s_gphi_k)
+            self._gather_cache = g
+        q_idx, s_bdofs, f_bdofs, f_gx, w, s_phi_k, s_gphi_k = g
         npts = len(q_idx)
-        s_phi_k = self.s_phi[q_idx]                # (npts, ndofs_s)
-        s_gphi_k = self.s_gphi[q_idx]              # (npts, ndofs_s, 2)
 
         # ---- deformation gradient F = I + grad_X W at the quadrature points ----
-        Wq = np.zeros((npts, 2))
         gradW = np.zeros((npts, 2, 2))
         for c in range(2):
             Wvals = W[s_bdofs * 2 + c]             # (npts, ndofs_s)
-            Wq[:, c] = np.sum(Wvals * s_phi_k, axis=1)
             gradW[:, c, :] = np.einsum("nk,nkb->nb", Wvals, s_gphi_k)
         F = np.eye(2)[None, :, :] + gradW
         Finv = np.linalg.inv(F)
         P = mu_s * (F - Finv.transpose(0, 2, 1))
         PeFT = P @ F.transpose(0, 2, 1)            # (npts, 2, 2)
 
-        # ---- f_el (scatter by fluid dof) ----
+        # ---- f_el (scatter by fluid dof), vectorised over (i, ci) ----
+        #   contr[p,i,ci] = sum_a PeFT[p,ci,a] * f_gx[p,i,a] * w[p]
+        contr = np.einsum("pca,pia->pic", PeFT, f_gx) * w[:, None, None]
         f_el = np.zeros(self.n_u)
-        for i in range(f_bdofs.shape[1]):
-            gx = f_gx[:, i, :]                     # (npts, 2)
-            for ci in range(2):
-                contr = np.sum(PeFT[:, ci, :] * gx, axis=1) * w
-                np.add.at(f_el, f_bdofs[:, i] * bs + ci, -contr)
+        np.add.at(f_el,
+                  (f_bdofs * bs)[:, :, None] + np.arange(2)[None, None, :],
+                  -contr)
+        if not tangent:
+            return f_el, None
 
         # ---- A_uW (scatter by fluid x solid dof pair) ----
-        rows, cols, vals = [], [], []
+        # ---- A_uW (scatter by fluid x solid dof pair), vectorised with
+        #      BLAS matmul.  dF[a][b] = delta_{a,cj} gk[b] has only one nonzero
+        #      row, so (j, cj) are flattened into a single jc index.
+        ndofs_f = f_bdofs.shape[1]
+        ndofs_s = s_bdofs.shape[1]
         Ft = F.transpose(0, 2, 1)
-        for i in range(f_bdofs.shape[1]):
-            gx = f_gx[:, i, :]
-            for ci in range(2):
-                for j in range(s_bdofs.shape[1]):
-                    gk = s_gphi_k[:, j, :]         # (npts, 2)
-                    for cj in range(2):
-                        # dF[a][b] = delta_{a,cj} gk[b]  (only row cj nonzero)
-                        dF = np.zeros((npts, 2, 2))
-                        dF[:, cj, :] = gk
-                        dFinv = -Finv @ dF @ Finv
-                        dP = mu_s * (dF - dFinv.transpose(0, 2, 1))
-                        dPeFT = dP @ Ft + P @ dF.transpose(0, 2, 1)
-                        dcontr = np.sum(dPeFT[:, ci, :] * gx, axis=1) * w
-                        rows.append(f_bdofs[:, i] * bs + ci)
-                        cols.append(s_bdofs[:, j] * bs + cj)
-                        vals.append(-dcontr)
-        A_uW = coo_matrix((np.concatenate(vals),
-                           (np.concatenate(rows), np.concatenate(cols))),
+        dF_all = np.zeros((npts, ndofs_s * 2, 2, 2))
+        dF_all[:, 0::2, 0, :] = s_gphi_k          # cj=0: row 0 = gk
+        dF_all[:, 1::2, 1, :] = s_gphi_k          # cj=1: row 1 = gk
+        tmp = np.matmul(Finv[:, None, :, :], dF_all)              # [p,jc,i,b]
+        dFinv_all = -np.matmul(tmp, Finv[:, None, :, :])          # [p,jc,i,k]
+        dP_all = mu_s * (dF_all - dFinv_all.transpose(0, 1, 3, 2))
+        term1 = np.matmul(dP_all, Ft[:, None, :, :])              # [p,jc,m,k]
+        term2 = np.matmul(P[:, None, :, :], dF_all.transpose(0, 1, 3, 2))
+        dPeFT_all = term1 + term2                                 # [p,jc,m,k]
+        flat = dPeFT_all.reshape(npts, ndofs_s * 2 * 2, 2)        # [p,(jc,m),k]
+        dcontr = (np.matmul(f_gx, flat.transpose(0, 2, 1))
+                  * w[:, None, None])                             # [p,i,(jc,m)]
+        dcontr = dcontr.reshape(npts, ndofs_f, ndofs_s, 2, 2)     # [p,i,j,c,m]
+        rows = np.broadcast_to((f_bdofs * bs)[:, :, None, None, None]
+                               + np.arange(2)[None, None, None, None, :],
+                               dcontr.shape).ravel()
+        cols = np.broadcast_to((s_bdofs * bs)[:, None, :, None, None]
+                               + np.arange(2)[None, None, None, :, None],
+                               dcontr.shape).ravel()
+        A_uW = coo_matrix((-dcontr.ravel(), (rows, cols)),
                           shape=(self.n_u, self.n_s)).tocsr()
         return f_el, A_uW
 
@@ -716,15 +748,41 @@ class ImmersedFEM:
         # seed: linear extrapolation of W (fewer Newton iterations)
         self.X[self.n_u + self.n_p:] = 2.0 * W_old - self.W_prev
 
-        # (b) Newton loop
-        f_el = np.zeros(self.n_u)
-        A_uW = None
-        dX_norm = 0.0
+        # (b) Newton loop.  Default is a quasi-Newton with a FROZEN Jacobian:
+        # the monolithic matrix is factorised once and reused for every
+        # correction; only the exact elastic force is re-evaluated each
+        # iteration.  This is modified Newton -- it converges to the SAME root
+        # as full Newton, so the implicit (stable) solution is unchanged, but it
+        # avoids (n_it-1) expensive MUMPS factorisations.  FROZEN=1 factorises
+        # once per step; FROZEN=2 (default) reuses the factor across steps and
+        # only refactorises on demand (stall / failed convergence), so the
+        # factorisation cost is amortised over many steps.  FROZEN=0 restores
+        # the original full Newton.
+        frozen = cfg["frozen"]
+        lu = None
+        if frozen == 2 and getattr(self, "_lu_cache", None) is not None:
+            lu = self._lu_cache
+            self.msg("    [mono] reusing frozen Jacobian factor")
+        elif frozen >= 1:
+            _, A_uW = self.assemble_elastic(self.X[self.n_u + self.n_p:],
+                                            tangent=True)
+            lu = MumpsFactor(self.apply_bc(self.build_monolithic(A_uW)))
+            self.msg("    [mono] factorised Jacobian (frozen)")
+            if frozen == 2:
+                self._lu_cache = lu
+        else:
+            self._lu_cache = None
+
+        dX_prev = None
+        refactored = False
+        converged = False
         for it in range(cfg["n_newton_max"]):
             W = self.X[self.n_u + self.n_p:]
-            f_el, A_uW = self.assemble_elastic(W)
-            A = self.build_monolithic(A_uW)
-            A = self.apply_bc(A)
+            if frozen >= 1:
+                f_el = self.assemble_elastic(W, tangent=False)[0]
+            else:
+                f_el, A_uW = self.assemble_elastic(W, tangent=True)
+                lu = MumpsFactor(self.apply_bc(self.build_monolithic(A_uW)))
 
             R_u, R_p, R_W = self._residual(W_old, f_el)
             rhs = np.zeros(self.N)
@@ -733,15 +791,53 @@ class ImmersedFEM:
             rhs[self.n_u + self.n_p:] = -R_W
             rhs[self.bc_all] = 0.0
 
-            lu = MumpsFactor(A)
             dX = lu.solve(rhs)
             dX[self.bc_all] = 0.0
             self.X += dX
 
             dX_norm = np.linalg.norm(dX)
-            self.msg(f"    [mono] newton {it} |dX|={dX_norm:.3e}")
+            self.msg(f"    [mono] newton {it} |dX|={dX_norm:.3e}"
+                     f"{'  (refactorised)' if refactored else ''}")
+            refactored = False
             if dX_norm < cfg["newton_rtol"] * (1.0 + np.linalg.norm(self.X)):
+                converged = True
                 break
+            # adaptive refactorisation on stagnation (frozen mode only)
+            if (frozen >= 1 and it > 0 and dX_prev is not None
+                    and dX_norm > 0.5 * dX_prev):
+                _, A_uW = self.assemble_elastic(
+                    self.X[self.n_u + self.n_p:], tangent=True)
+                lu = MumpsFactor(self.apply_bc(self.build_monolithic(A_uW)))
+                if frozen == 2:
+                    self._lu_cache = lu
+                refactored = True
+            dX_prev = dX_norm
+
+        if not converged and frozen >= 1:
+            # the frozen factor stalled/diverged: fall back to a full-Newton
+            # restart from the step start with the exact Jacobian (robustness)
+            self.msg("    [mono] frozen Newton did not converge -- "
+                     "restarting with exact Jacobian")
+            self.X[self.n_u + self.n_p:] = W_old
+            for it in range(cfg["n_newton_max"]):
+                W = self.X[self.n_u + self.n_p:]
+                f_el, A_uW = self.assemble_elastic(W, tangent=True)
+                lu = MumpsFactor(self.apply_bc(self.build_monolithic(A_uW)))
+                R_u, R_p, R_W = self._residual(W_old, f_el)
+                rhs = np.zeros(self.N)
+                rhs[:self.n_u] = -R_u
+                rhs[self.n_u:self.n_u + self.n_p] = -R_p
+                rhs[self.n_u + self.n_p:] = -R_W
+                rhs[self.bc_all] = 0.0
+                dX = lu.solve(rhs)
+                dX[self.bc_all] = 0.0
+                self.X += dX
+                dX_norm = np.linalg.norm(dX)
+                self.msg(f"    [mono] restart newton {it} |dX|={dX_norm:.3e}")
+                if dX_norm < cfg["newton_rtol"] * (1.0 + np.linalg.norm(self.X)):
+                    break
+            if frozen == 2:
+                self._lu_cache = lu
         self.W_prev = self.X[self.n_u + self.n_p:].copy()
 
     # ------------------------------------------------------------------

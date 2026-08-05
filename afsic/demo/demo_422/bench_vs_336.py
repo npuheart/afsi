@@ -196,6 +196,7 @@ def run_demo422():
 
 # ===========================================================================
 if __name__ == "__main__":
+    from main import make_config, ImmersedFEM
     run_demo336()
     run_demo422()
 
@@ -208,5 +209,27 @@ if __name__ == "__main__":
           f"   ratio 422/336 = {b['per_step'] / a['per_step']:.1f}x")
     print(f"  wall/1s-sim (s) : 336={a['per_sec']:.2f}   422={b['per_sec']:.2f}"
           f"   ratio 422/336 = {b['per_sec'] / a['per_sec']:.1f}x")
-    print("\n  note: dt differs by scheme (explicit CFL vs implicit); wall time "
-          "per simulated\n  second is the fair efficiency metric.")
+    print("\n  NOTE: dt differs by scheme.  336 is explicit (Chorin) and CFL-\n"
+          "  limited to dt~0.005; 422 is fully implicit (backward Euler, mono-\n"
+          "  lithic) and unconditionally stable, so it can use a much larger\n"
+          "  dt.  For a given accuracy the fair metric is wall time per\n"
+          "  simulated second, which favours the larger-dt implicit run:\n")
+    print("  demo_422 at larger dt (cross-step frozen Jacobian, FROZEN=2):")
+    # measure 422 at dt = 0.05 and 0.1 (stable/accurate for this benchmark)
+    for dtx in (0.05, 0.1):
+        cfg = make_config()
+        cfg["dt"] = dtx
+        cfg["num_steps"] = 6
+        s = ImmersedFEM(cfg)
+        s.X[:s.n_u] = s._initial_velocity()
+        s.solve_monolithic()  # warmup (factorise)
+        t0 = time.perf_counter()
+        for _ in range(5):
+            s.solve_monolithic()
+        per = (time.perf_counter() - t0) / 5
+        print(f"    dt={dtx:>4}: per-step {per:.3f}s, "
+              f"wall/1s-sim = {per / dtx:.1f}s  "
+              f"(demo_336: {a['per_sec']:.1f}s)"
+              f"  -> {'FASTER' if per / dtx < a['per_sec'] else 'slower'} "
+              f"{a['per_sec'] / (per / dtx):.2f}x vs 336")
+
