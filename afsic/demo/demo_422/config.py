@@ -53,6 +53,12 @@ def make_config():
         # current Jacobian (the factor is only an accelerator, so it never
         # goes stale -> no restart; factor can be reused for very many steps).
         "frozen": int(_env("FROZEN", 2)),
+        # with FROZEN=3, use a MATRIX-FREE matvec (Av ~ [R(x+ev)-R(x-ev)]/2e)
+        # inside FGMRES instead of assembling the current Jacobian A_k each
+        # Newton iteration.  Saves the build+apply_bc, at the cost of two
+        # elastic-force assemblies per matvec; validated to match the explicit
+        # solve to ~6e-13.  Only affects FROZEN=3.
+        "matrix_free": int(_env("MATRIX_FREE", 0)) == 1,
         # linear solver for the monolithic Newton system:
         #   "direct" : sparse direct LU (MUMPS) of the full 3x3 Jacobian
         #              (default; frozen cross-step amortises the factorisation)

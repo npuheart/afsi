@@ -643,10 +643,42 @@ class ImmersedFEM:
                 # CURRENT Jacobian (preconditioner never goes stale -> no
                 # restart, factor reused for many steps).
                 from linops import fgmres
-                A_k = self.apply_bc(
-                    self.build_monolithic(self.assemble_elastic(W)[1]))
-                dX, _info = fgmres(A_k, rhs, M=lu.solve, rtol=1e-8,
-                                   atol=1e-14, restart=50, maxiter=100)
+                if cfg.get("matrix_free"):
+                    # matrix-free matvec: Av ~ [R(X+ev)-R(X-ev)]/2e, BC rows
+                    # set to the unit rows (dX_bc = rhs_bc = 0).  No Jacobian
+                    # assembly at all.  Validated == explicit A_k to ~6e-13.
+                    from scipy.sparse.linalg import LinearOperator
+                    X0 = self.X.copy()
+
+                    def _resv(Xv):
+                        u = Xv[:self.n_u]
+                        p = Xv[self.n_u:self.n_u + self.n_p]
+                        Wv = Xv[self.n_u + self.n_p:]
+                        f = self.assemble_elastic(Wv, tangent=False)[0]
+                        r = np.zeros(self.N)
+                        r[:self.n_u] = self.K @ u + self.Bt @ p - f
+                        r[self.n_u:self.n_u + self.n_p] = self.B @ u
+                        r[self.n_u + self.n_p:] = (1.0 / cfg["dt"]) * (
+                            self.M_s @ (Wv - W_old)) - self.MfsT_csr @ u
+                        return r
+
+                    def mf_matvec(v, eps=1e-5):
+                        v = np.asarray(v, dtype=float).copy()
+                        v[self.bc_all] = 0.0
+                        Av = (_resv(X0 + eps * v) - _resv(X0 - eps * v)) \
+                            / (2.0 * eps)
+                        Av[self.bc_all] = v[self.bc_all]
+                        return Av
+
+                    Amf = LinearOperator((self.N, self.N), matvec=mf_matvec,
+                                         dtype=float)
+                    dX, _info = fgmres(Amf, rhs, M=lu.solve, rtol=1e-8,
+                                       atol=1e-14, restart=50, maxiter=100)
+                else:
+                    A_k = self.apply_bc(
+                        self.build_monolithic(self.assemble_elastic(W)[1]))
+                    dX, _info = fgmres(A_k, rhs, M=lu.solve, rtol=1e-8,
+                                       atol=1e-14, restart=50, maxiter=100)
                 if _info != 0:
                     self.msg(f"    [mono] fgmres did not converge (info={_info}) "
                              "-- refactoring")
@@ -656,8 +688,14 @@ class ImmersedFEM:
                         self.apply_bc(self.build_monolithic(A_uW)))
                     self._lu_cache = lu
                     refactored = True
-                    dX, _info = fgmres(A_k, rhs, M=lu.solve, rtol=1e-8,
-                                       atol=1e-14, restart=50, maxiter=100)
+                    if cfg.get("matrix_free"):
+                        dX, _info = fgmres(Amf, rhs, M=lu.solve, rtol=1e-8,
+                                           atol=1e-14, restart=50, maxiter=100)
+                    else:
+                        A_k = self.apply_bc(
+                            self.build_monolithic(self.assemble_elastic(W)[1]))
+                        dX, _info = fgmres(A_k, rhs, M=lu.solve, rtol=1e-8,
+                                           atol=1e-14, restart=50, maxiter=100)
             else:
                 dX = lu.solve(rhs)
             dX[self.bc_all] = 0.0

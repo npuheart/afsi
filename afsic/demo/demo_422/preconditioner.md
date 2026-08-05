@@ -215,13 +215,30 @@ matvec 用当前 Jacobian $A_k$（每 Newton 迭代装配；文档建议 matrix-
 相当于 frozen=1 的收敛性 + frozen=2 的低分解成本。已实现为 `FROZEN=3`（`immersed.py`
 `solve_monolithic`：fgmres(A_k, rhs, M=lu.solve, restart=50)；fgmres 不收敛时自动重分解）。
 
+## §4a Cahouet–Chabard Schur 近似 —— 完成（amg 路径，3D 内层）
+
+`_assemble_fluid_blocks` 新增 $L_p$（压力 Laplacian）；`IterativeFluidSaddle` 传
+`Mp/Lp/rho/eta/dt` 时用
+$S_p^{-1}\approx\frac{1}{\mu}M_p^{-1}+\frac{\rho}{\Delta t}L_p^{-1}$
+（$M_p^{-1}$ 集中质量对角，$L_p^{-1}$ GAMG、pin 一个压力 dof）。amg 路径默认启用。
+验证：流体鞍点解与 MUMPS 一致 ~1.5e-6（GAMG 松容差水平），端到端 amg+CC 跑通
+Newton 3 次。2D 当前参数下与旧 $S_p$ 精度相当（预期）；价值在 3D 大尺度跨度
+（补上 $B\,\mathrm{diag}(K)^{-1}B^T$ 缺的粘性半）。
+
+## §2 matrix-free matvec —— 完成（可选 `MATRIX_FREE=1`，2D 不划算）
+
+frozen=3 加 `MATRIX_FREE=1`：FGMRES matvec 用残差差分
+$Av\approx[R(X+\varepsilon v)-R(X-\varepsilon v)]/(2\varepsilon)$（$\varepsilon=10^{-5}$
+最优），BC 行模拟单位行。**关键坑**：`_residual` 用 `self.X` 而非传入 X，必须写显式残差
+函数；且 matrix-free 给的是**未 BC 的 Jacobian**（与 raw 一致 4e-11），需手动设 BC 行。
+验证：单线性解与显式 A_k 一致 6e-13（端到端 1e-10），eps=1e-5 最优。
+**2D 下更慢**（每 matvec 2 次 force 组装，单解 11ms vs 显式 4ms），迭代数略增（24→26）。
+价值在**免装配 Jacobian**（3D 重写 / 不可微本构时可用），默认关闭。
+
 ## 待办（未执行）
 
 - §1a 固定稀疏模式 + 一次符号分析（scipy→PETSc 179ms/次，频繁分解场景价值高）
 - §1b spread 装配向量化（Mfs/A_uW 已向量化，剩余 coo→csr，收益有限）
 - §1c MUMPS 参数（ICNTL(7)=5 METIS、3D 上 ICNTL(35)=2 BLR）
-- §2d 外推初值（linear 已实现 = §2d 的 $2x^n-x^{n-1}$；速度外推与之等价）
-- §2 matrix-free matvec（Av ≈ [R(x+εv)-R(x)]/ε，免去每迭代装配 A_k）
-- §4a Cahouet–Chabard Schur 近似（3D 内层）
 - §4b/c 单 V-cycle + GMG（3D 终态）
 - §5 零碎（ICNTL(24)、增广拉格朗日、BDF2）
