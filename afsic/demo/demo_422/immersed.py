@@ -642,20 +642,46 @@ class ImmersedFEM:
         return self._fluid_pre_lu, self._Ms_pre_lu
 
     def _block_gmres_solve(self, A, rhs, rtol=1e-8, maxiter=300):
-        """Solve A x = rhs with GMRES + the constant block preconditioner."""
+        """Solve A x = rhs with GMRES + a block-LDU preconditioner.
+
+        The monolithic Jacobian
+            A = [[K, Bt, -A_uW], [B, s11, 0], [-Mfs^T, 0, (1/dt) M_s]]
+        is preconditioned by the approximate block LDU factorisation
+            P = L D U,   D = diag([K Bt; B s11], (1/dt) M_s),
+            L = [[I,0,A_s M_ww^{-1}],[0,I,0],[0,0,I]],
+            U = [[I,0,0],[0,I,0],[-M_ww^{-1} M_wu,0,I]],
+        with A_s = -A_uW, M_wu = Mfs^T, M_ww = (1/dt) M_s.  The COUPLING blocks
+        are kept in L and U (only the 2nd-order correction A_s M_ww^{-1} M_wu is
+        dropped, as in the literature for monolithic FSI), so P^{-1}A stays
+        close to the identity even when the coupling (e.g. a stiff solid) is
+        strong.  The fluid saddle [K Bt; B s11] and the solid mass M_s are
+        CONSTANT and each factorised once; per GMRES iteration the cost is
+        1 fluid saddle solve + 2 M_ww^{-1} + 2 coupling matvecs.  This is the
+        scalable (large/3D) path: no monolithic factorisation at all.
+        """
         from scipy.sparse.linalg import LinearOperator, gmres
         n_u, n_p, n_s = self.n_u, self.n_p, self.n_s
         fl, ms = self._build_block_preconditioner()
         dt = self.cfg["dt"]
-        if getattr(self, "_gmres_P", None) is None:
-            def p_inv(r):
-                r = np.asarray(r, dtype=float)
-                f = fl.solve(np.ascontiguousarray(r[:n_u + n_p]))
-                w = dt * ms.solve(np.ascontiguousarray(r[n_u + n_p:]))
-                return np.concatenate([f, w])
-            self._gmres_P = LinearOperator((self.N, self.N), matvec=p_inv,
-                                           dtype=float)
-        x, info = gmres(A, rhs, M=self._gmres_P, rtol=rtol, atol=1e-14,
+        # coupling blocks of the CURRENT Jacobian (BCs already applied to A)
+        A_s = A[:n_u, n_u + n_p:]      # (n_u, n_s) = -A_uW
+        M_wu = A[n_u + n_p:, :n_u]     # (n_s, n_u) = -Mfs^T
+
+        def Minv(x):
+            return dt * ms.solve(np.ascontiguousarray(x))
+
+        def p_inv(r):
+            r = np.asarray(r, dtype=float)
+            zw0 = Minv(r[n_u + n_p:])                    # M_ww^{-1} r_w
+            yu = r[:n_u] - A_s @ zw0                     # L^{-1}
+            zu_zp = fl.solve(np.ascontiguousarray(
+                np.concatenate([yu, r[n_u:n_u + n_p]])))  # fluid saddle
+            zu = zu_zp[:n_u]
+            zw = zw0 + Minv(M_wu @ zu)                   # U^{-1}
+            return np.concatenate([zu_zp, zw])
+
+        P = LinearOperator((self.N, self.N), matvec=p_inv, dtype=float)
+        x, info = gmres(A, rhs, M=P, rtol=rtol, atol=1e-14,
                         maxiter=maxiter, restart=100)
         if info != 0:
             raise RuntimeError(f"GMRES did not converge (info={info})")

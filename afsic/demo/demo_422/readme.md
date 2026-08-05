@@ -85,7 +85,7 @@ python main.py --steps 10 --nx 16   # 快速冒烟测试
 | `PIN` | 0 | 1=钉住圆盘中心（准静态演示） |
 | `SCHEME` | 0 | 0=单块 3×3；3=约化 2×2（精确 Schur 消去 W） |
 | `FROZEN` | 2 | 冻结 Jacobian 准 Newton：0=完全 Newton（每迭代分解）；1=每步分解一次；2=跨步复用（默认，停滞自适应重分解+失败回退） |
-| `LINEAR_SOLVER` | direct | monolithic 线性求解器：`direct`=MUMPS 直接分解（默认）；`gmres`=GMRES + 常数块预条件（见下） |
+| `LINEAR_SOLVER` | direct | monolithic 线性求解器：`direct`=MUMPS 直接分解（默认）；`gmres`=GMRES + 块 LDU 预条件（见下） |
 | `OUT` | 10 | 输出间隔（步） |
 | `OUTPUT` | output | 输出目录 |
 
@@ -217,17 +217,51 @@ dt=0.1 时快 ~1.5×）。随 μ_s 增大，**当前直接法的隐式每步成�
 
 ## 块预条件迭代求解器（LINEAR_SOLVER=gmres，概念验证）
 
-monolithic Jacobian $A$ 与块算子 $P=\mathrm{diag}([K\ B^T;\ B\ s_{11}],\ \frac{1}{\Delta t}M_s)$
-只差**低秩耦合块**（$-A_{uW}$、$-M_{fs}^T$，秩≈$n_s$）。$P$ 的流体 Stokes 块与
-固体质量块**都是常数**（只依赖网格），各用 MUMPS 分解一次后作为 GMRES 的
-块预条件子，每步不再做 monolithic 分解：
+monolithic Jacobian
 
-* 32×32 下 GMRES 仅 **~7 次 Krylov 迭代**收敛（耦合弱，$P^{-1}A≈I+$小扰动）；
-* 解与 MUMPS 直接法**逐位一致**（≤3e-14）；
-* 当前为 scipy 实现（有 Python 开销，2D 小规模比摊销后的直接法慢）；
-  生产版应为 PETSc KSP GMRES + Python PC（把每迭代的 1 次流体回代+1 次
-  $M_s$ 回代降到 ~ms 级），这是通往 3D/大规模可扩展求解器的路径——因为
-  3D 下 monolithic 直接分解的内存/时间不可行，而常数块预条件可以。
+$$A=\begin{bmatrix}K & B^T & -A_{uW}\\ B & s_{11} & 0\\ -M_{fs}^T & 0 & \tfrac{1}{\Delta t}M_s\end{bmatrix}$$
+
+用**块 LDU 预条件**（借鉴大规模 FSI 分析的 block-LDU 做法）：耦合块保留在
+$L$、$U$ 中，只丢二阶修正 $A_{uW}\,\tfrac{\Delta t}{M_s}\,M_{fs}^T$：
+
+$$P=L\,\tilde D\,U,\quad
+L=\begin{bmatrix}I&0&-A_{uW}\,(\tfrac{\Delta t}{M_s})\\ 0&I&0\\0&0&I\end{bmatrix},\quad
+\tilde D=\mathrm{diag}(\begin{bmatrix}K&B^T\\B&s_{11}\end{bmatrix},\ \tfrac{1}{\Delta t}M_s),\quad
+U=\begin{bmatrix}I&0&0\\0&I&0\\ -(\tfrac{\Delta t}{M_s})M_{fs}^T&0&I\end{bmatrix}$$
+
+流体 Stokes 块与固体质量块**都是常数**，各用 MUMPS 分解一次；每次 Krylov 迭代
+= 1 次流体回代 + 2 次 $M_s$ 回代 + 2 个耦合 matvec，**不做任何 monolithic 分解**。
+
+32×32 实测（块对角 vs 块 LDU，GMRES 收敛到 rtol=1e-8 的迭代数）：
+
+| μ_s | 块对角 | 块 LDU |
+|---|---|---|
+| 0.1 | 6 | **4** |
+| 10 | 12 | **8** |
+
+解与 MUMPS 直接法一致（≤1e-9，即 GMRES 容差水平）。**诚实结论**：LDU 在中低
+μ_s 稳定减少迭代，但在 μ_s=100 下预条件残差**停滞在 ~3e-3 相对水平**（无法到
+1e-8）。原因：本算例的 (1,3) 耦合块是**随 μ_s 缩放的弹性刚度** $-A_{uW}$，
+被丢弃的 $A_{uW}\frac{\Delta t}{M_s}M_{fs}^T\sim \mu_s\frac{\Delta t}{\rho_s}$，
+在大 μ_s 下相对流体算子 $K$ 不再是小量——而大规模 FSI 文档里被丢的 $A_s$
+是纯几何插值（不随刚度缩放），所以文档的"丢二阶修正"只在弱耦合成立。要让
+隐式每步成本真正与 μ_s 无关，需要在预条件中显式处理弹性刚度（如把
+$A_{uW}$ 并入 Schur 块的块三角预条件），这超出了本 demo 的 LDU 范围。
+
+**从大规模分析中真正可借鉴、可迁移到 3D 的**：
+1. **FGMRES(50)+块 LDU**：预条件随 Jacobian 变化用 FGMRES（右预条件）比
+   普通 GMRES 更稳；块结构（1 流体鞍点 + 2×$M_{ww}^{-1}$）正是大问题的形态。
+2. **流体块用 AMG + 压力 Schur 补 $S_p$ 预条件**：文档对 $A$ 与 $S_p$ 都
+   用 AMG 代替直接分解——这是 3D 下唯一可行的流体预条件（MUMPS 在 3D 不可行）。
+3. **固体块 $M_{ww}$ 精确处理**：$M_s$ 小且常数，直接分解一次即可；文档也是
+   这么做的（相对流体，固体块极小）。
+4. **结构拓扑差异**：文档的 monolithic 把固体弹性放进 (3,3) 块，而本实现
+   （deal.II a.cpp 的 IBFE 形态）把弹性力放进流体动量方程，导致 (1,3) 耦合
+   随 μ_s 缩放——这是"隐式每步随 μ_s 变慢"的根源，LDU 只缓解不根治。
+
+当前为 scipy 实现（有 Python 开销，2D 小规模比摊销后的直接法慢）；生产版应
+为 PETSc KSP FGMRES + Python PC（把每迭代的 1 次流体回代+2 次 $M_s$ 回代降到
+~ms 级），流体块换 AMG，这是通往 3D/大规模可扩展求解器的路径。
 
 ## 输出
 
