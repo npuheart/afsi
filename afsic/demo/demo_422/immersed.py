@@ -447,13 +447,30 @@ class ImmersedFEM:
             Wvals = W[s_bdofs * 2 + c]             # (npts, ndofs_s)
             gradW[:, c, :] = np.einsum("nk,nkb->nb", Wvals, s_gphi_k)
         F = np.eye(2)[None, :, :] + gradW
-        Finv = np.linalg.inv(F)
+        # analytic 2x2 inverse (batched np.linalg.inv is ~4x slower here)
+        F00, F01, F10, F11 = F[:, 0, 0], F[:, 0, 1], F[:, 1, 0], F[:, 1, 1]
+        det = F00 * F11 - F01 * F10
+        Finv = np.empty_like(F)
+        Finv[:, 0, 0] = F11 / det
+        Finv[:, 0, 1] = -F01 / det
+        Finv[:, 1, 0] = -F10 / det
+        Finv[:, 1, 1] = F00 / det
         P = mu_s * (F - Finv.transpose(0, 2, 1))
-        PeFT = P @ F.transpose(0, 2, 1)            # (npts, 2, 2)
 
         # ---- f_el (scatter by fluid dof), vectorised over (i, ci) ----
-        #   contr[p,i,ci] = sum_a PeFT[p,ci,a] * f_gx[p,i,a] * w[p]
-        contr = np.einsum("pca,pia->pic", PeFT, f_gx) * w[:, None, None]
+        #   contr[p,i,ci] = sum_a (P F^T)[p,ci,a] * f_gx[p,i,a] * w[p]
+        # computed with explicit 2x2 components (no batched-einsum overhead)
+        ndofs_f = f_gx.shape[1]
+        P00, P01, P10, P11 = P[:, 0, 0], P[:, 0, 1], P[:, 1, 0], P[:, 1, 1]
+        # (P F^T) components:  P00*F00+P01*F01  etc.
+        e00 = P00 * F00 + P01 * F01
+        e01 = P00 * F10 + P01 * F11
+        e10 = P10 * F00 + P11 * F01
+        e11 = P10 * F10 + P11 * F11
+        fgx0, fgx1 = f_gx[:, :, 0], f_gx[:, :, 1]
+        contr = np.empty((npts, ndofs_f, 2))
+        contr[:, :, 0] = (e00[:, None] * fgx0 + e01[:, None] * fgx1) * w[:, None]
+        contr[:, :, 1] = (e10[:, None] * fgx0 + e11[:, None] * fgx1) * w[:, None]
         # scatter with bincount (fast, no np.add.at atomics)
         idx = (f_bdofs * bs)[:, :, None] + np.arange(2)[None, None, :]
         f_el = np.bincount(idx.ravel(), weights=(-contr).ravel(),
