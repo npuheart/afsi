@@ -73,14 +73,20 @@ class GAMGSolver:
     anywhere -- this is the scalable (large/3D) replacement for MUMPS on the
     fluid blocks.  KSP and PETSc vectors are reused between solves."""
 
-    def __init__(self, A, rtol=1e-2, max_it=100, comm=comm):
+    def __init__(self, A, rtol=1e-2, max_it=100, comm=comm, vcycle=False):
         self._n = A.shape[0]
         self._ksp = PETSc.KSP().create(comm)
         self._Ap = scipy_to_petsc(A, comm)
         self._ksp.setOperators(self._Ap)
-        self._ksp.setType("gmres")
         pc = self._ksp.getPC()
         pc.setType("gamg")
+        if vcycle:
+            # §4b: NO inner Krylov -- a single GAMG V-cycle applied as the
+            # approximate inverse (preonly + gamg PC).  Cheap per application;
+            # the outer flexible FGMRES absorbs the coarser approximation.
+            self._ksp.setType("preonly")
+        else:
+            self._ksp.setType("gmres")
         self._ksp.setFromOptions()
         self._ksp.setTolerances(rtol=rtol, atol=1e-30, max_it=max_it)
         self._ksp.setUp()

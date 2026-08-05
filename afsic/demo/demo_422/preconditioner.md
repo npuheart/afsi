@@ -235,10 +235,28 @@ $Av\approx[R(X+\varepsilon v)-R(X-\varepsilon v)]/(2\varepsilon)$（$\varepsilon
 **2D 下更慢**（每 matvec 2 次 force 组装，单解 11ms vs 显式 4ms），迭代数略增（24→26）。
 价值在**免装配 Jacobian**（3D 重写 / 不可微本构时可用），默认关闭。
 
+## §4b 单 V-cycle（内层去 Krylov）—— 验证**不适用**（GAMG 对 P2 向量质量差）
+
+`GAMGSolver` 加 `vcycle=True`（preonly + GAMG，1 次 V-cycle）。实测（32×32 流体鞍点，
+Cahouet-Chabard S_p）：**单 V-cycle 不收敛**（err 4.3），内层 max_it 扫描：
+
+| 内层 max_it | 外层 FGMRES 迭代 | 解 err |
+|---|---|---|
+| 1 (preonly) | 10 | 2.95 |
+| 3 | 10 | 0.35 |
+| 5 | 10 | 1.8e-3 |
+| 100 (松收敛) | 5 | 1.5e-6 |
+
+**结论**：GAMG 一次 V-cycle 对 2D P2 向量流体块 $K$ 的质量太差（代数聚集不匹配块结构），
+"1–2 次 V-cycle 作 $K^{-1}$"的假设在此不成立，需要多次迭代。⇒ §4c 的 **GMG（几何多网格）**
+才是 2D/3D 结构网格的正解（几何插值算子精确，不像 GAMG 代数聚集）；实现需层级网格 +
+P2/P1 层间插值/限制算子（P2 的粗边中点→细 dof 插值较繁琐），3D 重写时配合现成 Block-GMG
+框架落地。
+
 ## 待办（未执行）
 
 - §1a 固定稀疏模式 + 一次符号分析（scipy→PETSc 179ms/次，频繁分解场景价值高）
 - §1b spread 装配向量化（Mfs/A_uW 已向量化，剩余 coo→csr，收益有限）
 - §1c MUMPS 参数（ICNTL(7)=5 METIS、3D 上 ICNTL(35)=2 BLR）
-- §4b/c 单 V-cycle + GMG（3D 终态）
+- §4c GMG（几何多网格，结构网格 2–4×，3D 终态）
 - §5 零碎（ICNTL(24)、增广拉格朗日、BDF2）
