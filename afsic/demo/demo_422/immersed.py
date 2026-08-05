@@ -179,7 +179,36 @@ class ImmersedFEM:
         e2 = fverts[:, 2] - self.f_v0
         fJ = np.stack([e1, e2], axis=-1)                             # (n_bg, 2, 2) cols = edges
         self.f_Jinv = np.linalg.inv(fJ)
-        # bounding box tree of the fluid mesh (for locating solid points)
+        # ---- analytical O(1) point->cell lookup on the REGULAR background
+        # grid (a uniform rectangle, each square split by a fixed diagonal).
+        # A point is located by (floor(x/dx), floor(y/dy)) plus one diagonal
+        # test -- no bounding-box collision search needed.  Built once; if the
+        # mesh is not the expected clean diagonal triangulation (or MPI), fall
+        # back to the bb_tree below.  Saves ~30 ms/step at 64x64.
+        Nx, Ny = cfg["Nx"], cfg["Ny"]
+        self.bg_dx = 1.0 / Nx
+        self.bg_dy = 1.0 / Ny
+        self.square_to_cell = -np.ones((Nx, Ny, 2), dtype=np.int64)
+        self._use_analytic = comm.size == 1
+        for c in range(n_bg):
+            v = self.f_geom_x[self.f_geom_dofs[c]][:, :2]
+            x0, y0 = v.min(axis=0)
+            x1, y1 = v.max(axis=0)
+            i = int(round(x0 / self.bg_dx))
+            j = int(round(y0 / self.bg_dy))
+            if not (0 <= i < Nx and 0 <= j < Ny):
+                self._use_analytic = False
+                break
+            has_tl = np.any(np.all(np.isclose(v, [x0, y1]), axis=1))
+            t = 1 if has_tl else 0
+            if self.square_to_cell[i, j, t] != -1:
+                self._use_analytic = False   # not a clean diagonal split
+                break
+            self.square_to_cell[i, j, t] = c
+        if self._use_analytic and (self.square_to_cell < 0).any():
+            self._use_analytic = False
+        # bounding box tree of the fluid mesh (for locating solid points;
+        # only used when the analytical grid table is unavailable)
         self.bb_tree = geometry.bb_tree(self.msh, self.msh.topology.dim)
 
     # ------------------------------------------------------------------
@@ -254,20 +283,37 @@ class ImmersedFEM:
         Wq = np.einsum("nkc,qk->nqc", W_cell, self.s_phi)                   # (nc, nq, 2)
         xq_all = (Xq_all + Wq).reshape(nc * nq, 2)
 
-        xq3 = np.hstack([xq_all, np.zeros((len(xq_all), 1))])
-        coll = geometry.compute_collisions_points(self.bb_tree, xq3)
-        own = geometry.compute_colliding_cells(self.msh, coll, xq3)
-
-        # per located point keep the first colliding (owned) background cell.
-        # Vectorised through the AdjacencyList offsets/array (no Python loop):
-        #   own.array[offsets[i]] is the first colliding cell of point i.
+        # ---- locate each deformed solid quadrature point in the background
+        # mesh.  Fast path: analytical O(1) lookup on the regular grid table
+        # (built once).  Fallback: bounding-box collision search (e.g. for a
+        # non-regular mesh or MPI).  Both produce fcell_raw[i] = background
+        # cell id (or -1 for points outside the mesh).
         n_pts_all = nc * nq
-        offs = own.offsets
-        nlinks = offs[1:] - offs[:-1]
-        has = nlinks > 0
         fcell_raw = np.full(n_pts_all, -1, dtype=np.int64)
-        fcell_raw[has] = own.array[offs[:-1][has]]
-        sel = np.flatnonzero(has)                                           # global pt indices found
+        if self._use_analytic:
+            dx, dy = self.bg_dx, self.bg_dy
+            i = np.floor(xq_all[:, 0] / dx).astype(np.int64)
+            j = np.floor(xq_all[:, 1] / dy).astype(np.int64)
+            inside = ((xq_all[:, 0] >= 0.0) & (xq_all[:, 0] <= 1.0)
+                      & (xq_all[:, 1] >= 0.0) & (xq_all[:, 1] <= 1.0))
+            ic = np.clip(i, 0, self.cfg["Nx"] - 1)
+            jc = np.clip(j, 0, self.cfg["Ny"] - 1)
+            # on/below the diagonal (x-offset dominates) -> right-bottom tri
+            t = ((xq_all[:, 0] - ic * dx) * dy
+                 <= (xq_all[:, 1] - jc * dy) * dx).astype(np.int64)
+            fcell_raw[inside] = self.square_to_cell[ic[inside], jc[inside],
+                                                    t[inside]]
+        else:
+            xq3 = np.hstack([xq_all, np.zeros((len(xq_all), 1))])
+            coll = geometry.compute_collisions_points(self.bb_tree, xq3)
+            own = geometry.compute_colliding_cells(self.msh, coll, xq3)
+            # vectorised through the AdjacencyList offsets/array (no Python
+            # loop):  own.array[offsets[i]] is the first colliding cell of i
+            offs = own.offsets
+            nlinks = offs[1:] - offs[:-1]
+            has = nlinks > 0
+            fcell_raw[has] = own.array[offs[:-1][has]]
+        sel = np.flatnonzero(fcell_raw >= 0)                            # global pt indices found
         n_pts = sel.size
         if n_pts == 0:
             self.interaction = []
@@ -276,9 +322,9 @@ class ImmersedFEM:
         if n_miss > 0 and rank == 0:
             self.msg(f"    [warn] {n_miss} solid quadrature point(s) outside the "
                      "background mesh (disk touching a wall?) -- skipped")
-        fcell_found = fcell_raw[sel]                                        # (n_pts,)
+        fcell_found = fcell_raw[sel]                                    # (n_pts,)
         xq_found = xq_all[sel]
-        idx_map = np.full(n_pts_all, -1, dtype=np.int64)                    # global pt -> compressed idx
+        idx_map = np.full(n_pts_all, -1, dtype=np.int64)                # global pt -> compressed idx
         idx_map[sel] = np.arange(n_pts)
 
         # reference coordinates, vectorised with the precomputed cell Jacobians
