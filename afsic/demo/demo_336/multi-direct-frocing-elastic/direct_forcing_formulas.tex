@@ -1,0 +1,187 @@
+\documentclass[10pt]{article}
+\usepackage[a4paper,margin=1.0cm]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\setlength{\parindent}{0pt}
+\pagestyle{empty}
+\setlength{\abovedisplayskip}{4pt}
+\setlength{\belowdisplayskip}{4pt}
+\setlength{\abovedisplayshortskip}{2pt}
+\setlength{\belowdisplayshortskip}{2pt}
+
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\R}{\mathbb{R}}
+
+\begin{document}
+
+\begin{center}
+{\large\bf Direct-Forcing Immersed-Boundary Method}\\
+Lid-driven cavity elastic disk \quad (AFSI \texttt{multi-direct-frocing-elastic}) \quad \underline{Page 1/2}
+\end{center}
+
+\section*{0. Nomenclature}
+\[
+\begin{array}{lll}
+\rho,\ \mu,\ \nu=\mu/\rho & \text{fluid density/viscosity/diffusivity} & h\ \text{grid size},\ \dd t\ \text{step}\\[2pt]
+\bm u,\ p & \text{fluid velocity / pressure} & \bm X_s,\ \bm V_s\ \text{solid position/velocity}\\[2pt]
+\bm U_l & \text{fluid velocity at marker} & \bm F_{\mathrm{IBM}},\ \Delta V_l\ \text{force/marker volume}\\[2pt]
+\bm F=\nabla_X\bm X_s,\ J,\ \bm P & \text{deformation grad. / det / 1st P-K} & \mu_s,\lambda_s,\mu_s^{\mathrm{visc}}\ \text{solid moduli}\\[2pt]
+M_{\mathrm{HRZ}},\ V_{\mathrm{node}},\ K^{\mathrm{visc}} & \text{lumped mass / node volume / visc. stiffness} & \rho_s\ \text{solid density}
+\end{array}
+\]
+
+\section*{1. Incompressible NS with IBM force}
+\[
+\rho\Big(\frac{\partial \bm u}{\partial t}+\bm u\!\cdot\!\nabla \bm u\Big)
+= -\nabla p + \mu\,\Delta \bm u + \bm f_{\mathrm{IBM}},
+\qquad \nabla\!\cdot\!\bm u = 0
+\]
+\(\bm f_{\mathrm{IBM}}\): immersed-boundary force spread to the fluid, non-zero only on marker nodes.
+
+\section*{2. IB interpolation \& spreading (Peskin 4-pt kernel)}
+\[
+\bm U_l = \sum_{\bm x}\bm u(\bm x)\,\delta_h(\bm x-\bm X_{s,l})\,h^2
+\qquad(\text{fluid}\to\text{solid})
+\]
+\[
+\bm f_{\mathrm{IBM}}(\bm x)=\sum_l \bm F_{\mathrm{IBM},l}\,\delta_h(\bm x-\bm X_{s,l})\,\Delta V_l
+\qquad(\text{solid}\to\text{fluid})
+\]
+\[
+\delta_h(r)=
+\begin{cases}
+\dfrac{1}{4h}\Big(1+\cos\dfrac{\pi r}{2h}\Big), & |r|\le 2h\\[4pt]
+0, & |r|>2h
+\end{cases}
+\]
+
+\section*{3. Time stepping (one step, partitioned explicit)}
+\textbf{3.1 Predictor} — AB2 convection $+$ $\frac32$--$\frac12$ semi-implicit diffusion: find $\bm u^*\!\in\! V$ s.t.
+\[
+\begin{aligned}
+\int\!\bm u^*\!\cdot\!\bm v\,\dd x+\tfrac32\nu\dd t\!\int\!\nabla \bm u^*\!:\!\nabla \bm v\,\dd x
+&=\int\!\bm u^n\!\cdot\!\bm v\,\dd x
+-\tfrac32\dd t\!\int\!(\bm u^n\!\cdot\!\nabla\bm u^n)\!\cdot\!\bm v\,\dd x\\
+&\quad+\tfrac12\dd t\!\int\!(\bm u^{n-1}\!\cdot\!\nabla\bm u^{n-1})\!\cdot\!\bm v\,\dd x
+-\tfrac12\nu\dd t\!\int\!\nabla\bm u^n\!:\!\nabla\bm v\,\dd x
++\tfrac12\dd t\!\int\!\nabla p^n\!\cdot\!\bm v\,\dd x
+\end{aligned}
+\]
+
+\textbf{3.2 Direct forcing} (no-slip at markers, $\bm U_l \to \bm V_s$):
+\[
+\bm F_{\mathrm{IBM},l} = \frac{\bm V_{s,l}-\bm U_l}{\dd t}\,\Delta V_l,
+\qquad \bm u = \bm u^* + \dd t\,\bm f_{\mathrm{IBM}}
+\]
+\textbf{3.2b Multi-direct forcing} (iterate until convergence):
+\[
+\begin{aligned}
+&\bm u^{(0)}=\bm u^*\\
+&\bm U_l^{(k)}=\sum_{\bm x}\bm u^{(k)}\delta_h(\bm x-\bm X_{s,l})\,h^2,\qquad
+\bm F_{\mathrm{IBM},l}^{(k)}=\frac{\bm V_{s,l}-\bm U_l^{(k)}}{\dd t}\,\Delta V_l\\
+&\bm u^{(k+1)}=\bm u^{(k)}+\dd t\sum_l\bm F_{\mathrm{IBM},l}^{(k)}\,\delta_h(\bm x-\bm X_{s,l})\,\Delta V_l
+\qquad \text{until}\ \max_l\|\bm U_l^{(k)}-\bm V_{s,l}\|<\varepsilon
+\end{aligned}
+\]
+
+\textbf{3.3 Pressure Poisson:}
+\[
+\nabla^2 p^{n+1} = \frac{2}{3\dd t}\,\nabla\!\cdot\!\bm u
+\qquad (\text{pin one corner dof})
+\]
+
+\textbf{3.4 L$^2$ projection (end-of-step divergence-free):}
+\[
+\bm u^{n+1} = \bm u^* - \tfrac{3}{2}\dd t\,\nabla p^{n+1}
+\]
+
+\clearpage
+\begin{center}
+{\large\bf Direct-Forcing Immersed-Boundary Method}\\
+Lid-driven cavity elastic disk \quad (AFSI \texttt{multi-direct-frocing-elastic}) \quad \underline{Page 2/2}
+\end{center}
+
+\section*{4. Elastic solid (total Lagrangian, reference config)}
+\textbf{4.1 Momentum:}
+\[
+\rho_s\frac{\partial^2 \bm X_s}{\partial t^2} = \nabla_X\!\cdot\!\bm P(\bm F)+\bm f^{\,f\to s},
+\qquad \bm F = \nabla_X \bm X_s
+\]
+
+\textbf{4.2 Constitutive} (compressible neo-Hookean + Kelvin--Voigt viscosity):
+\[
+\bm P = \mu_s(\bm F-\bm F^{-T})+\lambda_s\ln J\,\bm F^{-T},
+\qquad J=\det\bm F
+\]
+\[
+\bm\sigma^{\mathrm{visc}} = 2\,\mu_s^{\mathrm{visc}}\,\mathrm{sym}\big(\nabla_X \bm V_s\big),
+\qquad \mu_s^{\mathrm{visc}}=\mu
+\]
+
+\textbf{4.3 Internal force \& HRZ lumped mass:}
+\[
+\bm F_{\mathrm{int}} = \int \bm P(\bm F):\nabla_X\delta\bm v\;\dd X,
+\qquad
+M_{\mathrm{HRZ},i}=M_{ii}\,\frac{M_{\mathrm{tot}}}{\sum_j M_{jj}},
+\quad M_{\mathrm{tot}}=\rho_s\,\pi r^2
+\]
+
+\textbf{4.4 Solid advance} (added-mass implicit; viscous term implicit in LHS):
+\[
+\big[\mathrm{diag}(M_{\mathrm{HRZ}}+\rho_f V_{\mathrm{node}})+\dd t\,K^{\mathrm{visc}}\big]
+\bm V_s^{n+1}
+= M_{\mathrm{HRZ}}\bm V_s^n
++\rho_f V_{\mathrm{node}}\,\bm U_l
+-\dd t\,\bm F_{\mathrm{int}}
+\]
+\[
+K^{\mathrm{visc}} = \int 2\mu_s^{\mathrm{visc}}\,
+\mathrm{sym}(\nabla_X\delta\bm u):\mathrm{sym}(\nabla_X\delta\bm v)\;\dd X
+\]
+\[
+\bm X_s^{n+1} = \bm X_s^n + \dd t\,\bm V_s^{n+1}
+\]
+
+\section*{5. Rigid-disk variant (\texttt{multi-direct-frocing}, no elasticity)}
+\[
+\bm V_c=\big\langle \bm U_l\big\rangle_{\mathrm{ring}},
+\qquad
+\omega=\Big\langle\frac{\bm r\times\bm U_l}{|\bm r|^2}\Big\rangle_{\mathrm{ring}},
+\qquad \bm r=\bm x-\bm X_c
+\]
+\[
+\bm U^d(\bm x)=\bm V_c+\omega\times\bm r\quad\text{(rigid constraint)},
+\qquad
+\bm X_c^{n+1}=\bm X_c^n+\dd t\,\bm V_c,\qquad
+\theta^{n+1}=\theta^n+\dd t\,\omega
+\]
+
+\section*{6. Per-step algorithm}
+\[
+\boxed{
+\begin{gathered}
+\bm u^{n-1},\bm u^n,p^n
+\xrightarrow{3.1}\bm u^*
+\xrightarrow{3.2}\bm F_{\mathrm{IBM}}=\tfrac{\bm V_s-\bm U_l}{\dd t}\,\Delta V_l
+\xrightarrow{3.3,3.4}\bm u^{n+1},p^{n+1}\\[2mm]
+\big(M_{\mathrm{HRZ}}+\rho_f V_{\mathrm{node}}+\dd t K^{\mathrm{visc}}\big)\bm V_s^{n+1}
+= M_{\mathrm{HRZ}}\bm V_s^n+\rho_f V_{\mathrm{node}}\bm U_l-\dd t\,\bm F_{\mathrm{int}}
+\end{gathered}
+}
+\]
+
+\section*{7. Stability}
+\[
+\alpha=\frac{\rho_f V_{\mathrm{node}}}{M_{\mathrm{HRZ}}+\rho_f V_{\mathrm{node}}}
+\qquad\text{(added-mass ratio, }0<\alpha<1\text{)}
+\]
+\[
+\dd t<c\,\frac{h_s}{\sqrt{(\mu_s+\lambda_s)/\rho_s}}\ \text{(elastic wave CFL)},
+\qquad
+\dd t<c\,\frac{h^2}{\nu}\ \text{(fluid diffusion)}
+\]
+\[
+\text{viscous term implicit }(\dd t K^{\mathrm{visc}}\ \text{on LHS})\ \Rightarrow\
+\text{unconditionally stable for the viscous part.}
+\]
+
+\end{document}

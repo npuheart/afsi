@@ -68,6 +68,7 @@ $V_s^{n+1}$ 一侧），不是固液联立求解——固液仍是分区、相�
 | `configuration.py` | 方腔/弹性圆盘/本构参数，`STEPS`/`NX`/`NY` 覆盖 |
 | `main.py` | AB2 流体 + 惯性弹性固体 direct-forcing 时间循环 |
 | `output/` | `velocity.xdmf/.h5`、`pressure.xdmf/.h5`、`solid.xdmf`(位移场)、`solid_force.xdmf`、`forces.csv` |
+| `direct_forcing_formulas.tex/.pdf` | direct-forcing 公式速查（2 页 A4，符号表 + 时间步进 + 弹性固体 + 稳定性） |
 
 ## 运行
 
