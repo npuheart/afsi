@@ -508,6 +508,58 @@ FGMRES 残差在舍入误差 ~1e-8 处停滞，rtol=1e-8 边界上随 RHS 随机
   50000 只是恰在 rtol 边界上（RHS 依赖的"硬币翻转"）。**结论：迭代数本身 μ_s 无关，
   50000 的"异常"是 cond 暴涨下的机器精度极限，非算法问题。**
 
+### 6.6 V3 预条件子的精确定义（2026-08-06）
+
+**目标系统**（monolithic 3×3，每 Newton 迭代一次线性解 $A\,dx=-R$）：
+
+$$
+A=\begin{bmatrix}K & B^T & -A_{uW}\\ B & s_{11} & 0\\ -M_{fs}^T & 0 & M_{ww}\end{bmatrix},
+\qquad M_{ww}=\tfrac{1}{\Delta t}M_s,\quad s_{11}=10^{-8}M_p
+$$
+
+记号：$A_s=-A_{uW}$（(1,3) 弹性刚度）、$M_{wu}=-M_{fs}^T$（(3,1) 插值）。
+
+**V3 = 块 LU 预条件 $P=L\,D_{V3}\,U$（作 FGMRES 右预条件）**：
+
+$$
+L=\begin{bmatrix}I&0&A_sM_{ww}^{-1}\\0&I&0\\0&0&I\end{bmatrix},\quad
+U=\begin{bmatrix}I&0&0\\0&I&0\\-M_{ww}^{-1}M_{wu}&0&I\end{bmatrix},\quad
+D_{V3}=\mathrm{diag}\Big(\begin{bmatrix}\tilde K&B^T\\B&s_{11}\end{bmatrix},\ M_{ww}\Big)
+$$
+
+$$
+\boxed{\;\tilde K \;=\; K-dt\,A_{uW}M_s^{-1}M_{fs}^T \;=\; K-A_sM_{ww}^{-1}M_{wu}\;}
+$$
+
+L/U 保留全部耦合（与 V0 相同）；**唯一区别在 $D$：流体鞍点的 (1,1) 块用精确约化算子
+$\tilde K$**（V0 用普通 K）。$\tilde K$ 含稠密 $M_s^{-1}$：2D 组装成稠密矩阵、鞍点稠密 LU；
+3D 走隐式算子（a.cpp scheme 5，§6.4）。
+
+**关键性质（作用到 A 后）**：$P_{V3}^{-1}A$ 的 (1,1) 块
+$X_{11}=F_{11}\tilde K+F_{12}B=I$（$F=S^{-1}$，$S=\begin{bmatrix}\tilde K&B^T\\B&s_{11}\end{bmatrix}$）
+——**μ_s 项 $A_sM_{ww}^{-1}M_{wu}$ 被精确消去**；剩余扰动 μ_s 无关（(3,1) 块
+$=2M_{ww}^{-1}M_{wu}$ + BC 局部）。⇒ 谱与 μ_s 无关，迭代数恒定（实测 21~26，μ_s=0.1→100000）。
+
+**$P_{V3}^{-1}$ 应用算法**（对残差 $r=[r_u;r_p;r_w]$）：
+
+```
+zw0 = M_ww^{-1} r_w                        # 1 次固体求解（dt M_s^{-1}，稀疏因子，M_s 小）
+yu  = r_u - A_s zw0                        # L^{-1} 步
+[zu;zp] = S^{-1} [yu; r_p]                 # ★ 流体鞍点求解（含 K~；2D 稠密 LU / 3D 内层 Krylov）
+zw  = zw0 + M_ww^{-1} M_wu zu              # U^{-1} 步
+return [zu; zp; zw]
+```
+
+**每次应用成本**：1 次鞍点求解 + 2 次 $M_s^{-1}$ 回代 + 2 次耦合 matvec。预条件是**常数**
+（只依赖网格，不依赖 W），跨 Newton、跨时间步复用。
+
+**V3 vs V0**（$D$ 的 (1,1) 块不同 → $P^{-1}A$ 的 (1,1) 块不同）：
+
+| | $D$ 的 (1,1) 块 | $P^{-1}A$ 的 (1,1) 块 $X_{11}$ | μ_s 行为 |
+|---|---|---|---|
+| V0 | $K$ | $I-F_{11}^0 A_sM_{ww}^{-1}M_{wu}$（含 μ_s 项） | μ_s≥100 发散 |
+| **V3** | $\tilde K=K-A_sM_{ww}^{-1}M_{wu}$ | **$I$**（μ_s 项精确消去） | **恒定 21~26** |
+
 ## 7. 发表评估（2026-08-06，诚实）
 
 **现状**：§5–§6 的分析足够构成**论文核心素材**，但还不足以直接投 CPC（Computer Physics
