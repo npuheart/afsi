@@ -935,9 +935,16 @@ class ImmersedFEM:
     #   K~ = K - dt A_uW M_s^-1 Mfs^T,   dW = dt M_s^-1 (Mfs^T du - R_W)
     # Newton uses the exact residuals and the elimination is exact, so the
     # converged solution is identical to the full 3x3 solve and Newton
-    # converges quadratically.  NB: the exact Schur elimination makes K~ a
-    # dense n_u x n_u block, so this variant is only practical on coarse
-    # meshes -- use scheme 0 (full monolithic, sparse) at larger scale.
+    # converges quadratically.
+    #
+    # K~ is assembled EXACTLY as a BAND-BLOCK SPARSE matrix (not dense):
+    # C = dt A_uW M_s^-1 Mfs^T is nonzero only on (rows of A_uW) x (non-zero
+    # columns of Mfs^T) -- the interaction band near the disk -- and is DENSE
+    # within it (M_s^-1 is dense).  So only that block is formed: memory
+    # O(band^2) instead of O(nu^2), and the per-Newton product costs
+    # O(nnz * nu_band) instead of O(nnz * nu).  The band-block is EXACT (the
+    # matrix is zero outside it), so Newton stays quadratic -- same solution
+    # as the full 3x3 and as the old dense K~.
     # (This is the FEniCSx analogue of a.cpp scheme 5; a.cpp schemes 3/4
     # replace M_s^-1 by its diagonal, which here made Newton diverge for the
     # soft benchmark disk, so we always use the exact elimination.)
@@ -946,17 +953,18 @@ class ImmersedFEM:
         cfg = self.cfg
         nu, np_, ns = self.n_u, self.n_p, self.n_s
         W_old = self.X[self.n_u + self.n_p:].copy()
-        if nu * ns > 3e7:
-            self.msg("  [warn] reduced scheme assembles the dense Schur-eliminated "
-                     f"K~ ({nu} x {nu}); prefer scheme 0 on this mesh")
 
         self.compute_interaction(W_old)
         self.assemble_mixed_mass()
 
         # exact M_s^-1 via a sparse factor (M_s is constant in time)
         Ms_lu = MumpsFactor(self.M_s)
-        # dense  M_s^-1 Mfs^T  (geometry fixed within this step)
-        Y = Ms_lu.solve(self.MfsT_csr.toarray())   # (ns, nu)
+        # band columns of Mfs^T (fluid dofs interpolating to the solid); solve
+        # M_s^{-1} only on those columns (ns x nu_band, not ns x nu)
+        MfsT_d = self.MfsT_csr.toarray()                   # (ns, nu) small
+        band_cols = np.nonzero(np.abs(MfsT_d).sum(axis=0) > 0)[0]
+        Y_band = Ms_lu.solve(np.ascontiguousarray(
+            MfsT_d[:, band_cols]))                         # (ns, nu_band)
 
         f_el = np.zeros(self.n_u)
         A_uW = None
@@ -965,8 +973,15 @@ class ImmersedFEM:
             W = self.X[self.n_u + self.n_p:]
             f_el, A_uW = self.assemble_elastic(W)
 
-            # K~ = K - dt A_uW (M_s^-1 Mfs^T)   (dense product -> csr)
-            Ktilde = csr_matrix(self.K - cfg["dt"] * (A_uW @ Y))
+            # K~ = K - C,  C = dt A_uW (M_s^-1 Mfs^T)  (EXACT band scatter:
+            # C is zero outside (A_uW rows) x (band cols), dense inside)
+            band_rows = np.nonzero(np.abs(A_uW).sum(axis=1) > 0)[0]
+            C_band = cfg["dt"] * (A_uW[band_rows, :] @ Y_band)  # (n_br, n_bc)
+            rows = np.repeat(band_rows, len(band_cols))
+            cols = np.tile(band_cols, len(band_rows))
+            C_sp = coo_matrix((C_band.ravel(), (rows, cols)),
+                              shape=(nu, nu)).tocsr()
+            Ktilde = self.K - C_sp
             A2 = bmat([[Ktilde, self.Bt], [self.B, cfg["p_stab"] * self.Mp]],
                       format="csr")
             A2 = self.apply_bc2(A2)
