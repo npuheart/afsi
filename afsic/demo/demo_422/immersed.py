@@ -77,6 +77,7 @@ class ImmersedFEM:
         self._A_cache = None        # frozen monolithic Jacobian (gmres mode)
         self._fluid_pre_lu = None   # constant fluid Stokes factor (preconditioner)
         self._Ms_pre_lu = None      # constant solid mass factor (preconditioner)
+        self._Ms_lu_cache = None    # exact M_s factor for the reduced scheme
         self._gmres_P = None        # cached block preconditioner LinearOperator
 
         # ---- boundary data ----
@@ -957,8 +958,11 @@ class ImmersedFEM:
         self.compute_interaction(W_old)
         self.assemble_mixed_mass()
 
-        # exact M_s^-1 via a sparse factor (M_s is constant in time)
-        Ms_lu = MumpsFactor(self.M_s)
+        # exact M_s^-1 via a sparse factor (M_s is constant in time -> factor
+        # ONCE, reuse across steps; 2D sparse LU of M_s is O(ns^1.5) flops)
+        if self._Ms_lu_cache is None:
+            self._Ms_lu_cache = MumpsFactor(self.M_s)
+        Ms_lu = self._Ms_lu_cache
         # band columns of Mfs^T (fluid dofs interpolating to the solid); solve
         # M_s^{-1} only on those columns (ns x nu_band, not ns x nu)
         MfsT_d = self.MfsT_csr.toarray()                   # (ns, nu) small
