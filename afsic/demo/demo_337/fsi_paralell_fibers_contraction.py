@@ -262,7 +262,7 @@ L_hat = -inner(PK1, grad(dVs))*dxx
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(mesh_markers['BASE'][0])
 L_hat -= ufl.inner(dVs, endo_pressure * ufl.cofac(FF)* N) * dss(mesh_markers['ENDO'][0])
 L_hat = form(L_hat)
-b1 = create_vector(L_hat)
+b1 = create_vector(Vs)  # dolfinx 0.10: create_vector 接受 FunctionSpace，不接受 Form
 
 ###########################################################################################################
 ##########################################  Interaction  ##################################################
