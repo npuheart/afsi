@@ -3,16 +3,29 @@ from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import numpy as np
 
-data_ibamr = np.loadtxt('../reference/systole-ibamr.txt', skiprows=1)
+# IBAMR 参考数据（外部数据，缺文件时跳过该曲线）
+try:
+    data_ibamr = np.loadtxt('../reference/systole-ibamr.txt', skiprows=1)
+    has_ibamr = True
+except FileNotFoundError:
+    print("[warn] 未找到 ../reference/systole-ibamr.txt，跳过 IBAMR 曲线")
+    has_ibamr = False
+
 initial = np.loadtxt("../reference/ideal_middle_wall.txt")
 displacements = np.loadtxt("../reference/systole-pulse-disp.txt")
-displacements_afsi = np.loadtxt("../reference/systole-afsi-4.txt")
 deformed = initial + displacements
-deformed_afsi = displacements_afsi
 
-for i in range(len(deformed_afsi)):
-    deformed_afsi[i][0] = (deformed_afsi[i][0] - 3.5)*10.0
-    deformed_afsi[i][1] = (deformed_afsi[i][1] - 2.5)*10.0
+# AFSI 收缩结果（缺文件时跳过该曲线）
+try:
+    displacements_afsi = np.loadtxt("../reference/systole-afsi-4.txt")
+    deformed_afsi = displacements_afsi
+    has_afsi = True
+    for i in range(len(deformed_afsi)):
+        deformed_afsi[i][0] = (deformed_afsi[i][0] - 3.5)*10.0
+        deformed_afsi[i][1] = (deformed_afsi[i][1] - 2.5)*10.0
+except FileNotFoundError:
+    print("[warn] 未找到 ../reference/systole-afsi-4.txt，跳过 AFSI 曲线")
+    has_afsi = False
 
 plt.subplots_adjust(right=0.50)  
 main_ax = plt.subplot(1, 1, 1)
@@ -22,9 +35,11 @@ main_ax = plt.subplot(1, 1, 1)
 # main_ax.plot(initial[:, 1],initial[:, 0], linewidth=2, linestyle='--', color='gray', label='Initial')
 # plt.plot(initial[:, 1], initial[:, 0], label='Initial Position')
 main_ax.plot(initial[:, 1],initial[:, 0], linewidth=2, linestyle='--', color='gray', label='Initial')
-main_ax.plot(data_ibamr[:, 0],data_ibamr[:, 1],  alpha=1.0, label='IBAMR')
+if has_ibamr:
+    main_ax.plot(data_ibamr[:, 0],data_ibamr[:, 1],  alpha=1.0, label='IBAMR')
 main_ax.plot(deformed[:, 1],deformed[:, 0], alpha=1.0, label='Pulse')
-main_ax.plot(deformed_afsi[:, 1],deformed_afsi[:, 0], alpha=1.0, label='AFSI')
+if has_afsi:
+    main_ax.plot(deformed_afsi[:, 1],deformed_afsi[:, 0], alpha=1.0, label='AFSI')
 
 main_ax.set_xlim(-15, 4)
 main_ax.set_ylim(-30, 4)
@@ -58,9 +73,11 @@ main_ax.text(
 )
 
 sub_ur = plt.axes([0.65, 0.60, 0.3, 0.3])
-sub_ur.plot(data_ibamr[:, 0],data_ibamr[:, 1],  alpha=1.0, linestyle='None', marker='+', markersize=5, markeredgewidth=0.8, label='IBAMR')
+if has_ibamr:
+    sub_ur.plot(data_ibamr[:, 0],data_ibamr[:, 1],  alpha=1.0, linestyle='None', marker='+', markersize=5, markeredgewidth=0.8, label='IBAMR')
 sub_ur.plot(deformed[:, 1],deformed[:, 0], alpha=1.0, linestyle='None', marker='x', markersize=5, markeredgewidth=0.8, label='Pulse')
-sub_ur.plot(deformed_afsi[:, 1],deformed_afsi[:, 0], alpha=1.0, label='Present')
+if has_afsi:
+    sub_ur.plot(deformed_afsi[:, 1],deformed_afsi[:, 0], alpha=1.0, label='Present')
 
 sub_ur.set_xticks([-8.75, -8.25])
 sub_ur.set_yticks([-2, -1, 0, 1, 2])
@@ -79,9 +96,11 @@ sub_ur.text(
 
 
 sub_ax = plt.axes([0.65, 0.15, 0.3, 0.3])  
-sub_ax.plot(data_ibamr[:, 0],data_ibamr[:, 1],  alpha=1.0, linestyle='None', marker='+', markersize=5, markeredgewidth=0.8, label='IBAMR')
+if has_ibamr:
+    sub_ax.plot(data_ibamr[:, 0],data_ibamr[:, 1],  alpha=1.0, linestyle='None', marker='+', markersize=5, markeredgewidth=0.8, label='IBAMR')
 sub_ax.plot(deformed[:, 1],deformed[:, 0], alpha=1.0, linestyle='None', marker='x', markersize=5, markeredgewidth=0.8, label='Pulse')
-sub_ax.plot(deformed_afsi[:, 1],deformed_afsi[:, 0], alpha=1.0, label='Present')
+if has_afsi:
+    sub_ax.plot(deformed_afsi[:, 1],deformed_afsi[:, 0], alpha=1.0, label='Present')
 sub_ax.set_xticks([-2, 0])  
 sub_ax.set_yticks([-15, -14, -13])  
 sub_ax.set_xlim(-2, 0)

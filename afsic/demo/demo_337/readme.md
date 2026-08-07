@@ -149,6 +149,10 @@ python plot_speedup.py      # -> ../figures/your_plot.png
 
 > 各画图脚本读取 `../reference/` 下的参考/AFSI 数据；`plot_speedup.py`、
 > `plot_percentage.py` 读取 `../`（`data/` 根目录）下的性能 CSV。
+>
+> 可选数据：`*-ibamr.*`（外部 IBAMR 参考）、`systole-afsi-4.txt`（AFSI 收缩结果）
+> 缺失时画图脚本自动跳过对应曲线，不报错；`systole-pulse-disp.txt` 由
+> `bench-ilv-contraction.py`（Docker）生成。
 
 ---
 
