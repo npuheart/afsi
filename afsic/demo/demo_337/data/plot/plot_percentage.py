@@ -27,7 +27,7 @@ plt.rcParams.update({
 
 
 # 读取 CSV 文件
-df = pd.read_csv('32x32x32.csv')
+df = pd.read_csv('../32x32x32.csv')
 
 # 绘制图形
 plt.figure(figsize=(8, 6))

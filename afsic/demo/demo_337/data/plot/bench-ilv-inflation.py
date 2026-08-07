@@ -1,6 +1,5 @@
-# # Problem 3: inflation and active contraction of a ventricle
-
-# In the third problem we will solve the inflation and active contraction of a ventricle. First we import the necessary libraries
+# # Problem 2: Inflation of a ventricle
+# In the second problem we will solve the inflation of a ventricle. First we import the necessary libraries
 #
 
 from pathlib import Path
@@ -14,10 +13,10 @@ import pulse
 from dolfinx.geometry import bb_tree, compute_colliding_cells, compute_collisions_points
 
 
-# Next we will create the geometry and save it in the folder called `lv_ellipsoid`. Now we will also generate fibers and use a sixth order quadrature space for the fibers
+# Next we will create the geometry and save it in the folder called `lv_ellipsoid`.
 
 comm = MPI.COMM_WORLD
-geodir = Path("lv_ellipsoid-problem3")
+geodir = Path("lv_ellipsoid-problem2")
 if not geodir.exists():
     comm.barrier()
     cardiac_geometries.mesh.lv_ellipsoid(
@@ -30,10 +29,6 @@ if not geodir.exists():
         mu_base_endo=-math.acos(5 / 17),
         mu_apex_epi=-math.pi,
         mu_base_epi=-math.acos(5 / 20),
-        fiber_space="Quadrature_6",
-        create_fibers=True,
-        fiber_angle_epi=-90,
-        fiber_angle_endo=90,
         comm=comm,
     )
     print("Done creating geometry.")
@@ -47,24 +42,23 @@ geo = cardiac_geometries.geometry.Geometry.from_folder(
 
 # Now, lets convert the geometry to a `pulse.Geometry` object.
 
-geometry = pulse.HeartGeometry.from_cardiac_geometries(geo, metadata={"quadrature_degree": 6})
+geometry = pulse.HeartGeometry.from_cardiac_geometries(geo, metadata={"quadrature_degree": 4})
 
 
 # The material model used in this benchmark is the {py:class}`Guccione <pulse.material_models.guccione.Guccione>` model.
 
 material_params = {
-    "C": dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(2.0)),
-    "bf": dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(8.0)),
-    "bt": dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(2.0)),
-    "bfs": dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(4.0)),
+    "C": dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(10.0)),
+    "bf": dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1.0)),
+    "bt": dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1.0)),
+    "bfs": dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(1.0)),
 }
-material = pulse.Guccione(f0=geo.f0, s0=geo.s0, n0=geo.n0, **material_params)
+material = pulse.Guccione(**material_params)
 
 
-# We use an active stress approach with 60% transverse active stress
+# There are now active contraction, so we choose a pure passive model
 
-Ta = dolfinx.fem.Constant(geometry.mesh, dolfinx.default_scalar_type(0.0))
-active_model = pulse.ActiveStress(geo.f0, activation=pulse.Variable(Ta, "kPa"))
+active_model = pulse.active_model.Passive()
 
 # and the model should be incompressible
 
@@ -103,12 +97,50 @@ log.set_log_level(log.LogLevel.INFO)
 
 problem.solve()
 
-# Now we will solve the problem for a range of active contraction and traction values
+# Now step up the pressure to 10 kPa starting with an increment of 1 kPa
+target_value = 10.0
+incr = 1.0
 
-target_pressure = 15.0
-target_Ta = 60.0
+# Here we use a continuation strategy to speed up the convergence
 
-# Let us just gradually increase the active contraction and traction with a linear ramp of 40 steps
+use_continuation = True
+
+old_u = [problem.u.copy()]
+old_p = [problem.p.copy()]
+old_tractions = [traction.value.copy()]
+
+while traction.value < target_value:
+    value = min(traction.value + incr, target_value)
+    print(f"Solving problem for traction={value}")
+
+    if use_continuation and len(old_tractions) > 1:
+        # Better initial guess
+        d = (value - old_tractions[-2]) / (old_tractions[-1] - old_tractions[-2])
+        problem.u.x.array[:] = (1 - d) * old_u[-2].x.array + d * old_u[-1].x.array
+        problem.p.x.array[:] = (1 - d) * old_p[-2].x.array + d * old_p[-1].x.array
+
+    traction.value = value
+
+    try:
+        nit = problem.solve()
+    except RuntimeError:
+        print("Convergence failed, reducing increment")
+
+        # Reset state and half the increment
+        traction.value = old_tractions[-1]
+        problem.u.x.array[:] = old_u[-1].x.array
+        problem.p.x.array[:] = old_p[-1].x.array
+        incr *= 0.5
+        problem._init_forms()
+    else:
+        print(f"Converged in {nit} iterations")
+        if nit < 3:
+            print("Increasing increment")
+            # Increase increment
+            incr *= 1.5
+        old_u.append(problem.u.copy())
+        old_p.append(problem.p.copy())
+        old_tractions.append(traction.value.copy())
 
 
 class DomainCollisionChecker:
@@ -127,18 +159,8 @@ class DomainCollisionChecker:
             return disp.eval(x0, first_cell)[:3]
 
 us = []
-N = 40
 dcc = DomainCollisionChecker(geometry.mesh)
-
-for Ta_value, traction_value in zip(np.linspace(0, target_Ta, N), np.linspace(0, target_pressure, N)):
-    print(f"Solving problem for traction={traction_value} and active contraction={Ta_value}")
-    Ta.value = Ta_value
-    traction.value = traction_value
-    problem.solve()
-
-
-
-for point in np.loadtxt('data/ideal_middle_wall.txt'):
+for point in np.loadtxt('../reference/ideal_middle_wall.txt'):
     u = dcc.eval_point(problem.u, point[0], point[1], 0)
     us.append([u[0], u[1]])
 
@@ -149,7 +171,7 @@ comm.Reduce(us, global_sum, op=MPI.SUM, root=0)
 
 
 if comm.rank == 0:
-    np.savetxt("data/systole-pulse-disp.txt", np.column_stack((global_sum[:, 0], global_sum[:, 1])))
+    np.savetxt("../reference/diastole-pulse-disp.txt", np.column_stack((global_sum[:, 0], global_sum[:, 1])))
 
 
 

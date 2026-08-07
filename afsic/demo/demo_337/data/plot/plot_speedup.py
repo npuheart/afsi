@@ -28,7 +28,7 @@ plt.rcParams.update({
 })
 
 # 读取 CSV 文件
-df = pd.read_csv('32x32x32.csv')
+df = pd.read_csv('../32x32x32.csv')
 
 
 plt.figure(figsize=(8, 6))
@@ -38,7 +38,7 @@ plt.plot(df['num_processors'], df['num_processors'], marker='o', linestyle='--')
 plt.plot(df['num_processors'], df['speed_up'], marker='^', markerfacecolor='none', color='tab:blue', label='$32^3$ AFSI 求解器')
 plt.plot(df['num_processors'], df['speed_up_2'], marker='^', markerfacecolor='none', color='tab:orange', label='$32^3$ Navier-Stokes 求解器')
 
-df = pd.read_csv('64x64x64.csv')
+df = pd.read_csv('../64x64x64.csv')
 # 64x64x64的网格
 plt.plot(df['num_processors'], df['speed_up'], marker='x', markerfacecolor='none', color='tab:green', label='$64^3$ AFSI 求解器')
 plt.plot(df['num_processors'], df['speed_up_2'], marker='x', markerfacecolor='none', color='tab:red', label='$64^3$ Navier-Stokes 求解器')

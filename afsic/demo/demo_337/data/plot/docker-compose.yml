@@ -1,0 +1,34 @@
+# demo_337 — pulse-fenicsx 环境（网格 + 参考数据生成）
+#
+# 本 compose 文件位于 data/plot/，把 data/plot 挂载为容器内的 /repo。
+# 在容器内运行的脚本会把结果写到上一级目录：
+#   - generate_mesh.py        -> ../mesh/lv_ellipsoid/geometry/  (网格)
+#   - bench-ilv-inflation.py  -> ../reference/diastole-pulse-disp.txt (参考数据)
+#   - bench-ilv-contraction.py-> ../reference/systole-pulse-disp.txt (参考数据)
+#   - middle_wall_location.py -> ../reference/ideal_middle_wall.txt
+
+# 本 compose 位于 data/plot/，把整个 data/ 挂载为容器内的 /repo，
+# 工作目录为 /repo/plot。脚本中的相对路径：
+#   - ../mesh/      -> data/mesh/      （generate_mesh.py 输出）
+#   - ../reference/ -> data/reference/ （bench/middle_wall 输出与输入）
+
+version: '3.8'
+
+services:
+  fenicsx-pulse:
+    image: ghcr.io/finsberg/fenicsx-pulse:v0.4.1
+    container_name: fenicsx-pulse-container
+    # 镜像默认 entrypoint 是 jupyter lab，这里覆盖为 bash
+    entrypoint: /usr/bin/bash
+    command: -c "sleep infinity"
+    working_dir: /repo/plot
+    volumes:
+      - ..:/repo
+
+# 用法（在 demo_337/data/plot/ 下）：
+#   docker compose up -d
+#   docker exec -it fenicsx-pulse-container /usr/bin/bash
+#   cd /repo/plot && python generate_mesh.py
+#   cd /repo/plot && python bench-ilv-inflation.py    # 舒张参考数据
+#   cd /repo/plot && python bench-ilv-contraction.py  # 收缩参考数据
+#   cd /repo/plot && python middle_wall_location.py

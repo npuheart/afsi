@@ -5,10 +5,10 @@ from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import numpy as np
 
-data_ibamr = np.loadtxt('../data/systole-ibamr.txt', skiprows=1)
-initial = np.loadtxt("../data/ideal_middle_wall.txt")
-displacements = np.loadtxt("../data/systole-pulse-disp.txt")
-displacements_afsi = np.loadtxt("../data/systole-afsi-4.txt")
+data_ibamr = np.loadtxt('../reference/systole-ibamr.txt', skiprows=1)
+initial = np.loadtxt("../reference/ideal_middle_wall.txt")
+displacements = np.loadtxt("../reference/systole-pulse-disp.txt")
+displacements_afsi = np.loadtxt("../reference/systole-afsi-4.txt")
 deformed = initial + displacements
 deformed_afsi = displacements_afsi
 

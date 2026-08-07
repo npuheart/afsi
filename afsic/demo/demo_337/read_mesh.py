@@ -5,10 +5,12 @@ import numpy as np
 import json
 import ufl
 
-with open('/home/dolfinx/afsi/afsic/demo/demo_337/mesh/lv_ellipsoid/geometry/markers.json', 'r', encoding='utf-8') as file:
+mesh_dir = "data/mesh/lv_ellipsoid/geometry"
+
+with open(f'{mesh_dir}/markers.json', 'r', encoding='utf-8') as file:
     mesh_markers = json.load(file)
 
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, '/home/dolfinx/afsi/afsic/demo/demo_337/mesh/lv_ellipsoid/geometry/mesh.xdmf', "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f'{mesh_dir}/mesh.xdmf', "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh(name="Mesh")
     structure.topology.create_connectivity(structure.topology.dim-1, structure.topology.dim)
     ft = file.read_meshtags(structure, "Facet tags")

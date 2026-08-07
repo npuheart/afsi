@@ -1,7 +1,7 @@
 # output the location of a line in the middle of the ventricular wall
 
 import numpy as np
-file = 'ideal_middle_wall.txt'
+file = '../reference/ideal_middle_wall.txt'
 a = 18.5
 b = 8.5  
 theta = np.linspace(0, 2 * np.pi, 200)

@@ -3,7 +3,10 @@ results
 
 mail/build
 
-data
+# 所有 data/ 下的生成数据/网格/输出默认不入库；
+# 但各 demo 的 data/plot/（画图与生成命令）是代码，需要入库
+data/*
+!data/plot/
 
 *nohup.out
 
@@ -19,6 +22,11 @@ data
 
 afsic/demo/demo_337/mesh
 afsic/demo/demo_337/mesh-90
+
+# demo_337: LV 椭圆结构网格由 pulse-fenicsx (Docker) 生成，不入库
+afsic/demo/demo_337/data/mesh/
+# demo_337: bench-ilv-*.py 运行时生成的自带几何目录
+afsic/demo/demo_337/data/plot/lv_ellipsoid-problem*/
 
 # 方腔驱动圆盘：根目录测试输出（用户手动复制的结果数据，不入库）
 .trash
