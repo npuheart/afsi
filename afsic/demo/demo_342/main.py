@@ -199,7 +199,7 @@ L_hat = form(
     -inner(P_s, grad(dVs)) * dxx(1)
     - beta * inner(constraint, dVs) * dxx(1)
 )
-b1 = create_vector(L_hat)
+b1 = create_vector(Vs)  # dolfinx 0.10.0: create_vector 需函数空间而非 Form
 
 # ==========================================================================
 # 3. IBM coupling — same as demo_402

@@ -1,11 +1,23 @@
-from petsc4py import PETSc
-from afsic import IBMesh3D, IBInterpolation3D
-from afsic import unique_filename, get_project_name
-from mpi4py import MPI
+"""demo_341 三维方腔驱动圆球 —— FSI（浸没边界法）求解。
 
+流体用 ChorinSolver（方腔 [0,1]^3，入口 u_x=1 驱动），固体为 Gmsh 圆球
+（Neo-Hookean 型 P=mu_s*(F-F^-T)），通过 IBMesh3D/IBInterpolation3D 耦合。
+输出速度场/固体力到 plot/fsi_N<grid>/（本地）。
+
+环境变量：
+    GRID=32   # 背景网格密度 Nx=Ny=Nz（默认 32）
+    STEPS=200 # 运行步数覆盖（t=1s 时 STEPS=200）
+    CASE=fsi  # 输出子目录名
+
+运行：
+    conda activate afsi-dolfinx
+    python generate_mesh.py            # 先生成固体网格 plot/mesh-341.xdmf
+    STEPS=200 python fsi_paralell.py
+"""
 import os
-import time
-import requests
+from mpi4py import MPI
+from petsc4py import PETSc
+
 import numpy as np
 
 import dolfinx
@@ -18,10 +30,14 @@ from basix.ufl import element
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction, inv, ln, det,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from dolfinx.fem import form, assemble_scalar
-
-from afsic import IPCSSolver, ChorinSolver, TimeManager
-from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
+
+from afsic import IBMesh3D, IBInterpolation3D, ChorinSolver, TimeManager
+from afsic import swanlab_init, swanlab_upload
+
+_demo_dir = os.path.dirname(os.path.abspath(__file__))
+_GRID = int(os.environ.get("GRID", "32"))
+_CASE = os.environ.get("CASE", "fsi")
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
@@ -37,19 +53,23 @@ config = {"nssolver": "chorinsolver",
           "Lx": 1.0,
           "Ly": 1.0,
           "Lz": 1.0,
-          "Nx": 32,
-          "Ny": 32,
-          "Nz": 32,
+          "Nx": _GRID,
+          "Ny": _GRID,
+          "Nz": _GRID,
           "Nl": 20,
           "mu": 0.01,
           "mu_s": 0.1,  # Solid elasticity
           }
 
 config["num_steps"] = int(config['T']/config['dt'])
-config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
-config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
-config["experiment_name"] = get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None
-config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
+# 环境变量 STEPS 覆盖步数（如 t=1s: STEPS=200）
+if os.environ.get("STEPS"):
+    config["num_steps"] = int(os.environ["STEPS"])
+    config["T"] = config["num_steps"] * config["dt"]
+# 输出到本地 plot/<case>_N<grid>/
+config["output_path"] = os.path.join(_demo_dir, "plot", f"{_CASE}_N{_GRID}") + os.sep
+os.makedirs(config["output_path"], exist_ok=True)
+config["experiment_name"] = f"demo-341-{_CASE}-N{_GRID}"
 swanlab_init(config['project_name'], config['experiment_name'], config)
 
 
@@ -107,10 +127,12 @@ Q = functionspace(mesh, s_cg1)
 # Define boundary conditions
 fdim = mesh.topology.dim - 1
 gdim = mesh.geometry.dim
-tdim = mesh.topology.dim
-class UpVelocity():
+
+
+class UpVelocity:
     def __init__(self, t):
         self.t = t
+
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
         values[0] = 1.0
@@ -150,19 +172,15 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/root/afsi/afsic/demo/demo_341/mesh-341.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+mesh_path = os.path.join(_demo_dir, "plot", "mesh-341.xdmf")
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, mesh_path, "r",
+                         encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh()
-# structure = dolfinx.mesh.create_box(
-#     comm=MPI.COMM_WORLD,
-#     points=((0.4, 0.4, 0.3), (0.8,0.8,0.7)),
-#     n=(config["Nx"], config["Ny"], config["Nz"]),
-#     cell_type=CellType.hexahedron,
-#     ghost_mode=GhostMode.shared_facet,
-# )
+
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
-                 config["force_order"], shape=(structure.geometry.dim, ))
+                config["force_order"], shape=(structure.geometry.dim, ))
 v_cg1 = element("Lagrange", structure.topology.cell_name(),
-                 1, shape=(structure.geometry.dim, ))
+                1, shape=(structure.geometry.dim, ))
 Vs = functionspace(structure, v_cg2)
 Vs_io = functionspace(structure, v_cg1)
 
@@ -181,13 +199,13 @@ FF = grad(solid_coords)
 
 # L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
 L_hat = form(-inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx)
-b1 = create_vector(L_hat)
+b1 = create_vector(Vs)  # dolfinx 0.10.0: create_vector 需函数空间而非 Form
 
 ###########################################################################################################
 ##########################################  Interaction  ##################################################
 ###########################################################################################################
-from afsic import IBMesh3D, IBInterpolation3D
-ibmesh = IBMesh3D(0.0, config["Lx"], 0.0, config["Ly"], 0.0, config["Lz"], config["Nx"], config["Ny"], config["Nz"], config["velocity_order"])
+ibmesh = IBMesh3D(0.0, config["Lx"], 0.0, config["Ly"], 0.0, config["Lz"],
+                  config["Nx"], config["Ny"], config["Nz"], config["velocity_order"])
 ib_interpolation = IBInterpolation3D(ibmesh)
 coords_bg = Function(V)
 coords_bg.interpolate(lambda x: np.array([x[0], x[1], x[2]]))
@@ -199,11 +217,9 @@ ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 ###########################################################################################################
 ##########################################  Output  #######################################################
 ###########################################################################################################
-
-
 u_io = Function(V_io)
-file_velocity = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"velocity.xdmf", "w")
-file_solid = dolfinx.io.XDMFFile(mesh.comm, config["output_path"]+"solid_force.xdmf", "w")
+file_velocity = dolfinx.io.XDMFFile(mesh.comm, config["output_path"] + "velocity.xdmf", "w")
+file_solid = dolfinx.io.XDMFFile(mesh.comm, config["output_path"] + "solid_force.xdmf", "w")
 file_velocity.write_mesh(mesh)
 file_solid.write_mesh(structure)
 
@@ -215,6 +231,10 @@ form_F_L2 = form(dot(solid_coords, solid_coords) * dx)
 form_volume = form(det(grad(solid_coords)) * dx)
 
 log.set_log_level(log.LogLevel.INFO)
+if MPI.COMM_WORLD.rank == 0:
+    print(f"FSI 方腔驱动圆球: {config['Nx']}^3, dt={config['dt']}, steps={config['num_steps']}, "
+          f"out={config['output_path']}")
+
 for step in range(config['num_steps']):
     current_time = step * config['dt']
     up_velocity.t = current_time
@@ -238,7 +258,6 @@ for step in range(config['num_steps']):
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
 
-    data_log = {}
     if time_manager.should_output(step):
         u_io.interpolate(ns_solver.u_)
         file_velocity.write_function(u_io, current_time)
@@ -247,9 +266,12 @@ for step in range(config['num_steps']):
         file_solid.write_function(solid_force_io, current_time)
         file_solid.write_function(solid_coords_io, current_time)
         if MPI.COMM_WORLD.rank == 0:
-            data_log["u_norm"] = u_L2
-            data_log["p_norm"] = p_L2
-            data_log["solid_force_norm"] = F_L2
-            data_log["volume"] = volume
-            print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
-            swanlab_upload(current_time, data_log)
+            print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s, "
+                  f"u_L2={u_L2:.4f} p_L2={p_L2:.4f}", flush=True)
+            swanlab_upload(current_time, {"u_norm": u_L2, "p_norm": p_L2,
+                                          "solid_force_norm": F_L2, "volume": volume})
+
+file_velocity.close()
+file_solid.close()
+if MPI.COMM_WORLD.rank == 0:
+    print(f"\nDone. Output: {config['output_path']}")
