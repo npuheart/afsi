@@ -1,6 +1,13 @@
+"""生成 demo_340 瓣膜固体网格（上/下两叶片）→ plot/mesh-340.xdmf。
+
+运行：
+    conda activate afsi-dolfinx
+    python generate_mesh.py
+"""
+import os
 from mpi4py import MPI
 import gmsh  # type: ignore
-from dolfinx.io import XDMFFile, gmshio
+from dolfinx.io import XDMFFile, gmsh as gmshio  # dolfinx 0.10.0: gmshio 更名 gmsh
 
 def gmsh_rectangle(model: gmsh.model, name: str, x0=0.0, y0=0.0, lx=1.0, ly=1.0, mesh_size=0.05, tag_offset=0) -> int:
     """
@@ -52,7 +59,9 @@ ft.name = "Facet markers"
 ct.name = "Cell markers"
 
 import dolfinx
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, 'mesh-340.xdmf', "w", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+_mesh_out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plot", "mesh-340.xdmf")
+os.makedirs(os.path.dirname(_mesh_out), exist_ok=True)
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, _mesh_out, "w", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     file.write_mesh(mesh)
     file.write_meshtags(ft, mesh.geometry)
     file.write_meshtags(ct, mesh.geometry)

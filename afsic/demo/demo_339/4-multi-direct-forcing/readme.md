@@ -63,15 +63,9 @@ $$
 
 ```bash
 conda activate afsi-dolfinx
-cd afsic/demo/demo_339/multi_direct_forcing
+cd afsic/demo/demo_339/4-multi-direct-forcing
 python main.py                 # 完整 10000 步 (T=10 s)，输出到 output/
 STEPS=2500 python main.py      # 短程验证 (t=2.5 s)
-```
-
-与 body_fitted 对比：
-```bash
-cd afsic/demo/demo_339
-STEPS=2500 python compare_mdf_bf.py
 ```
 
 ## 已知局限（继承自 DFIBMFoam / afsic IBM）
@@ -81,7 +75,7 @@ STEPS=2500 python compare_mdf_bf.py
 - **固定圆柱**（U^d=0）。DFIBMFoam 的振荡/游动运动学可通过改 `desiredIbpVel` 接入
 - 边界-only 标记（忠实 DFIBMFoam）；圆柱内部速度场不受显式约束
 
-## 验证结果（compare_mdf_bf.py，N=2500 步，t=2.5s，与 body_fitted 对比）
+## 验证记录（历史，N=2500 步，t=2.5s，与 body_fitted 对比）
 
 | 量 | body_fitted | mdf (disk) | mdf (boundary) |
 |----|-------------|-----------|----------------|
@@ -113,8 +107,8 @@ STEPS=2500 python compare_mdf_bf.py
 
 ## Cd 收敛性验证（与官方贴体教程对比，2026-08 结论）
 
-用 `dfg_tutorial/compare_tutorial_mdf.py` 把本 demo 的 multi-direct forcing 求解器与
-官方 dolfinx 贴体教程（CN+AB2 IPCS，**表面应力积分** Cd）在**相同物理**下对比
+历史验证（2026-08）：把本 demo 的 multi-direct forcing 求解器与官方 dolfinx 贴体教程
+（CN+AB2 IPCS，**表面应力积分** Cd）在**相同物理**下对比
 （ρ=1、μ=0.001、Re=100、sin 入口 $U=1.5\sin(\pi t/8)$、dt=0.001、t=0.3s、300 步）：
 
 | 分辨率 | mdf Cd（体积力积分） | tutorial Cd（表面应力积分） | uL2 差 | 尾流 x=0.3 速度差 |

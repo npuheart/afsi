@@ -4,13 +4,13 @@
 
 | 目录 | 方法 | 固体表示 | 流体网格 |
 |------|------|----------|----------|
-| `no_cylinder/` | 纯通道流（基准对照） | 无 | 220×41 均匀四边形 |
-| `body_fitted/` | 贴体网格法 | 网格中的洞（无滑移 Dirichlet） | Gmsh 贴体三角形 |
-| `ibfe/` | IB-FE 浸没边界法 | Neo-Hookean 圆盘 + 惩罚固定 | 220×41 均匀四边形 |
-| `multi_direct_forcing/` | 浸没边界直接力法（IBM, DFIBMFoam 移植） | 边界标记 + Peskin δ 核 + 内部掩码 | 220×41 均匀四边形 |
+| `1-no-cylinder/` | 纯通道流（基准对照） | 无 | 220×41 均匀四边形 |
+| `2-body-fitted/` | 贴体网格法 | 网格中的洞（无滑移 Dirichlet） | Gmsh 贴体三角形 |
+| `3-ibfe/` | IB-FE 浸没边界法 | Neo-Hookean 圆盘 + 惩罚固定 | 220×41 均匀四边形 |
+| `4-multi-direct-forcing/` | 浸没边界直接力法（IBM, DFIBMFoam 移植） | 边界标记 + Peskin δ 核 + 内部掩码 | 220×41 均匀四边形 |
 
-> **注**：早期曾有 `direct_forcing/` 实现（速度掩码式直接力），经与 `body_fitted` 定量对比证实其
-> Cd/近壁压力不可信，已**删除**并被 `multi_direct_forcing/` 取代（见 §8）。
+> **注**：早期曾有 `direct_forcing/` 实现（速度掩码式直接力），经与 `2-body-fitted` 定量对比证实其
+> Cd/近壁压力不可信，已**删除**并被 `4-multi-direct-forcing/` 取代（见 §8）。
 
 ---
 
@@ -68,11 +68,11 @@ $$
 
 ## 3. 各方法原理
 
-### 3.1 `no_cylinder/` — 纯通道流基准
+### 3.1 `1-no-cylinder/` — 纯通道流基准
 
 无浸没体。抛物线入口、上下壁无滑移、出口 $p=0$。用于验证流体求解器基线。
 
-### 3.2 `body_fitted/` — 贴体网格法
+### 3.2 `2-body-fitted/` — 贴体网格法
 
 圆柱是流体网格中的**洞**，圆柱表面无滑移直接作为 Dirichlet 边界条件：
 $$
@@ -80,7 +80,7 @@ $$
 $$
 无需浸没边界、无固体本构。网格由 Gmsh 生成（`channel_hole.msh`），圆柱边界物理标签 15。
 
-### 3.3 `ibfe/` — IB-FE 浸没边界法
+### 3.3 `3-ibfe/` — IB-FE 浸没边界法
 
 用**极高刚度 Neo-Hookean 圆盘 + 惩罚固定**近似刚性圆柱，通过 Peskin 浸没边界反馈力耦合：
 
@@ -104,9 +104,9 @@ $$
 
 ---
 
-## 4. 短程验证结果
+## 4. 短程验证结果（历史记录）
 
-用 `run_short.py` 在统一参数下对各实现各运行 **300 步**（$t=0.3$ s，仍处入口斜坡早期）验证正确性：
+统一参数下对各实现各运行 **300 步**（$t=0.3$ s，仍处入口斜坡早期）的验证记录：
 
 | 实现 | $u_{L2}=\int|\mathbf{u}|^2 dV$ | $p_{L2}=\int p^2 dV$ | 附加量 |
 |------|------|------|------|
@@ -126,16 +126,12 @@ $$
 ```bash
 conda activate afsi-dolfinx
 
-# 方式一：各实现逐一运行（完整 $10^4$ 步）
+# 各实现逐一运行（完整 $10^4$ 步）
 cd afsic/demo/demo_339
-cd no_cylinder     && python main.py      # 或 mpirun -n <N> python main.py
-cd ../body_fitted  && python main.py      # 网格已生成 channel_hole.msh
-cd ../ibfe         && python main.py      # 网格已生成 cylinder_solid.xdmf
-cd ../multi_direct_forcing && python main.py
-
-# 方式二：短程验证（离线安全，默认 100 步）
-cd afsic/demo/demo_339
-SHORT_STEPS=300 python run_short.py
+cd 1-no-cylinder          && python main.py   # 或 mpirun -n <N> python main.py
+cd ../2-body-fitted       && python main.py   # 网格已生成 channel_hole.msh
+cd ../3-ibfe              && python main.py   # 网格已生成 cylinder_solid.xdmf
+cd ../4-multi-direct-forcing && python main.py
 ```
 
 ---
@@ -146,11 +142,11 @@ SHORT_STEPS=300 python run_short.py
 
 | 文件 | 修复 |
 |------|------|
-| `body_fitted/main.py` | `from dolfinx.io import gmsh as gmshio`（`gmshio` 更名 `gmsh`） |
-| `ibfe/generate_mesh.py` | 同上 |
-| `ibfe/main.py` | `create_vector(L_hat)` → `create_vector(Vs)`（0.10.0 中 `create_vector` 需函数空间而非 Form） |
+| `2-body-fitted/main.py` | `from dolfinx.io import gmsh as gmshio`（`gmshio` 更名 `gmsh`） |
+| `3-ibfe/generate_mesh.py` | 同上 |
+| `3-ibfe/main.py` | `create_vector(L_hat)` → `create_vector(Vs)`（0.10.0 中 `create_vector` 需函数空间而非 Form） |
 
-### 6.2 `body_fitted` 网格 `.geo` 修正
+### 6.2 `2-body-fitted` 网格 `.geo` 修正
 
 - **重叠圆盘**：原 `.geo` 用 `Duplicata` 保留圆盘曲面，导致 gmsh 同时剖分圆盘与流体，`read_from_msh` 报 `Invalid rank ... less than 1`。改为 `BooleanDifference` 直接删除圆盘输入。
 - **物理标签失效**：原 gmsh 自动分配标签 1–6，而 `main.py` 用 `find(11)`~`find(15)`，边界条件从未生效。现显式指定 11=inlet、12=outlet、13=bottom、14=top、15=cylinder。
@@ -158,25 +154,15 @@ SHORT_STEPS=300 python run_short.py
 
 ### 6.3 固有局限（未修改，供参考）
 
-- **`ibfe` 耦合稳定性**：刚性近似采用显式位移更新 + $\beta=10^{12}$ 惩罚。流体推动下圆盘缓慢下游漂移（300 步约 $9\times10^{-4}$ m），惩罚力反馈回流体后随步数增长，**约 200 步后固体力出现 NaN**。这是该演示算法的固有特性；流体场在短程内仍正确。
-
----
-
-## 7. 新增文件
-
-| 文件 | 用途 |
-|------|------|
-| `run_short.py` | 离线短程验证脚本：屏蔽 swanlab/网络调用，统一参数下依次运行各实现并汇总 $u_{L2}/p_{L2}$ |
-| `compare_mdf_bf.py` | 定量对比 `multi_direct_forcing` vs `body_fitted`（探针 + 表面应力阻力），`STEPS=2500 python compare_mdf_bf.py` |
-| `_short_run/` | 短程运行输出目录（velocity/pressure xdmf） |
+- **`3-ibfe` 耦合稳定性**：刚性近似采用显式位移更新 + $\beta=10^{12}$ 惩罚。流体推动下圆盘缓慢下游漂移（300 步约 $9\times10^{-4}$ m），惩罚力反馈回流体后随步数增长，**约 200 步后固体力出现 NaN**。这是该演示算法的固有特性；流体场在短程内仍正确。
 
 ---
 
 ## 8. multi-direct forcing 的 Cd 收敛性（与官方贴体教程对比）
 
-对 `multi_direct_forcing/`（新 demo，详见其 readme）与官方 dolfinx 贴体教程
+对 `4-multi-direct-forcing/`（详见其 readme）与官方 dolfinx 贴体教程
 （CN+AB2 IPCS，**表面应力积分** Cd）在相同物理下做 3 档分辨率对比
-（`dfg_tutorial/compare_tutorial_mdf.py`，ρ=1、μ=0.001、Re=100、sin 入口、t=0.3s、300 步）：
+（历史记录：ρ=1、μ=0.001、Re=100、sin 入口、t=0.3s、300 步）：
 
 | 分辨率 | mdf Cd（力积分） | tutorial Cd（表面应力） | uL2 差 | 尾流 x=0.3 速度差 |
 |---|---|---|---|---|
@@ -195,6 +181,6 @@ SHORT_STEPS=300 python run_short.py
 - **正确 Cd 算法**：**控制体积动量平衡**（最推荐）、包络面应力积分、表面应力积分（贴体）；
   直接力积分 $\int f_{\mathrm{IBM}}\,dV$ 不推荐做定量。
 
-> 补充：已删除的旧 `direct_forcing` 的 Cd 代理量虚高 ~8×，`multi_direct_forcing` 的
+> 补充：已删除的旧 `direct_forcing` 的 Cd 代理量虚高 ~8×，`4-multi-direct-forcing` 的
 > 力积分 Cd 量级合理但不网格收敛（见本节）——定量阻力应统一用控制体积动量平衡或
 > 包络面应力积分计算。

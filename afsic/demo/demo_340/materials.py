@@ -10,15 +10,15 @@
 # -----------------------------------------------------------------------------
 
 
-"""neo-Hookean material model"""
+"""本构模型（material models）
 
-
-from dolfinx import default_scalar_type
+- FRHMaterial          — 纤维增强超弹性（demo_340 主程序默认使用；
+                        需传入 C0/C1/kappa_s，并通过 f1 指定各瓣膜叶片的纤维方向）
+- NeoHookeanMaterial   — neo-Hookean 超弹性（备用）
+"""
 import ufl
-from dolfinx import fem
-from mpi4py import MPI
 
-__all__ = ['FRHMaterial'] 
+__all__ = ['FRHMaterial', 'NeoHookeanMaterial'] 
 
 class FRHMaterial:
     def __init__(self, **params) :
@@ -55,5 +55,40 @@ class FRHMaterial:
         return ufl.diff(self.strain_energy(domain, F), F)
 
     def first_piola_kirchhoff_stress_v1(self, domain, coords, p=None) :
+        F = ufl.variable(ufl.grad(coords))
+        return ufl.diff(self.strain_energy(domain, F), F)
+
+
+class NeoHookeanMaterial:
+    """Neo-Hookean 超弹性本构（备用；demo_340 默认使用 FRHMaterial）。"""
+    def __init__(self, **params):
+        params = params or {}
+        self._parameters = self.default_parameters()
+        self._parameters.update(params)
+
+    @staticmethod
+    def default_parameters():
+        p = {'nu': 0.4,
+             'E': 5.6e5}
+        return p
+
+    def strain_energy(self, domain, F):
+        params = self._parameters
+        mu_s = 0.5 * params["E"] / (1 + params["nu"])
+        lambda_s = 2 * params["E"] * params["nu"] / (1 + params["nu"]) / (1 - 2 * params["nu"])
+
+        C = ufl.variable(F.T * F)
+        Ic = ufl.variable(ufl.tr(C))
+        J = ufl.variable(ufl.det(F))
+        psi = (mu_s / 2) * (Ic - 3) - mu_s * ufl.ln(J) + (lambda_s / 2) * (ufl.ln(J)) ** 2
+        return psi
+
+    def first_piola_kirchhoff_stress(self, domain, u, p=None):
+        d = len(u)
+        I = ufl.variable(ufl.Identity(d))
+        F = ufl.variable(I + ufl.grad(u))
+        return ufl.diff(self.strain_energy(domain, F), F)
+
+    def first_piola_kirchhoff_stress_v1(self, domain, coords, p=None):
         F = ufl.variable(ufl.grad(coords))
         return ufl.diff(self.strain_energy(domain, F), F)

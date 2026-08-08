@@ -16,6 +16,6 @@ on the cylinder boundary.  No immersed boundary method.
 ## Run
 
 ```bash
-python generate_mesh.py       # creates channel_hole.xdmf
+python generate_mesh.py       # creates channel_hole.msh
 python main.py                # or mpirun -n <N> python main.py
 ```

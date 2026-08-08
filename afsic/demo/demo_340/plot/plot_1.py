@@ -5,14 +5,15 @@ from scipy.interpolate import UnivariateSpline
 import numpy as np
 
 # 分别读取两个文件
+# AFSI 曲线数据来自新生成 data/ani_*.csv（45° = demo-340-000092），5.17_*.csv 已删除可再生成
 df_ALE = pd.read_csv('x_dis_ALE.csv')
 df_FSI = pd.read_csv('X_FSI.csv')
-df_ma = pd.read_csv('5.17_t.csv')
-df_ma_x = pd.read_csv('5.17_x.csv')
+df_ma_t = pd.read_csv('data/ani_t.csv')
+df_ma_x = pd.read_csv('data/ani_x.csv')
 df_M2 = pd.read_csv('X_M2.csv')
 
-t_ma = df_ma['ideal-valve-2D-000029 - data/time'].values
-x_displacement_ma = df_ma_x['ideal-valve-2D-000029 - data/x_displacement'].values
+t_ma = df_ma_t['demo-340-000092-time_step'].values
+x_displacement_ma = df_ma_x['demo-340-000092-x_displacement_step'].values
 
 # 提取数据列
 t_ALE = df_ALE['x'].values
@@ -45,11 +46,11 @@ df_ALE_Y = pd.read_csv('Y_ALE.csv')  # 替换为你的文件路径
 df_FSI_Y = pd.read_csv('Y_FSI.csv')  # 替换为你的文件路径
 df_M2_Y = pd.read_csv('y_M2.csv')
 
-df_ma = pd.read_csv('5.17_t.csv')
-df_ma_y = pd.read_csv('5.17_y.csv')
+df_ma_t = pd.read_csv('data/ani_t.csv')
+df_ma_y = pd.read_csv('data/ani_y.csv')
 
-t_ma = df_ma['ideal-valve-2D-000029 - data/time'].values
-y_displacement_ma = df_ma_y['ideal-valve-2D-000029 - data/y_displacement'].values
+t_ma = df_ma_t['demo-340-000092-time_step'].values
+y_displacement_ma = df_ma_y['demo-340-000092-y_displacement_step'].values
 
 t_ALE_Y = df_ALE_Y['x'].values
 y_displacement_ALE = df_ALE_Y['Curve1'].values

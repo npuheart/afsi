@@ -1,12 +1,10 @@
 # https://swanlab.cn/@SimCardiac/ideal_valve_2D/charts
 # https://swanlab.cn/@SimCardiac/demo-340/charts
 
-from afsic import unique_filename
+import os
 from mpi4py import MPI
 from petsc4py import PETSc
 
-import time
-import requests
 import numpy as np
 
 import dolfinx
@@ -20,13 +18,12 @@ from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction, in
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from dolfinx.fem import form, assemble_scalar
 
-from afsic import IPCSSolver, ChorinSolver, TimeManager
+from afsic import ChorinSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 from dolfinx.geometry import bb_tree, compute_colliding_cells, compute_collisions_points
 
-from NeoHookean import NeoHookeanMaterial
-from FRH import FRHMaterial
+from materials import FRHMaterial
 
 # Define the configuration for the simulation
 config = {"nssolver": "chorinsolver",
@@ -56,10 +53,15 @@ config = {"nssolver": "chorinsolver",
           }
 
 config["num_steps"] = int(config['T']/config['dt'])
-config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
-config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
-config["experiment_name"] = requests.get(f"http://counter.pengfeima.cn/{config['project_name']}").text if MPI.COMM_WORLD.rank == 0 else None
-config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
+# 环境变量 STEPS 覆盖步数（短程验证）：STEPS=20 python main.py
+if os.environ.get("STEPS"):
+    config["num_steps"] = int(os.environ["STEPS"])
+    config["T"] = config["num_steps"] * config["dt"]
+_demo_dir = os.path.dirname(os.path.abspath(__file__))
+# 数据输出到本地 plot/ 文件夹（与历史数据、plot 代码放一起）
+config["output_path"] = os.path.join(_demo_dir, "plot") + os.sep
+os.makedirs(config["output_path"], exist_ok=True)
+config["experiment_name"] = "demo-340"
 swanlab_init(config['project_name'], config['experiment_name'], config)
 
 
@@ -149,11 +151,11 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-# with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
-import json
 import ufl
 
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"/home/dolfinx/afsi/data/340-valve/mesh-340.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+# 固体网格由 generate_mesh.py 生成到 plot/mesh-340.xdmf
+mesh_path = os.path.join(_demo_dir, "plot", "mesh-340.xdmf")
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, mesh_path, "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh(name="mesh")
     structure.topology.create_connectivity(structure.topology.dim-1, structure.topology.dim)
     ft = file.read_meshtags(structure, "Facet markers")
@@ -221,7 +223,7 @@ L_hat -= inner(PK1_down, grad(dVs))*dxx(1) # Bottom valve
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(4)
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(15)
 L_hat = form(L_hat)
-b1 = create_vector(L_hat)
+b1 = create_vector(Vs)  # dolfinx 0.10.0: create_vector 需函数空间而非 Form
 
 ###########################################################################################################
 ##########################################  Interaction  ##################################################

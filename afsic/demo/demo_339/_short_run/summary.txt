@@ -1,0 +1,4 @@
+[RESULT] 1-no-cylinder: u_L2=0.002728 p_L2=208904.717813
+[RESULT] 2-body-fitted: u_L2=0.002792 p_L2=207765.204643
+[RESULT] 3-ibfe: u_L2=0.002728 p_L2=208904.755555 |F_s|max=nan
+[RESULT] 4-multi-direct-forcing: u_L2=0.002828 p_L2=0.224956 Cd=0.1585 Cl=-0.0002
