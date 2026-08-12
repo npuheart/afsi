@@ -224,10 +224,10 @@ f_follower = -p_ext * J * inv(FF).T * N0
 f_parallel = dot(f_follower, spine_dir) * spine_dir
 
 L_hat = form(-inner(P_s, grad(dVs))*dx
-            #  - beta*inner(circum_constraint, dVs)*dss(15)
+             - beta*inner(circum_constraint, dVs)*dss(15)   # 固定乌龟头尾（tag 15）
              - inner(f_parallel, dVs)*dss(16)
              - inner(f_parallel, dVs)*dss(17))
-b1 = create_vector(L_hat)
+b1 = create_vector(Vs)  # dolfinx 0.10.0: create_vector 需函数空间而非 Form
 
 ###########################################################################################################
 ##########################################  Interaction  ##################################################
