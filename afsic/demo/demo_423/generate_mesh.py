@@ -26,6 +26,7 @@ w = 0.0625        # annulus width [m]
 cx, cy = 0.5, 0.5 # center
 
 N = int(os.environ.get("N", "32"))
+CELL_TYPE = os.environ.get("CELL_TYPE", "quadrilateral").lower()
 M = 2 * N // 16
 if M < 1:
     raise ValueError("N must be at least 8 so that M=N/8 >= 1")
@@ -44,25 +45,49 @@ for j in range(n_r + 1):
         x[idx, 0] = cx + r * np.cos(theta)
         x[idx, 1] = cy + r * np.sin(theta)
 
-# Quadrilateral cells in VTK cyclic order: [inner-left, inner-right,
-# outer-right, outer-left].  Then convert to DOLFINx order with the official
-# permutation instead of handwriting a cell ordering.
-cells_vtk = np.zeros((n_theta * n_r, 4), dtype=np.int64)
-c = 0
-for j in range(n_r):
-    for i in range(n_theta):
-        i_next = (i + 1) % n_theta
-        il = j * n_theta + i
-        ir = j * n_theta + i_next
-        oo = (j + 1) * n_theta + i_next
-        ol = (j + 1) * n_theta + i
-        cells_vtk[c] = [il, ir, oo, ol]
-        c += 1
+if CELL_TYPE == "quadrilateral":
+    # Quadrilateral cells in VTK cyclic order: [inner-left, inner-right,
+    # outer-right, outer-left].  Then convert to DOLFINx order with the
+    # official permutation instead of handwriting a cell ordering.
+    cells_vtk = np.zeros((n_theta * n_r, 4), dtype=np.int64)
+    c = 0
+    for j in range(n_r):
+        for i in range(n_theta):
+            i_next = (i + 1) % n_theta
+            il = j * n_theta + i
+            ir = j * n_theta + i_next
+            oo = (j + 1) * n_theta + i_next
+            ol = (j + 1) * n_theta + i
+            cells_vtk[c] = [il, ir, oo, ol]
+            c += 1
 
-perm = np.asarray(dolfinx.cpp.io.perm_vtk(CellType.quadrilateral, 4), dtype=np.int64)
-cells = cells_vtk[:, perm]
+    perm = np.asarray(
+        dolfinx.cpp.io.perm_vtk(CellType.quadrilateral, 4), dtype=np.int64)
+    cells = cells_vtk[:, perm]
+    cell_type = CellType.quadrilateral
+    coord_cell = "quadrilateral"
+elif CELL_TYPE == "triangle":
+    # Split each quadrilateral (physical CCW order) into two triangles.
+    # DOLFINx triangle ordering is simply counter-clockwise.
+    cells = np.zeros((2 * n_theta * n_r, 3), dtype=np.int64)
+    c = 0
+    for j in range(n_r):
+        for i in range(n_theta):
+            i_next = (i + 1) % n_theta
+            il = j * n_theta + i
+            ir = j * n_theta + i_next
+            oo = (j + 1) * n_theta + i_next
+            ol = (j + 1) * n_theta + i
+            # physical CCW quad: il -> ol -> oo -> ir
+            cells[c] = [il, ol, oo]      # lower triangle
+            cells[c + 1] = [il, oo, ir]  # upper triangle
+            c += 2
+    cell_type = CellType.triangle
+    coord_cell = "triangle"
+else:
+    raise ValueError("CELL_TYPE must be 'quadrilateral' or 'triangle'")
 
-coord_element = element("Lagrange", "quadrilateral", 1, shape=(2,))
+coord_element = element("Lagrange", coord_cell, 1, shape=(2,))
 structure = dolfinx.mesh.create_mesh(
     MPI.COMM_WORLD, cells, coord_element, x[:, :2]
 )
