@@ -52,8 +52,11 @@ from materials import CircumferentialMaterial
 N = int(os.environ.get("N", "32"))        # fluid elements along one side
 STEPS = int(os.environ.get("STEPS", "100"))
 DT = float(os.environ.get("DT", "1.0e-4"))
-FORCE_SCALE = float(os.environ.get("FORCE_SCALE", "1.0"))
 SOLVER = os.environ.get("SOLVER", "chorin").lower()
+# IPCSSolver uses +f in the momentum equation while ChorinSolver uses -f.
+# Keep the physical force sign consistent by flipping the default scale.
+_DEFAULT_FORCE_SCALE = "-1.0" if SOLVER == "ipcs" else "1.0"
+FORCE_SCALE = float(os.environ.get("FORCE_SCALE", _DEFAULT_FORCE_SCALE))
 
 R = 0.25          # inner radius
 w = 0.0625        # annulus width
