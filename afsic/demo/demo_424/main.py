@@ -27,7 +27,7 @@ from dolfinx.fem import (Function, functionspace, dirichletbc,
                          locate_dofs_topological, form, assemble_scalar,
                          Constant)
 from dolfinx.fem.petsc import create_vector, assemble_vector
-from dolfinx.io import XDMFFile
+from dolfinx.io import VTKFile, XDMFFile
 from dolfinx.mesh import (CellType, GhostMode, locate_entities, meshtags)
 from basix.ufl import element
 from ufl import (Measure, TestFunction, SpatialCoordinate, as_vector,
@@ -80,16 +80,70 @@ s_cg1 = element("Lagrange", mesh.topology.cell_name(), cfg.PRESSURE_ORDER)
 V = functionspace(mesh, v_cg2)
 Q = functionspace(mesh, s_cg1)
 
-# --- velocity BCs: no-slip on the two side walls of the box ----------------
-# The open ends deliberately get NO velocity condition: the natural condition
-# there is zero traction, which together with the pressure Dirichlet below is
-# the prescribed-normal-traction outlet.
+# --- gap damping instead of a sharp pressure/velocity BC split -------------
+# Uniform pressure on the whole end face keeps the boundary-data analysis
+# smooth and avoids the pressure/no-slip corner singularity.  The outer gap
+# is then made effectively static by an implicit linear damping term
+# ``drag * u`` in the momentum equation.  This is a smooth porous-medium
+# regularisation: the lumen (drag = 0) is unaffected, while the gap is damped
+# to a small velocity.
+GAP_DRAG = float(os.environ.get(
+    "GAP_DRAG", "1.0e6" if cfg.CASE == "closed" else "0.0"))
+# Damping can be applied to the full outer gap (GAP_DRAG_LENGTH <= 0) or
+# only to a short plug near each open end (positive length).
+GAP_DRAG_LENGTH = float(os.environ.get("GAP_DRAG_LENGTH", "-1.0"))
+# Optional extra volumetric drag in a thin band around all immersed solid
+# surfaces.  This is a numerical experiment to see whether the near-wall
+# high-speed layer is a fluid boundary-layer artifact.
+EDGE_DRAG = float(os.environ.get("EDGE_DRAG", "0.0"))
+EDGE_BAND = float(os.environ.get("EDGE_BAND", str(2.0 * cfg.H)))
+DRAG_DELTA = 2.0 * cfg.H
+
+
+def _smoothstep(s):
+    s = np.clip(s, 0.0, 1.0)
+    return s * s * (3.0 - 2.0 * s)
+
+
+def drag_weight(y):
+    # 1 in the outer gap, 0 in the wall/lumen, smooth over DRAG_DELTA.
+    lo = _smoothstep((cfg.Y_OUT_LO - y) / DRAG_DELTA)
+    hi = _smoothstep((y - cfg.Y_OUT_HI) / DRAG_DELTA)
+    return np.maximum(lo, hi)
+
+
+def end_weight(x):
+    # 1 near the inlet/outlet plugs, 0 in the middle of the tube.
+    if GAP_DRAG_LENGTH <= 0.0:
+        return np.ones_like(x)
+    L = GAP_DRAG_LENGTH
+    left = _smoothstep((L - x) / L)
+    right = _smoothstep((x - (cfg.BOX_L - L)) / L)
+    return np.maximum(left, right)
+
+
+def edge_weight(x, y):
+    """Smooth band around the wall/membrane surfaces (diagnostic test)."""
+    if EDGE_DRAG <= 0.0:
+        return np.zeros_like(x)
+    w = np.zeros_like(x)
+    xw = (x >= cfg.X_OFF) & (x <= cfg.X_OFF + cfg.L_AORTA)
+    for y0 in (cfg.Y_OUT_LO, cfg.Y_IN_LO, cfg.Y_IN_HI, cfg.Y_OUT_HI):
+        w = w + np.exp(-((y - y0) / EDGE_BAND) ** 2) * xw
+    xd = cfg.X_OFF + cfg.DISC_X
+    ym = (y >= cfg.Y_IN_LO) & (y <= cfg.Y_IN_HI)
+    for x0 in (xd - 0.5 * cfg.DISC_T, xd + 0.5 * cfg.DISC_T):
+        w = w + np.exp(-((x - x0) / EDGE_BAND) ** 2) * ym
+    return np.clip(w, 0.0, 1.0)
+
+
+# --- velocity BCs: no-slip on the two side walls only ----------------------
 u_zero = np.zeros(mesh.geometry.dim, dtype=PETSc.ScalarType)
 bcu = [dirichletbc(u_zero, locate_dofs_topological(V, fdim, facet_tag.find(m)),
                    V)
        for m in (MARKER_BOTTOM, MARKER_TOP)]
 
-# --- pressure BCs: inlet p = p_in(t), outlet p = 0 -------------------------
+# --- pressure BCs: uniform traction on the whole inlet/outlet --------------
 dofs_inlet = locate_dofs_topological(Q, fdim, facet_tag.find(MARKER_INLET))
 dofs_outlet = locate_dofs_topological(Q, fdim, facet_tag.find(MARKER_OUTLET))
 bcp_outlet = dirichletbc(PETSc.ScalarType(0.0), dofs_outlet, Q)
@@ -100,13 +154,39 @@ def make_bcp(value):
 
 
 bcp = make_bcp(0.0)
+ds_inlet = Measure("ds", domain=mesh, subdomain_data=facet_tag)(MARKER_INLET)
+
+# Implicit damping coefficient.  It enters the momentum LHS, so it can be
+# made large without an explicit time-step stability restriction.
+if GAP_DRAG > 0.0:
+    drag_coeff = Function(Q)
+    drag_coeff.interpolate(
+        lambda x: (GAP_DRAG * drag_weight(x[1]) * end_weight(x[0])
+                   + EDGE_DRAG * edge_weight(x[0], x[1])))
+    drag_coeff.x.scatter_forward()
+else:
+    drag_coeff = None
+
+if MPI.COMM_WORLD.rank == 0:
+    if GAP_DRAG_LENGTH > 0.0:
+        print(f"gap drag coefficient: {GAP_DRAG:g} "
+              f"(end plugs only, length {GAP_DRAG_LENGTH:g} m)")
+    else:
+        print(f"gap drag coefficient: {GAP_DRAG:g} (full gap)")
+    if EDGE_DRAG > 0.0:
+        print(f"edge drag coefficient: {EDGE_DRAG:g} "
+              f"(band {EDGE_BAND:g} m)")
 
 if cfg.SOLVER == "chorin":
-    ns_solver = ChorinSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU)
+    ns_solver = ChorinSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU,
+                             drag=drag_coeff)
     # ChorinSolver uses -f in the momentum equation, IPCSSolver uses +f
     force_scale = 1.0
 else:
-    ns_solver = IPCSSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU)
+    p_traction = Constant(mesh, PETSc.ScalarType(0.0))
+    ns_solver = IPCSSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU,
+                           ds_p=ds_inlet, p_traction=p_traction,
+                           drag=drag_coeff)
     force_scale = -1.0
 
 # ==========================================================================
@@ -169,6 +249,39 @@ x_disc = cfg.X_OFF + cfg.DISC_X
 y_disc_probe = np.linspace(cfg.Y_IN_LO + 0.2 * cfg.A_LUMEN,
                            cfg.Y_IN_HI - 0.2 * cfg.A_LUMEN, 21)
 
+# ---- lightweight flow-history diagnostics ---------------------------------
+flow_diag_every = int(os.environ.get(
+    "FLOW_DIAG_EVERY", max(cfg.NSTEPS // 20, 1)))
+y_flow = np.arange(cfg.NY + 1) * cfg.H
+gap_half_flow = 0.5 * cfg.GAP
+gap_centres_flow = [0.5 * cfg.GAP, cfg.BOX_W - 0.5 * cfg.GAP]
+y_lumen_flow = y_flow[(y_flow >= cfg.Y_C - cfg.A_LUMEN)
+                      & (y_flow <= cfg.Y_C + cfg.A_LUMEN)]
+x_mid_flow = cfg.X_OFF + 0.5 * cfg.L_AORTA
+x_d_flow = cfg.X_OFF + cfg.DISC_X
+
+
+def compute_flow_rates(u):
+    q_gap = 0.0
+    for yc_g in gap_centres_flow:
+        y_g = y_flow[(y_flow >= yc_g - gap_half_flow)
+                     & (y_flow <= yc_g + gap_half_flow)]
+        ug = vf.sample_u(u, mesh, x_mid_flow, y_g)[:, 0]
+        ok = np.isfinite(ug)
+        q_gap += vf.trapz(y_g[ok], ug[ok])
+    q_leak = []
+    for dx_s in (-4.0 * cfg.H, 4.0 * cfg.H):
+        uf = vf.sample_u(u, mesh, x_d_flow + dx_s, y_lumen_flow)[:, 0]
+        ok = np.isfinite(uf)
+        q_leak.append(vf.trapz(y_lumen_flow[ok], uf[ok]))
+    return q_gap, q_leak[0], q_leak[1]
+
+
+flow_file = None
+if MPI.COMM_WORLD.rank == 0:
+    flow_file = open(OUT + "flow_history.csv", "w")
+    flow_file.write("step,t,Q_gap,Q_leak_up,Q_leak_dn,max_u\n")
+
 for step in range(cfg.NSTEPS):
     t = step * cfg.DT
 
@@ -176,8 +289,10 @@ for step in range(cfg.NSTEPS):
     if cfg.SOLVER == "chorin":
         ns_solver.bcp = make_bcp(p_target)
     else:
-        # IPCS accumulates the pressure increment phi into p_
+        # IPCS accumulates the pressure increment phi into p_ and uses the
+        # full pressure as the inlet traction.
         ns_solver.bcp = make_bcp(p_target - p_prev)
+        ns_solver.p_traction.value = p_target
     p_prev = p_target
 
     ns_solver.solve_one_step()
@@ -201,11 +316,30 @@ for step in range(cfg.NSTEPS):
                                     solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
 
-    if MPI.COMM_WORLD.rank == 0 and (step + 1) % max(cfg.NSTEPS // 10, 1) == 0:
+    if (step + 1) % max(cfg.NSTEPS // 10, 1) == 0:
         umax = np.max(np.linalg.norm(
             ns_solver.u_.x.array.reshape(-1, 2), axis=1))
-        print(f"  step {step + 1:>6}/{cfg.NSTEPS}  t={t + cfg.DT:.4g}  "
-              f"p_in={p_target:9.4f}  max|u|={umax:.4e}")
+        if MPI.COMM_WORLD.rank == 0:
+            print(f"  step {step + 1:>6}/{cfg.NSTEPS}  t={t + cfg.DT:.4g}  "
+                  f"p_in={p_target:9.4f}  max|u|={umax:.4e}")
+
+    if (step + 1) % flow_diag_every == 0 or step == cfg.NSTEPS - 1:
+        q_gap, q_leak_up, q_leak_dn = compute_flow_rates(ns_solver.u_)
+        umax_flow = float(np.max(np.linalg.norm(
+            ns_solver.u_.x.array.reshape(-1, 2), axis=1)))
+        if MPI.COMM_WORLD.rank == 0:
+            print(f"  FLOW step {step + 1:>6}/{cfg.NSTEPS}  "
+                  f"t={t + cfg.DT:8.4f}  Q_gap={q_gap: .6e}  "
+                  f"Q_leak_up={q_leak_up: .6e}  "
+                  f"Q_leak_dn={q_leak_dn: .6e}  max|u|={umax_flow:.4e}")
+            if flow_file is not None:
+                flow_file.write(
+                    f"{step + 1},{t + cfg.DT:.8e},{q_gap:.16e},"
+                    f"{q_leak_up:.16e},{q_leak_dn:.16e},{umax_flow:.16e}\n")
+                flow_file.flush()
+
+if flow_file is not None:
+    flow_file.close()
 
 # ==========================================================================
 # Solid diagnostics
@@ -306,6 +440,16 @@ u_io = Function(functionspace(mesh, element("Lagrange",
                                             shape=(mesh.geometry.dim,))))
 u_io.interpolate(ns_solver.u_)
 solid_coords_io.interpolate(solid_coords)
+
+# Solid displacement for ParaView/PyVista.  The .pvd collection stores
+# the current snapshot and can later be extended to a full time series.
+displacement_io = Function(Vs_io, name="displacement")
+displacement_io.interpolate(displacement)
+# The .pvd collection references the actual .vtu pieces, e.g.
+# solid_displacement_p0_000000.vtu.  Open the .pvd in ParaView/PyVista.
+with VTKFile(MPI.COMM_WORLD, OUT + "solid_displacement.pvd", "w") as file_d:
+    file_d.write_function(displacement_io, cfg.T_END)
+
 # Open the field files only now: holding them open for the whole time loop
 # leaves stale HDF5 locks behind if the run is interrupted.
 with XDMFFile(MPI.COMM_WORLD, OUT + "velocity.xdmf", "w") as file_u:

@@ -12,7 +12,7 @@ from ufl import (TestFunction, TrialFunction,
 # Solver
 class ChorinSolver:
 
-    def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw):
+    def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw, drag=None):
         self.bcu = bcu
         self.bcp = bcp
 
@@ -44,6 +44,9 @@ class ChorinSolver:
         F1 += rho * inner(dot(grad(u_n), u_n), v)*dx
         F1 += inner(mu * grad(u), grad(v)) * dx
         F1 -= inner(f, v) * dx
+        if drag is not None:
+            # Implicit linear damping: adds drag * u to the momentum LHS.
+            F1 += dot(drag * u, v) * dx
         a1 = form(lhs(F1))
         L1 = form(rhs(F1))
 

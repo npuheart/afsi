@@ -3,13 +3,28 @@ from petsc4py import PETSc
 from dolfinx.fem import (Constant, Function, form, set_bc)
 from dolfinx.fem.petsc import (apply_lifting, assemble_matrix, assemble_vector,
                                create_vector, create_matrix)
-from ufl import (TestFunction, TrialFunction,
-                 div, dot, dx, inner, lhs, grad, nabla_grad, rhs)
+from ufl import (FacetNormal, TestFunction, TrialFunction,
+                 div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs)
 
 class IPCSSolver:
-    def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw):
+    def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw,
+                 ds_p=None, p_traction=None, drag=None):
+        """Incremental pressure-correction solver.
+
+        Parameters
+        ----------
+        ds_p : ufl.Measure, optional
+            Measure on the pressure-Dirichlet open-boundary facets.  When
+            supplied, ``p_traction`` is added explicitly to the momentum
+            predictor so the remaining natural condition on those facets is
+            the correct homogeneous viscous traction ``mu du/dn = 0``.
+        p_traction : dolfinx.fem.Function or Constant, optional
+            Known pressure datum ``p_bc(t)`` on the ``ds_p`` facets.  The
+            caller must update its value every time step.
+        """
         self.bcu = bcu
         self.bcp = bcp
+        self.p_traction = p_traction
         
         self.V = V
         self.Q = Q
@@ -38,6 +53,15 @@ class IPCSSolver:
         F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
         F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
         F1 += dot(f, v) * dx
+        if drag is not None:
+            # Implicit linear damping: adds drag * u to the momentum LHS.
+            # Used to make a fluid region behave like a porous/static medium.
+            F1 += dot(drag * u, v) * dx
+        if ds_p is not None:
+            if p_traction is None:
+                raise ValueError("p_traction must be given when ds_p is provided")
+            n = FacetNormal(mesh)
+            F1 += dot(p_traction * n, v) * ds_p
         a1 = form(lhs(F1))
         L1 = form(rhs(F1))
         A1 = create_matrix(a1)
@@ -51,7 +75,7 @@ class IPCSSolver:
         # Velocity update
         a3 = form(rho * dot(u, v) * dx)
         L3 = form(rho * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
-        A3 = assemble_matrix(a3)
+        A3 = assemble_matrix(a3, bcs=self.bcu)
         A3.assemble()
         b3 = create_vector(V)
 
@@ -128,10 +152,14 @@ class IPCSSolver:
         self.p_.x.scatter_forward()
 
         # Step 3: Velocity correction step
+        # Applied to the full velocity field, so bcu must be imposed again;
+        # otherwise the pressure-correction gradient destroys wall no-slip.
         with self.b3.localForm() as loc:
             loc.set(0)
         assemble_vector(self.b3, self.L3)
+        apply_lifting(self.b3, [self.a3], [self.bcu])
         self.b3.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
+        set_bc(self.b3, self.bcu)
         self.solver3.solve(self.b3, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()
 
