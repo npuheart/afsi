@@ -76,7 +76,11 @@ Q = functionspace(mesh, s_cg1)
 # ---------------------------------------------------------------------------
 # 边界条件（入口抛物线 + 上下无滑移 + 出口 p=0）
 # ---------------------------------------------------------------------------
-inlet = TurekInlet(Um=Um, Ly=Ly)
+if os.environ.get("DFG_PROFILE"):
+    # DFG 2D-3 uses umax = 1.5 m/s; TurekInlet scales by Um, so pass 1.5 explicitly
+    inlet = TurekInlet(Um=float(os.environ["DFG_PROFILE"]), Ly=Ly)
+else:
+    inlet = TurekInlet(Um=Um, Ly=Ly)
 u_inlet = Function(V); u_inlet.interpolate(inlet)
 bcu_inlet = dirichletbc(u_inlet, locate_dofs_topological(
     V, fdim, facet_tag.find(MARKER_LEFT)))

@@ -31,3 +31,31 @@ python main.py            # 或 mpirun -n <N> python main.py
 
 输出：`velocity` / `pressure` / `solid_force`（xdmf + h5）。
 
+
+
+## 短程复跑（t ≤ 1 s，128×64，串行）与失稳位置
+
+本算例没有离线入口：`main.py` 顶部无条件调用 `swanlab_init(..., api_key=...)`，
+`configuration.py` 的 `unique_filename()` 还会往 `~/afsi-data/` 建目录。复跑时用一个
+小 harness 把 `swanlab_init` / `swanlab_upload` 换成 no-op + CSV 记录
+（同 `demo_339/_short_run/run_compare.py` 的做法）。另外两处必须先修：
+
+| 问题 | 修法 |
+|------|------|
+| `generate_mesh.py` 从 `dolfinx.io` 导入 `gmshio`（0.10 已改名） | 改为 `from dolfinx.io import gmsh as gmshio` |
+| `main.py` 把 `./turtle_mesh.xdmf` 写死 | 支持 `TURTLE_MESH` 环境变量 |
+| `STEPS` 不被识别 | `configuration.py` 增加 `STEPS` 覆盖 |
+
+运行：20000 步（$\Delta t = 5\times10^{-5}$，$t \le 1$ s，载荷周期 2 s），**2321 s** 串行。
+
+| 量 | 值 |
+|----|-----|
+| 入口速度 | **全程为 0**：`Um = 0.0`，且 inlet 的 `DirichletBC` 从未传给求解器 —— 流场完全由固体变形驱动 |
+| 流体速度 | t=0.35 s 时 1.2 m/s；t=1 s 时 **28 m/s** |
+| 肢端位移 | ±0.60 m（体高 33.8） |
+| 体积 | 319.93 → 319.78（压缩 0.05%） |
+
+**t ≲ 0.4 s 的结果可用**：压力呈跨体偶极子，速度场在四肢周围形成四瓣结构，肢端位移约体高的 1.8%。
+**再往后就不可信**：t=1 s 时流体 28 m/s，而肢端速度只有 ~1e-3 m/s，相差 1e4 倍，
+属显式 IB-FE 耦合失稳，不是物理结果，且发生在第一个载荷周期之内。要跑满文档里的
+30 s / 600000 步，需要更小的 $\Delta t$、子迭代耦合，或两者都要。

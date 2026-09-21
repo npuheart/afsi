@@ -42,7 +42,7 @@ from configuration import config
 _demo_dir = os.path.dirname(os.path.abspath(__file__))
 _CIRCLE = int(os.environ.get("CIRCLE", "1"))  # 1=含圆盘, 0=无圆盘（对照，类比 demo_339 no_cylinder）
 # 输出到本地 plot/circle<CIRCLE>/（有/无圆盘分开，便于对比）
-config["output_path"] = os.path.join(_demo_dir, "plot", f"circle{_CIRCLE}") + os.sep
+config["output_path"] = os.environ.get("OUTPUT_PATH", os.path.join(_demo_dir, "plot", f"circle{_CIRCLE}")) + os.sep
 os.makedirs(config["output_path"], exist_ok=True)
 swanlab_init(config['project_name'], config['experiment_name'], config)
 
@@ -224,7 +224,8 @@ file_solid = dolfinx.io.XDMFFile(mesh.comm, config["output_path"] + "solid_force
 file_velocity.write_mesh(mesh)
 file_solid.write_mesh(structure)
 
-time_manager = TimeManager(config['T'], config['num_steps'], fps=config['fps'])
+time_manager = TimeManager(config['num_steps'] * config['dt'], config['num_steps'],
+                          fps=config['fps'])
 
 form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_) * dx)
 form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_) * dx)

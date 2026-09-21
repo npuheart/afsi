@@ -57,7 +57,7 @@ mesh, ct, ft = mesh_data[0], mesh_data[1], mesh_data[2]
 ft.name = "Facet markers"
 gmsh.finalize()
 
-_out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plot", "mesh-341.xdmf")
+_out = os.environ.get("MESH_341", os.path.join(os.path.dirname(os.path.abspath(__file__)), "plot", "mesh-341.xdmf"))
 os.makedirs(os.path.dirname(_out), exist_ok=True)
 with XDMFFile(MPI.COMM_WORLD, _out, "w", encoding=XDMFFile.Encoding.HDF5) as file:
     file.write_mesh(mesh)

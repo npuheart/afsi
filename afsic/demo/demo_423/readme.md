@@ -72,3 +72,24 @@ solid element Jacobians: the solid area integral is wrong, the assembled PK
 force is wrong, and the resulting pressure is about half of the analytical
 value.  The current `generate_mesh.py` uses the correct ordering, so no
 empirical force scaling is needed.
+
+
+## 加密研究已执行（N = 16/32/64/128）
+
+`convergence.py -n 16 32 64 128 --steps 100` 共 60 s（单进程）。复现了归档表里
+$N=32$ 的一行到 5 位有效数字（$e_p^{L2}=3.169\times10^{-3}$，
+$e_p^{\text{band}}=3.169\times10^{-3}$，$e_p(r<R-2h)=9.19\times10^{-6}$）。
+
+| N | $e_p$ 全域 | inner | fibre band | $\lVert v\rVert_{L^2}$ |
+|---|---|---|---|---|
+| 16 | 4.798e-3 | 1.565e-4 | 4.788e-3 | 5.118e-5 |
+| 32 | 3.169e-3 | 9.190e-6 | 3.169e-3 | 1.541e-5 |
+| 64 | 3.074e-3 | 7.411e-5 | 3.073e-3 | 5.163e-6 |
+| 128 | 3.242e-3 | 3.764e-4 | 3.172e-3 | 1.785e-6 |
+
+- **速度干净收敛**：$\lVert v\rVert_{L^2}$ 收敛阶 1.73/1.58/1.53。
+- **压力误差卡在界面带**：全域阶 0.60/0.04/-0.08，因为 $e_p$ 由 fibre band 主导，
+  其值从 $N=32$ 起稳定在 $3\times10^{-3}$ Pa 附近 —— 这是界面分辨率极限（IB 核把
+  界面抹平约 $\pm2h$），不是求解器误差。
+- inner 区误差非单调（1.6e-4 → 9.2e-6 → 7.4e-5 → 3.8e-4），属大数相减的小量，
+  不要把它的表观阶当作收敛率。

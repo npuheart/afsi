@@ -1,3 +1,4 @@
+import os
 from mpi4py import MPI
 from afsic import unique_filename, get_project_name
 
@@ -34,7 +35,11 @@ config = {"nssolver": "chorinsolver",
 
 
 config["num_steps"] = int(config['T']/config['dt'])
-config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
+# 环境变量 STEPS 覆盖步数（短程运行；默认仍是 30 s 全时长）
+if os.environ.get("STEPS"):
+    config["num_steps"] = int(os.environ["STEPS"])
+    config["T"] = config["num_steps"] * config["dt"]
+config["output_path"] = (os.environ.get("OUTPUT_PATH") or unique_filename(config['project_name'], config['tag'])) if MPI.COMM_WORLD.rank == 0 else None
 config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
-config["experiment_name"] = get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None
+config["experiment_name"] = os.environ.get("EXPERIMENT_NAME") or (get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None)
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)

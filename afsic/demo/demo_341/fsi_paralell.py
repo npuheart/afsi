@@ -67,7 +67,7 @@ if os.environ.get("STEPS"):
     config["num_steps"] = int(os.environ["STEPS"])
     config["T"] = config["num_steps"] * config["dt"]
 # 输出到本地 plot/<case>_N<grid>/
-config["output_path"] = os.path.join(_demo_dir, "plot", f"{_CASE}_N{_GRID}") + os.sep
+config["output_path"] = (os.environ.get("OUTPUT_PATH") or os.path.join(_demo_dir, "plot", f"{_CASE}_N{_GRID}")) + os.sep
 os.makedirs(config["output_path"], exist_ok=True)
 config["experiment_name"] = f"demo-341-{_CASE}-N{_GRID}"
 swanlab_init(config['project_name'], config['experiment_name'], config)
@@ -172,7 +172,7 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-mesh_path = os.path.join(_demo_dir, "plot", "mesh-341.xdmf")
+mesh_path = os.environ.get("MESH_341", os.path.join(_demo_dir, "plot", "mesh-341.xdmf"))
 with dolfinx.io.XDMFFile(MPI.COMM_WORLD, mesh_path, "r",
                          encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh()

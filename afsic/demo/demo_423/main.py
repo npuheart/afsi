@@ -90,7 +90,7 @@ config = {
 config["num_steps"] = STEPS
 
 _demo_dir = os.path.dirname(os.path.abspath(__file__))
-config["output_path"] = os.path.join(_demo_dir, "plot") + os.sep
+config["output_path"] = os.environ.get("OUTPUT_PATH", os.path.join(_demo_dir, "plot")) + os.sep
 os.makedirs(config["output_path"], exist_ok=True)
 
 # ---------------------------------------------------------------------------

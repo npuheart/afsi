@@ -54,3 +54,19 @@ python plot_centerline.py
 - 输出写到 `plot/circle<CIRCLE>/`；网格与 `*.xdmf`/`*.h5` 被 `.gitignore` 忽略，不入库。
 - 性能：320×64 网格约 0.2 s/步；圆盘位于 x=0.5，需较长模拟时间流场才到达并推动圆盘，
   建议先用短 `STEPS` 验证流程。
+
+
+## 短程复跑（CIRCLE=1，t ≤ 0.2 s，320×64，串行）
+
+```bash
+OUTPUT_PATH=<dir>/ CIRCLE=1 STEPS=12800 python main.py
+```
+
+- 12800 步耗时 **3850 s**（0.30 s/步）；串行 —— IBM 标记映射不是 MPI 安全的。
+- 输出间隔坑：`TimeManager` 用 $T$ 推间隔，而 `STEPS` 只改 `num_steps` 不改 `T`，
+  导致 `step_interval = max(1, num_steps/(fps*T)) = 1`，**每步都写**。已修：`main.py`
+  改用 `TimeManager(num_steps*dt, num_steps, fps)`。
+- 结果：$u_{L2}$ 单调增长 73 → 297（入口仍在爬升，峰值在 t=0.25 s）；$\max|u| = 8.05$ m/s；
+  固体 $\max|u_s| = 0.824$ m（由最软的圆盘贡献，叶片本身小得多，见 `plot/` 位移图）。
+  叶片自 t≈40 ms 起张开并向下游弯曲，200 ms 时形成非对称喷嘴形；两个圆盘随流向下游移动。
+- 跑满 $T=3$ s 需 192000 步，此分辨率约 16 h。

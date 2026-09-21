@@ -72,6 +72,6 @@ if os.environ.get("NY"):
     config["Ny"] = int(os.environ["NY"])
 
 # 输出到本 demo 目录的 output/ 下
-config["output_path"] = os.path.join(_demo_dir, "output") + os.sep
+config["output_path"] = os.environ.get("OUTPUT_PATH", os.path.join(_demo_dir, "output")) + os.sep
 os.makedirs(config["output_path"], exist_ok=True)
 config["experiment_name"] = "fish-swimming-demo"

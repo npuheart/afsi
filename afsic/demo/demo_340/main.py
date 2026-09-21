@@ -59,7 +59,7 @@ if os.environ.get("STEPS"):
     config["T"] = config["num_steps"] * config["dt"]
 _demo_dir = os.path.dirname(os.path.abspath(__file__))
 # 数据输出到本地 plot/ 文件夹（与历史数据、plot 代码放一起）
-config["output_path"] = os.path.join(_demo_dir, "plot") + os.sep
+config["output_path"] = os.environ.get("OUTPUT_PATH", os.path.join(_demo_dir, "plot")) + os.sep
 os.makedirs(config["output_path"], exist_ok=True)
 config["experiment_name"] = "demo-340"
 swanlab_init(config['project_name'], config['experiment_name'], config)
@@ -310,6 +310,12 @@ for step in range(config['num_steps']):
     global_sum = np.zeros_like(us)
     comm = MPI.COMM_WORLD
     comm.Reduce(us, global_sum, op=MPI.MAX, root=0)
+
+    # 每步探针轨迹（供后处理对比文献/历史数据；PROBE_TRACE 指定 csv 路径）
+    if comm.rank == 0 and os.environ.get("PROBE_TRACE"):
+        with open(os.environ["PROBE_TRACE"], "a") as _fh:
+            _fh.write(f"{current_time:.8f},{global_sum[0][0] - (2.0-0.0106):.10e},"
+                      f"{global_sum[0][1] - (0.91+1e-4):.10e}\n")
 
     data_log = {}
     if step == 1 or time_manager.should_output(step):

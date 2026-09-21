@@ -112,3 +112,18 @@ multi-direct forcing 要求迭代累加体积力，故 `main.py` 在 **Python �
   （DFIBMFoam 的 `desiredIbpVel` 机制，改 `fish_geometry.fish_surface` 即可）
 - **多鱼**：`n_fish` 已支持，各鱼相位差 $2\pi i/n_{\text{fish}}$
 - **定量受力**：接入控制体积动量平衡计算游动推力/阻力
+
+
+## 短程复跑（T=1 s，N=140，串行）
+
+```bash
+NX=140 NY=140 OUTPUT_PATH=<dir>/ python main.py     # 1000 步
+```
+
+- 1000 步耗时 406 s（约 0.4 s/步），串行 —— 同 demo_339，IBM 映射不是 MPI 安全的。
+- 输出 51 帧（out_interval=20）；`fish_trace.csv` 每帧含 240 个标记的 (x,y)。
+- 实测：鱼身长 0.0992 m（=0.1，与配置一致），1 s 内质心净位移 0.0503 m（约 0.5 个身长，
+  主要在 y 方向）；水槽内 $\max|u| = 0.19$ m/s。
+- 流动高度局域：鱼仅占水槽 7% 宽度，动能几乎都集中在体长范围内，槽内是缓慢回流。
+- 注：配置里 `cycle_period=37.7` s，跑满一圈需约 37700 步（此分辨率约 4 小时），
+  1 s 只覆盖 2.7% 的圆周。

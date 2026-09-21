@@ -312,9 +312,13 @@ if config["write_solid"]:
     file_sf.write_mesh(solid_mesh)
 
 forces_path = config["output_path"] + "forces.csv"
+# 逐步诊断（每步一行）：质心/形变/体积/det(F)/载荷，供后处理用
+metrics_path = config["output_path"] + "metrics.csv"
 if rank == 0:
     with open(forces_path, "w") as fh:
         fh.write("t,Fx,Fy,disp_max,volume\n")
+    with open(metrics_path, "w") as fh:
+        fh.write("t,cx,cy,disp_max,disp_rms,det_min,volume,Fx,Fy,p_L2,u_L2\n")
 
 form_u_L2 = form(dot(u, u) * dx)
 form_p_L2 = form(dot(p, p) * dx)
@@ -544,6 +548,11 @@ for step in range(num_steps):
         if rank == 0:
             with open(forces_path, "a") as fh:
                 fh.write(f"{tt:.5f},{F_x:.6e},{F_y:.6e},{disp_max:.6e},{volume:.6e}\n")
+            with open(metrics_path, "a") as fh:
+                disp_rms = float(np.sqrt(np.mean(np.sum(disp.reshape(-1, 2) ** 2, axis=1))))
+                fh.write(f"{tt:.5f},{cx_s:.6f},{cy_s:.6f},{disp_max:.6e},"
+                         f"{disp_rms:.6e},{det_min:.6e},{volume:.6e},"
+                         f"{F_x:.6e},{F_y:.6e},{p_L2:.6e},{u_L2:.6e}\n")
             print(f"Step {step+1}/{num_steps}, t={tt:.3f}s, "
                   f"u_L2={u_L2:.4f}, p_L2={p_L2:.1f}, "
                   f"Fx={F_x:.4f}, Fy={F_y:+.4f}, "

@@ -99,7 +99,7 @@ A = assemble_scalar(form(Constant(structure, 1.0) * dxx))
 A_exact = np.pi * ((R + w) ** 2 - R**2)
 assert abs(A - A_exact) < 1e-2 * A, f"Solid mesh area mismatch: {A} vs {A_exact}"
 
-outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plot")
+outdir = os.environ.get("OUTPUT_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "plot"))
 os.makedirs(outdir, exist_ok=True)
 outfile = os.path.join(outdir, "mesh-423.xdmf")
 with XDMFFile(MPI.COMM_WORLD, outfile, "w") as xdmf:

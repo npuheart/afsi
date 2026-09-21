@@ -32,3 +32,35 @@ python main.py            # 运行 FSI（或 mpirun -n <N> python main.py）
   - `plot/data/ani_{t,x,y}.csv`：三个纤维角各跑一次 `main.py`（完整 T=3s，或 `STEPS=` 短跑），
     由位移探针导出；列名对应 `demo-340-000092/000091/000090`（45/60/75°）。
 - 参考数据 CSV（`X_M2`/`X_FSI`/`x_dis_ALE`/`Y_ALE`/`Y_FSI`/`y_M2`，文献 Ryan M2/M3、Kamensky）随仓库保留。
+
+## 完整 T=3s 复跑（45°）
+
+`main.py` 增加了两个环境变量覆盖，便于在别处运行与后处理：
+
+| 变量 | 作用 |
+|------|------|
+| `OUTPUT_PATH` | 覆盖输出目录（默认 `plot/`），避免必须写进本算例目录 |
+| `PROBE_TRACE` | 每步把位移探针追加写为 CSV（`t,x_disp,y_disp`），供与 `data/ani_*.csv` 逐步对比 |
+
+```bash
+export OUTPUT_PATH=/path/to/out PROBE_TRACE=/path/to/probe45.csv
+mpirun -n 8 python main.py       # 48000 步
+```
+
+**务必用 MPI**：同样 200 步，单进程 125 s、8 进程 7 s；单进程跑满 T=3s 约需 7 小时，
+8 进程约 **12 分钟**（48000 步 / 707 s）。
+
+实测（45°，T=3s，48000 步，无 NaN）：
+
+- 探针位移范围：$x\in[0.00015,0.6015]$、$y\in[0,0.4476]$，峰值都出现在 $t\approx1.25$ s。
+- 与仓库内归档的 AFSI 45° 序列（`data/ani_*.csv`）**逐步吻合**：最大偏差 $3.7\times10^{-4}$
+  （信号幅值 0.6014，即 0.06%）。
+- 周期性：$t=0.25$ s 的 $x=0.5942$ 与 $t=2.25$ s 的 $x=0.6013$ 相差 1.2%，即仍在缓慢趋近
+  周期态（前几个周期振幅略增）。
+- 两叶片张开而非相互靠近：叶尖自由间隙由未变形的 0.21 增至峰值 1.08、回落至谷值 0.50
+  （$L_y=1.61$）。全场最大速度 ≈9.2 m/s（入口峰值 10.5 m/s）出现在 $x\approx2.7$、
+  即叶片下游的收缩处。
+- 叶片整体 $|u_s|_{\max}=0.7515$（叶片长 0.7）。
+
+补充：`generate_mesh.py` 需要 `gmsh`（本环境用 `pip/mamba install python-gmsh` 补装）；
+`main.py` 无条件读取 `plot/mesh-340.xdmf`，故首次运行前必须先跑一次网格生成。

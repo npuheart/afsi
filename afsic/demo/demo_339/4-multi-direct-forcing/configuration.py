@@ -26,7 +26,7 @@ config = {
     # --- 流体 (SI) — 与其余实现一致 ---
     "Um": 1.0,          # 平均入口速度 [m/s]
     "T": 10.0,          # 模拟时长 [s]
-    "dt": 0.001,        # 时间步长 [s]
+    "dt": float(os.environ.get("DT", "0.001")),   # 时间步长 [s]（DT 可覆盖）
     "rho": 1000.0,      # 密度 [kg/m^3]
     "Lx": 2.2,          # 通道长度 [m]
     "Ly": 0.41,         # 通道高度 [m]
@@ -55,7 +55,21 @@ if os.environ.get("STEPS"):
     config["num_steps"] = int(os.environ["STEPS"])
     config["T"] = config["num_steps"] * config["dt"]
 
+# 本轮研究新增的参数覆盖（网格、圆柱位置、迭代/标记数）
+if os.environ.get("NX"):
+    config["Nx"] = int(os.environ["NX"])
+if os.environ.get("NY"):
+    config["Ny"] = int(os.environ["NY"])
+if os.environ.get("CX"):
+    config["cylinder_cx"] = float(os.environ["CX"])
+if os.environ.get("CY"):
+    config["cylinder_cy"] = float(os.environ["CY"])
+if os.environ.get("N_ITER"):
+    config["n_iter"] = int(os.environ["N_ITER"])
+if os.environ.get("N_MARKERS"):
+    config["n_markers"] = int(os.environ["N_MARKERS"])
+
 # 输出到本 demo 目录的 output/ 下（velocity/pressure 的 xdmf+h5）
-config["output_path"] = os.path.join(_demo_dir, "output") + os.sep
+config["output_path"] = os.environ.get("OUTPUT_PATH") or (os.path.join(_demo_dir, "output") + os.sep)
 os.makedirs(config["output_path"], exist_ok=True)
 config["experiment_name"] = "multi-direct-forcing-demo"

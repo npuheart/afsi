@@ -92,6 +92,8 @@ if os.environ.get("LAMBDA_S"):
     config["lambda_s"] = float(os.environ["LAMBDA_S"])
 if os.environ.get("SOLID_ACTIVE"):
     config["solid_active"] = (os.environ["SOLID_ACTIVE"].lower() in ("1", "true", "yes", "on"))
+if os.environ.get("CLAMP_SOLID"):
+    config["clamp_solid"] = (os.environ["CLAMP_SOLID"].lower() in ("1", "true", "yes", "on"))
 
 # 输出到本 demo 目录的 output/ 下（可用 OUTPUT_PATH 覆盖，便于并行对比）
 _op = os.environ.get("OUTPUT_PATH")

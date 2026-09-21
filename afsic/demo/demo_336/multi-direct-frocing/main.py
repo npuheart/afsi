@@ -303,9 +303,13 @@ if config["write_solid"]:
     file_solid.write_mesh(disk_mesh)
 
 forces_path = config["output_path"] + "forces.csv"
+# 逐步诊断（每步一行）：位姿/受力/流场范数
+metrics_path = config["output_path"] + "metrics.csv"
 if rank == 0:
     with open(forces_path, "w") as fh:
         fh.write("t,cx,cy,theta,Fx,Fy,Mz,Cx,Cy,Cm\n")
+    with open(metrics_path, "w") as fh:
+        fh.write("t,cx,cy,theta,Vc_x,Vc_y,omega,u_L2,p_L2,u_max\n")
 
 if disk_motion == "free" and rank == 0:
     trace_path = config["output_path"] + "disk_trace.csv"
@@ -498,6 +502,10 @@ for step in range(num_steps):
                 with open(trace_path, "a") as fh:
                     fh.write(f"{tt:.5f},{cx:.6f},{cy:.6f},{theta:.6f},"
                              f"{Vc_x:.6e},{Vc_y:.6e},{omega:.6e}\n")
+            with open(metrics_path, "a") as fh:
+                fh.write(f"{tt:.5f},{cx:.6f},{cy:.6f},{theta:.6f},"
+                         f"{Vc_x:.6e},{Vc_y:.6e},{omega:.6e},"
+                         f"{u_L2:.6e},{p_L2:.6e},{u_max:.6e}\n")
             print(f"Step {step+1}/{num_steps}, t={tt:.3f}s, "
                   f"u_L2={u_L2:.4f}, |u|max={u_max:.4f}, "
                   f"Cx={Cx:.4f}, Cy={Cy:+.4f}, Cm={Cm:+.4f}, "

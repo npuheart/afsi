@@ -77,6 +77,6 @@ if os.environ.get("MARKER_MODE"):
     config["marker_mode"] = os.environ["MARKER_MODE"]
 
 # 输出到本 demo 目录的 output/ 下（velocity/pressure 的 xdmf+h5 + forces.csv）
-config["output_path"] = os.path.join(_demo_dir, "output") + os.sep
+config["output_path"] = os.environ.get("OUTPUT_PATH") or (os.path.join(_demo_dir, "output") + os.sep)
 os.makedirs(config["output_path"], exist_ok=True)
 config["experiment_name"] = "lid-driven-cavity-disk-mdf"

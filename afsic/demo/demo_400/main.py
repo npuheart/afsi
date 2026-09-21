@@ -144,7 +144,8 @@ ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################
-turtle_mesh_path = os.path.join(os.path.dirname(__file__), "./turtle_mesh.xdmf")
+turtle_mesh_path = os.environ.get(
+    "TURTLE_MESH", os.path.join(os.path.dirname(__file__), "./turtle_mesh.xdmf"))
 with dolfinx.io.XDMFFile(MPI.COMM_WORLD, turtle_mesh_path, "r") as xdmf:
     structure = xdmf.read_mesh(name="mesh")
     structure.topology.create_connectivity(structure.topology.dim, structure.topology.dim - 1)
@@ -310,3 +311,9 @@ for step in range(config['num_steps']):
             data_log["p_ext.value"] = p_ext.value
             print(f"Step {step+1}/{config['num_steps']}, Time: {current_time:.2f}s")
             swanlab_upload(current_time, data_log)
+            # 发散保护：任一诊断量出现 NaN/Inf 即优雅终止（此算例在 t≈1 s 附近会跑飞）
+            if not np.isfinite([u_L2, p_L2, F_L2, volume, float(p_ext.value)]).all():
+                if MPI.COMM_WORLD.rank == 0:
+                    print(f"[STOP] non-finite diagnostics at t={current_time:.4f}s "
+                          f"(u_L2={u_L2}, p_L2={p_L2}, vol={volume}) — aborting", flush=True)
+                break

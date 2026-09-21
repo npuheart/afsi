@@ -1,3 +1,4 @@
+import os
 from mpi4py import MPI
 from afsic import unique_filename, get_project_name
 
@@ -58,7 +59,7 @@ config = {
 }
 
 config["num_steps"] = int(config['T'] / config['dt'])
-config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
+config["output_path"] = (os.environ.get("OUTPUT_PATH") or unique_filename(config['project_name'], config['tag'])) if MPI.COMM_WORLD.rank == 0 else None
 config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
-config["experiment_name"] = get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None
+config["experiment_name"] = (os.environ.get("EXPERIMENT_NAME") or get_project_name(config['project_name'])) if MPI.COMM_WORLD.rank == 0 else None
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
