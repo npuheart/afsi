@@ -240,6 +240,37 @@ RAMP_T = float(os.environ.get("RAMP_T", "0.1"))
 #   True : drive with the equivalent constant body force -grad(p) and keep the
 #     analytic velocity as a boundary condition as well (the earlier setup).
 USE_BODY_FORCE = os.environ.get("USE_BODY_FORCE", "0") not in ("0", "false")
+
+# Number of fixed-point iterations per step used to couple the time-centered
+# spring force with the marker/fluid velocity.  1 = uncoupled (apply the force
+# once, lagged), >1 closes the loop within the step.
+IB_ITERATIONS = int(os.environ.get("IB_ITERATIONS", "1"))
+DIAG_IB = bool(os.environ.get("DIAG_IB"))
+
+# --- correction of the immersed-boundary spreading normalisation -----------
+# AFSI's distributor spreads as  f_node += F * W * w / (dx*dy)  while the
+# interpolator is  U_particle += u_node * W  (no h factor).  For a proper IB
+# discretisation the two must be adjoints (I = S*); measured directly on a
+# unit square the adjointness ratio scales as
+#     <S* u, F> / <u, S F> = h^2      (power law index 2.0000 for N=16,32,64)
+# so the spreading operator injects 1/h^2 too much momentum.  For a volume
+# filling solid (w = dx*dy per point) the factors happen to cancel, which is why
+# demo_424 tolerates it; for a thin structure they do not.
+# SPREAD_NORM multiplies the Lagrangian force before spreading:
+#     "h2"   -> apply the measured h^2 correction (default)
+#     "none" -> leave the operator as shipped
+# SPREAD_NORM selects the correction factor applied to the Lagrangian force:
+#     "none"    -> as shipped by AFSI
+#     "h2"      -> the measured h^2 adjointness correction (makes I = S*, but
+#                  the resulting force is negligibly small -- see readme)
+#     a number  -> explicit factor, for calibration
+_sn = os.environ.get("SPREAD_NORM", "h2").lower()
+if _sn == "none":
+    SPREAD_SCALE = 1.0
+elif _sn == "h2":
+    SPREAD_SCALE = DX * DX
+else:
+    SPREAD_SCALE = float(_sn)
 DT_OVERRIDE = os.environ.get("DT_OVERRIDE")
 NSTEPS = int(round(T_END / DT))
 SMOKE = bool(os.environ.get("SMOKE"))

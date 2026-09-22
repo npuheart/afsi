@@ -40,3 +40,5 @@ afsic/demo/demo_426/_tune*.log
 afsic/demo/demo_426/hist_beta*.csv
 afsic/demo/demo_426/plot/_beta_sweep/
 afsic/demo/demo_426/plot/_sweep*.log
+afsic/demo/demo_426/plot/cgs_bcramp/
+afsic/demo/demo_426/plot/_sweep*/

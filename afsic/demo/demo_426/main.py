@@ -297,6 +297,7 @@ def ramp_factor(t):
 
 
 history = []
+ib_hist = []
 for step in range(n_steps):
     t = step * cfg.DT
     rfac = ramp_factor(t)
@@ -307,57 +308,75 @@ for step in range(n_steps):
     #     previous step (the body force plus the IB penalty) --------------
     ns_solver.solve_one_step()
 
-    # --- plates: time-centered (trapezoidal) penalty ----------------------
-    # The benchmark evaluates the spring at the TIME-CENTERED position
+    # --- plates: rigid-body constraint by fixed-point coupling ------------
+    # The benchmark's time-centered spring
     #
-    #     F^{n+1/2} = kappa * ( chi^0 - (chi_tilde^{n+1} + chi^n)/2 )
+    #     F^{n+1/2} = kappa * ( chi^0 - (chi_tilde^{n+1} + chi^n)/2 ),
+    #     chi_tilde^{n+1} = chi^n + dt*U^{n+1/2}
     #
-    # where chi_tilde^{n+1} = chi^n + dt*U^{n+1/2} is the predicted marker
-    # position.  The force therefore depends on the position at the SAME time
-    # level, which makes it self-limiting: if the markers overshoot, the
-    # averaged position pulls the force back the other way.  The earlier
-    # explicit form F = -kappa*(chi^n - chi^0) used a lagged position and had no
-    # such restoring property, which is why the markers drifted.
+    # requires the interface velocity U^{n+1/2} and the marker position at the
+    # SAME time level, i.e. they must be solved together.  Applying the force
+    # once per step (lagged) lets the plates drift, which is what we measured.
+    #
+    # Here the coupling is closed by fixed-point iteration WITHIN the step:
+    # the fluid state is frozen (u_n, u_n1 are not touched), only
+    #
+    #     f_ib  <-  -kappa * (chi - chi^0)      (assembled, weak form)
+    #     u     <-  the momentum predictor re-solved with the new f_ib
+    #     chi   <-  chi^n + dt * I[u]
+    #
+    # are updated, and the loop stops when the interface velocity stops
+    # changing.  Rigid plates means the target interface velocity is 0.
     if not cfg.USE_IMPLICIT_DRAG:
-        # 1) fluid velocity at the markers, from the tentatively updated field
-        ib_interpolation.fluid_to_solid(ns_solver.u_s._cpp_object,
-                                        solid_velocity._cpp_object)
-        solid_coords_prev = solid_coords.x.array.copy()
-        # 2) predict the marker position with the same velocity
-        solid_coords.x.array[:] = solid_coords_prev + \
-            solid_velocity.x.array[:] * cfg.DT
+        chi_n = solid_coords.x.array.copy()
+        for it in range(max(cfg.IB_ITERATIONS, 1)):
+            # 1) interface velocity from the current fluid field
+            ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object,
+                                            solid_velocity._cpp_object)
+            v_ib = solid_velocity.x.array.copy()
+            # 2) time-centered (trapezoidal) marker position
+            chi_pred = chi_n + v_ib * cfg.DT
+            solid_coords.x.array[:] = 0.5 * (chi_pred + chi_n)
+            solid_coords.x.scatter_forward()
+            # 3) assemble the spring at that position (weak form, area measure)
+            if cfg.MAP_AT_REFERENCE:
+                ib_interpolation.evaluate_current_points(coords_ref._cpp_object)
+            else:
+                ib_interpolation.evaluate_current_points(
+                    solid_coords._cpp_object)
+            with b1.localForm() as loc:
+                loc.set(0)
+            assemble_vector(b1, L_hat)
+            b1.ghostUpdate(addv=PETSc.InsertMode.ADD,
+                           mode=PETSc.ScatterMode.REVERSE)
+            with b1.getBuffer() as arr:
+                solid_force.x.array[: len(arr)] = force_sign * arr[:]
+            solid_force.x.array[:] *= cfg.SPREAD_SCALE
+            solid_force.x.scatter_forward()
+            # 4) spread and re-solve the momentum predictor with the new force
+            ns_solver.f.x.array[:] = 0.0
+            ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object,
+                                            solid_force._cpp_object)
+            if cfg.DIAG_IB:
+                _fm = float(np.max(np.abs(ns_solver.f.x.array)))
+                _sn = float(np.max(np.abs(solid_force.x.array)))
+                _dn = float(np.max(np.abs(solid_coords.x.array
+                                          - coords_ref.x.array)))
+                if it == 0:
+                    print(f"    [IBdiag] step {step} it 0: |F_lag|max={_sn:.4g} "
+                          f"|f_fluid|max={_fm:.4g} delta={_dn:.4g} "
+                          f"spread_scale={cfg.SPREAD_SCALE:.4g}")
+            if cfg.USE_BODY_FORCE:
+                ns_solver.f.x.array[:] += force_sign * rfac * f_body.x.array[:]
+            ns_solver.f.x.scatter_forward()
+            step_vel = float(np.max(np.abs(v_ib)))
+            if it + 1 < max(cfg.IB_ITERATIONS, 1):
+                ns_solver.solve_one_step()
+        # commit the predicted configuration
+        solid_coords.x.array[:] = chi_pred
         solid_coords.x.scatter_forward()
-
-        # 3) assemble the spring at the time-centered position and distribute.
-        #    Re-evaluating the map at the predicted position makes this the
-        #    implicit (mid-point) form in practice.
-        if cfg.MAP_AT_REFERENCE:
-            ib_interpolation.evaluate_current_points(coords_ref._cpp_object)
-        else:
-            ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
-        # overwrite the marker position used by the assemble with the average
-        solid_coords.x.array[:] = 0.5 * (solid_coords_prev
-                                        + solid_coords.x.array[:])
-        solid_coords.x.scatter_forward()
-        with b1.localForm() as loc:
-            loc.set(0)
-        assemble_vector(b1, L_hat)
-        b1.ghostUpdate(addv=PETSc.InsertMode.ADD,
-                       mode=PETSc.ScatterMode.REVERSE)
-        with b1.getBuffer() as arr:
-            solid_force.x.array[: len(arr)] = force_sign * arr[:]
-        solid_force.x.scatter_forward()
-        # restore the (predicted) marker position as the new configuration
-        solid_coords.x.array[:] = 2.0 * solid_coords.x.array[:] \
-            - solid_coords_prev
-        solid_coords.x.scatter_forward()
-
-        ns_solver.f.x.array[:] = 0.0
-        ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object,
-                                        solid_force._cpp_object)
-        if cfg.USE_BODY_FORCE:
-            ns_solver.f.x.array[:] += force_sign * rfac * f_body.x.array[:]
-        ns_solver.f.x.scatter_forward()
+        if cfg.DIAG_IB:
+            ib_hist.append(step_vel)
 
     if (step + 1) % max(n_steps // 10, 1) == 0 or step == 0:
         umax = float(np.max(np.linalg.norm(
@@ -447,7 +466,11 @@ if MPI.COMM_WORLD.rank == 0:
     _n = len(solid_coords.x.array) // 2
     _d = np.linalg.norm(
         (solid_coords.x.array - coords_ref.x.array).reshape(_n, 2), axis=1)
-    print(f"solid displacement: max {_d.max():.6e}  mean {_d.mean():.6e}")
+    print(f"solid displacement: max {_d.max():.6e}  mean {_d.mean():.6e}  "
+          f"= {_d.max()/(0.5*cfg.DX):.2f} x (h/2)")
+    if ib_hist:
+        print(f"interface velocity at the plates: "
+              f"first {ib_hist[0]:.4e} -> last {ib_hist[-1]:.4e}")
     print(f"solid output written to {cfg.output_path()}solid_*.xdmf")
 
 if MPI.COMM_WORLD.rank == 0:

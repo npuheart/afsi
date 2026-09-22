@@ -256,3 +256,53 @@ and comes out around `8e11` while its standard deviation is `0.84` and its range
 * The `U_max` inconsistency between the benchmark text and its own parameters
   is documented rather than silently patched; if the intended target really is
   `U_max = 0.25`, run with `DP_DL=0.75`.
+
+## Immersed-boundary spreading: a measured normalisation defect
+
+A proper IB discretisation requires the interpolation and spreading operators to
+be adjoints (`I = S*`); otherwise the coupling injects spurious momentum.  This
+was measured directly with random fields on a unit square:
+
+    <u, S F>  vs  <S* u, F>
+
+| N | h | ratio `<S*u,F>/<u,SF>` | 1/ratio | power-law index |
+|---|---|---|---|---|
+| 16 | 0.0625 | 9.766e-04 | 1024 | - |
+| 32 | 0.03125 | 2.441e-04 | 4096 | 2.0000 |
+| 64 | 0.015625 | 6.104e-05 | 16384 | 2.0000 |
+
+The ratio scales **exactly as `h^2`**, so AFSI's distributor
+(`f_node += F*W*w/(dx*dy)` against an interpolation with no `h` factor) injects
+`1/h^2` too much momentum for a *thin* structure.  For a volume-filling solid
+`w = dx*dy` and the factors cancel, which is why demo_424 tolerates it.
+
+`SPREAD_NORM` applies a correction in the Python layer:
+
+| SPREAD_NORM | meaning |
+|---|---|
+| `none` | as shipped |
+| `h2` (default) | the measured `h^2` factor, i.e. `I = S*` restored |
+| `<number>` | explicit factor, for calibration |
+
+### Effect at kappa = 60, dt = 0.2h, T = 2.0 s (320 steps)
+
+| | delta | x (h/2) | fluid \|u\| on the plates |
+|---|---|---|---|
+| `none` | 0.14335 | 9.17 | 0.0880 |
+| `h2` | 0.12455 | **7.97** | 0.0673 |
+
+So the correction is real and helps (delta -13 %, plate velocity -24 %), and it
+also removes the pathological `delta` growth with `kappa`, but it does **not**
+satisfy the `h/2` criterion.
+
+Diagnostic: with `h2`, `kappa` = 60/200/600 give delta = 0.12455/0.12459/0.12470
+—— i.e. **delta is independent of kappa**, so the tether is not what is holding
+the plates.  The measured scale is consistent with the plate being dragged until
+the tether stress balances the fluid load on it
+(`kappa*delta ~ mu*u_plate/(h/2)`), but neither raising `kappa` (checked to
+2e5) nor reducing `dt` (checked 16x) moves delta toward `h/2`.
+
+Fixed-point coupling within the step (`IB_ITERATIONS > 1`) was also tried: at
+`T = 0.625`, 8 iterations change delta by only 0.8 %, because `solve_one_step()`
+does not reset `u_n`/`u_n1`, so the loop does not actually iterate on a frozen
+fluid state.  Closing the coupling properly needs a solver-level change.
