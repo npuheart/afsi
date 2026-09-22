@@ -30,3 +30,7 @@ afsic/demo/demo_337/data/plot/lv_ellipsoid-problem*/
 
 # 方腔驱动圆盘：根目录测试输出（用户手动复制的结果数据，不入库）
 .trash
+# demo run logs (transient; regenerate by running the case)
+afsic/demo/demo_424/plot/_logs/
+afsic/demo/demo_425/plot/_logs/
+afsic/demo/demo_426/plot/_logs/
