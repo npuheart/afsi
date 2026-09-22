@@ -46,7 +46,7 @@ from dolfinx.fem.petsc import create_vector, assemble_vector
 from dolfinx.io import XDMFFile
 from dolfinx.mesh import (CellType, GhostMode, locate_entities, meshtags)
 from basix.ufl import element
-from ufl import Measure, TestFunction, SpatialCoordinate, as_vector, inner, dx, dot
+from ufl import Measure, TestFunction, SpatialCoordinate, as_vector, inner, dx
 
 import configuration as cfg
 import verify as vf
@@ -156,11 +156,21 @@ dofs_out_channel = dofs_outlet[sel_out]
 # with NO explicit function space -- the value function's own space is used.
 # Passing V explicitly, or wrapping dofs in a tuple/list, fails overload
 # resolution in this version.
-u_inlet = Function(V)
-_set_vector(u_inlet, lambda x, y: cfg.analytic(x, y))
+# The benchmark prescribes the STEADY ANALYTIC solution as the inflow condition
+# and starts the channel from rest, so the boundary data are the analytic
+# profile scaled by a ramp factor r(t): 0 at t=0, 1 for t >= RAMP_T.
+u_bc = Function(V)
 
-bc_inlet = dirichletbc(u_inlet, dofs_in_channel, None)
-bc_outlet = dirichletbc(u_inlet, dofs_out_channel, None)
+
+def set_inflow(scale):
+    """Set the inlet/outlet Dirichlet data to scale * analytic profile."""
+    _set_vector(u_bc, lambda x, y: tuple(scale * v
+                                         for v in cfg.analytic(x, y)))
+
+
+set_inflow(0.0)
+bc_inlet = dirichletbc(u_bc, dofs_in_channel, None)
+bc_outlet = dirichletbc(u_bc, dofs_out_channel, None)
 
 
 def make_bcu():
@@ -203,36 +213,44 @@ else:
 phase(f"solver assembly ({cfg.SOLVER})")
 
 # ==========================================================================
-# Lagrangian structure: the two channel plates (1-D, disconnected)
+# Solid: the two plates as 2-D triangular strips (built by generate_mesh.py)
 # ==========================================================================
-pts, cells = [], []
-for side in (-1, +1):
-    (x0, y0), (x1, y1) = cfg.wall_endpoints(side)
-    length = float(np.hypot(x1 - x0, y1 - y0))
-    n = max(int(np.ceil(length / cfg.DS_LAG)), 1)
-    base = len(pts)
-    for i in range(n + 1):
-        s = i / n
-        pts.append((x0 + s * (x1 - x0), y0 + s * (y1 - y0)))
-    for i in range(n):
-        cells.append((base + i, base + i + 1))
-pts = np.asarray(pts, dtype=np.float64)
-cells = np.asarray(cells, dtype=np.int64)
+# 2-D rather than 1-D on purpose: AFSI's immersed-boundary distributor takes an
+# integration weight per Lagrangian point, and the weak-form tether assembly
+# below carries the AREA measure dx_s.  With 1-D line segments the assembled
+# force would be a force per unit LENGTH while a 2-D fluid needs a force per
+# unit AREA -- the two differ by the plate thickness.  demo_424 works because
+# its solid is 2-D.
+with XDMFFile(MPI.COMM_WORLD, cfg.solid_mesh_path(), "r") as xdmf:
+    structure = xdmf.read_mesh(name="mesh")
 
-structure = dolfinx.mesh.create_mesh(
-    MPI.COMM_WORLD, cells,
-    element("Lagrange", "interval", 1, shape=(2,)), pts)
-
-Vs = functionspace(structure, element("Lagrange", "interval",
+Vs = functionspace(structure, element("Lagrange",
+                                      structure.topology.cell_name(),
                                       cfg.FORCE_ORDER, shape=(2,)))
 solid_coords = Function(Vs, name="solid_coords")
 coords_ref = Function(Vs, name="coords_ref")
 solid_velocity = Function(Vs, name="solid_velocity")
 solid_force = Function(Vs, name="solid_force")
+
+
+def _set_vec(fn, values):
+    c = fn.function_space.tabulate_dof_coordinates()
+    ux, uy = values(c[:, 0], c[:, 1])
+    fn.x.array[:] = np.column_stack([ux, uy]).reshape(-1)
+    fn.x.scatter_forward()
+
+
 for f in (solid_coords, coords_ref):
-    c = f.function_space.tabulate_dof_coordinates()
-    f.x.array[:] = np.column_stack([c[:, 0], c[:, 1]]).reshape(-1)
-    f.x.scatter_forward()
+    _set_vec(f, lambda x, y: (x, y))
+phase(f"solid mesh ({structure.topology.index_map(2).size_local} triangles)")
+
+# --- tether (volumetric spring) is the ONLY solid force, as in demo_424 ----
+dVs = TestFunction(Vs)
+X0 = SpatialCoordinate(structure)
+spring = solid_coords - as_vector([X0[0], X0[1]])
+dx_s = Measure("dx", domain=structure)
+L_hat = form(-cfg.BETA * inner(spring, dVs) * dx_s)
+b1 = create_vector(Vs)
 
 ibmesh = IBMesh(cfg.X_MIN, cfg.X_MIN + NX * cfg.DX, cfg.Y_MIN, BOX_TOP,
                 NX, NY, cfg.VELOCITY_ORDER)
@@ -241,7 +259,7 @@ coords_bg = Function(V)
 _set_vector(coords_bg, lambda x, y: (x, y))
 ibmesh.build_map(coords_bg._cpp_object)
 ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
-phase(f"IB mesh + Lagrangian plates ({len(pts)} nodes, {len(cells)} cells)")
+phase("IB mesh + map on the 2-D plates")
 
 # ==========================================================================
 # Time loop
@@ -266,36 +284,79 @@ def profile_line(npts=201):
 _, pts_prof = profile_line()
 t_prof = np.linspace(-cfg.R_HALF, cfg.R_HALF, len(pts_prof))
 
+def ramp_factor(t):
+    """Linear ramp of the DRIVING from rest, 0 -> 1 over RAMP_T.
+
+    The driving is the prescribed inflow: the inlet/outlet Dirichlet data are
+    the analytic steady profile scaled by this factor, so the channel starts
+    from rest and settles to the exact solution.  RAMP_T = 0 disables the ramp.
+    """
+    if cfg.RAMP_T <= 0.0:
+        return 1.0
+    return min(max(t / cfg.RAMP_T, 0.0), 1.0)
+
+
 history = []
 for step in range(n_steps):
     t = step * cfg.DT
+    rfac = ramp_factor(t)
+    # ramp the prescribed inflow (Dirichlet data are time dependent)
+    set_inflow(rfac)
 
     # --- solve the fluid step with the force assembled at the end of the
     #     previous step (the body force plus the IB penalty) --------------
     ns_solver.solve_one_step()
 
-    # --- plate penalty ---------------------------------------------------
-    # IMPLICIT route (default): the drag term assembled into the momentum LHS
-    # already imposes no-slip in a thin band around each plate, so nothing more
-    # is done here.
+    # --- plates: time-centered (trapezoidal) penalty ----------------------
+    # The benchmark evaluates the spring at the TIME-CENTERED position
     #
-    # EXPLICIT route (USE_IMPLICIT_DRAG=0): interpolate the fluid velocity to
-    # the plates and spread the penalty force f_ib = -DAMP*u_ib back to the
-    # grid.  This is the classic Peskin Lagrangian coupling, but because the
-    # force enters ns_solver.f it is frozen during the momentum solve, which
-    # caps the usable DAMP at rho*dx*dy/dt (= 0.208 at dx=1/32, dt=0.15dx).
-    # Kept because the benchmark is fundamentally about this kernel coupling;
-    # see the readme for what that limit means for reproducing Fig. 23.
+    #     F^{n+1/2} = kappa * ( chi^0 - (chi_tilde^{n+1} + chi^n)/2 )
+    #
+    # where chi_tilde^{n+1} = chi^n + dt*U^{n+1/2} is the predicted marker
+    # position.  The force therefore depends on the position at the SAME time
+    # level, which makes it self-limiting: if the markers overshoot, the
+    # averaged position pulls the force back the other way.  The earlier
+    # explicit form F = -kappa*(chi^n - chi^0) used a lagged position and had no
+    # such restoring property, which is why the markers drifted.
     if not cfg.USE_IMPLICIT_DRAG:
-        ib_interpolation.fluid_to_solid(ns_solver.u_._cpp_object,
-                                       solid_velocity._cpp_object)
-        # plates are rigid and stationary: X == X_ref identically, u_struct == 0
-        solid_force.x.array[:] = -cfg.DAMP * solid_velocity.x.array[:]
+        # 1) fluid velocity at the markers, from the tentatively updated field
+        ib_interpolation.fluid_to_solid(ns_solver.u_s._cpp_object,
+                                        solid_velocity._cpp_object)
+        solid_coords_prev = solid_coords.x.array.copy()
+        # 2) predict the marker position with the same velocity
+        solid_coords.x.array[:] = solid_coords_prev + \
+            solid_velocity.x.array[:] * cfg.DT
+        solid_coords.x.scatter_forward()
+
+        # 3) assemble the spring at the time-centered position and distribute.
+        #    Re-evaluating the map at the predicted position makes this the
+        #    implicit (mid-point) form in practice.
+        if cfg.MAP_AT_REFERENCE:
+            ib_interpolation.evaluate_current_points(coords_ref._cpp_object)
+        else:
+            ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
+        # overwrite the marker position used by the assemble with the average
+        solid_coords.x.array[:] = 0.5 * (solid_coords_prev
+                                        + solid_coords.x.array[:])
+        solid_coords.x.scatter_forward()
+        with b1.localForm() as loc:
+            loc.set(0)
+        assemble_vector(b1, L_hat)
+        b1.ghostUpdate(addv=PETSc.InsertMode.ADD,
+                       mode=PETSc.ScatterMode.REVERSE)
+        with b1.getBuffer() as arr:
+            solid_force.x.array[: len(arr)] = force_sign * arr[:]
         solid_force.x.scatter_forward()
+        # restore the (predicted) marker position as the new configuration
+        solid_coords.x.array[:] = 2.0 * solid_coords.x.array[:] \
+            - solid_coords_prev
+        solid_coords.x.scatter_forward()
+
         ns_solver.f.x.array[:] = 0.0
         ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object,
                                         solid_force._cpp_object)
-        ns_solver.f.x.array[:] += force_sign * f_body.x.array[:]
+        if cfg.USE_BODY_FORCE:
+            ns_solver.f.x.array[:] += force_sign * rfac * f_body.x.array[:]
         ns_solver.f.x.scatter_forward()
 
     if (step + 1) % max(n_steps // 10, 1) == 0 or step == 0:
@@ -304,9 +365,13 @@ for step in range(n_steps):
         if MPI.COMM_WORLD.rank == 0:
             print(f"  step {step + 1:>6}/{n_steps}  t={t + cfg.DT:.4g}  "
                   f"max|u|={umax:.6e}")
+    _nm = len(solid_coords.x.array) // 2
+    _pmax = float(np.max(np.linalg.norm(
+        (solid_coords.x.array - coords_ref.x.array).reshape(_nm, 2), axis=1)))
     history.append((step + 1, t + cfg.DT,
                     float(np.max(np.linalg.norm(
-                        ns_solver.u_.x.array.reshape(-1, 2), axis=1)))))
+                        ns_solver.u_.x.array.reshape(-1, 2), axis=1))),
+                    _pmax))
 
 # ==========================================================================
 # Report
@@ -321,9 +386,9 @@ if MPI.COMM_WORLD.rank == 0:
     import json
     out = cfg.output_path()
     with open(os.path.join(out, "history.csv"), "w") as fh:
-        fh.write("step,t,max_u\n")
+        fh.write("step,t,max_u,plate_disp\n")
         for row in history:
-            fh.write(f"{row[0]},{row[1]:.8e},{row[2]:.16e}\n")
+            fh.write(f"{row[0]},{row[1]:.8e},{row[2]:.16e},{row[3]:.16e}\n")
     print(f"history written to {out}history.csv")
 
     # machine-readable metrics (same convention as demo_424)
@@ -354,6 +419,36 @@ with XDMFFile(MPI.COMM_WORLD, cfg.output_path() + "velocity.xdmf", "w") as f:
 with XDMFFile(MPI.COMM_WORLD, cfg.output_path() + "pressure.xdmf", "w") as f:
     f.write_mesh(mesh)
     f.write_function(ns_solver.p_, cfg.DT * n_steps)
+
+# --- solid output: displaced coordinates and the displacement field ---------
+# Written on the LAGRANGIAN mesh, so the deformed plates can be compared with
+# their reference position (the tether's X_ref).
+displacement = Function(Vs, name="displacement")
+displacement.x.array[:] = solid_coords.x.array[:] - coords_ref.x.array[:]
+displacement.x.scatter_forward()
+# XDMF requires the output Function degree to match the mesh geometry degree
+# (the solid mesh is P1), so interpolate the P2 fields down to P1 for output.
+Vs_io = functionspace(structure, element("Lagrange",
+                                         structure.topology.cell_name(), 1,
+                                         shape=(2,)))
+solid_coords_io = Function(Vs_io, name="solid_coords_io")
+disp_io = Function(Vs_io, name="displacement_io")
+solid_coords_io.interpolate(solid_coords)
+disp_io.interpolate(displacement)
+with XDMFFile(MPI.COMM_WORLD, cfg.output_path() + "solid_coords.xdmf",
+              "w") as f:
+    f.write_mesh(structure)
+    f.write_function(solid_coords_io, cfg.DT * n_steps)
+with XDMFFile(MPI.COMM_WORLD, cfg.output_path() + "solid_displacement.xdmf",
+              "w") as f:
+    f.write_mesh(structure)
+    f.write_function(disp_io, cfg.DT * n_steps)
+if MPI.COMM_WORLD.rank == 0:
+    _n = len(solid_coords.x.array) // 2
+    _d = np.linalg.norm(
+        (solid_coords.x.array - coords_ref.x.array).reshape(_n, 2), axis=1)
+    print(f"solid displacement: max {_d.max():.6e}  mean {_d.mean():.6e}")
+    print(f"solid output written to {cfg.output_path()}solid_*.xdmf")
 
 if MPI.COMM_WORLD.rank == 0:
     print(f"elapsed {res['elapsed_s']:.1f} s")

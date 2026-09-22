@@ -64,46 +64,37 @@ import numpy as np
 # --------------------------------------------------------------------------
 # Space-time domain
 # --------------------------------------------------------------------------
-# The benchmark quotes Omega = [0,1] x [-0.25,2].  That rectangle does NOT
-# contain the slanted channel: at theta = 30 deg the walls are
-# y = (x*sin +- D/2)/cos, so over x in [0,1] the channel spans y in
-# [-0.66667, 1.24402].  The quoted box cuts the lower plate off below y=-0.25
-# and truncates the inlet cross-section by 37 %.
+# The benchmark's box is 2 x 2 with the channel entering on the left and leaving
+# on the right.  It is TRANSLATED here so its lower-left corner sits on the
+# origin, as an AFSI case requires:
 #
-# The setup figure in the benchmark makes the intent clear: BOTH plates run the
-# full length of the box as dotted Lagrangian marker lines, and the inlet and
-# outlet are complete channel cross-sections.  That requires the box to contain
-# the whole channel, i.e. it must be extended DOWNWARD (and slightly left so
-# the lower plate reaches the left face).
+#     paper frame :  x in [-0.25, 2] ,  y in [-1, 1]
+#     shift       :  X = x + 0.25 ,  Y = y + SHIFT_Y
+#     this demo   :  X in [0, 2.25] ,  Y in [0, 2.5]
 #
-# Chosen box:
+# The paper's box is 2.5 units tall and its width is kept here, but its HEIGHT
+# is not enough: over X in [0, 2.25] the channel spans 2.45271 in Y, so the
+# quoted 2.0-tall box cuts the lower plate at (1.155, 0).  SHIFT_Y is therefore
+# chosen to centre the channel in a 2.5-tall box (0.15 of margin top and
+# bottom) while keeping the lower-left corner on the origin.
 #
-#     x in [-0.2, 1.0] ,  y in [-0.8, 2.0]
+# The shift is NOT along the channel axis, so it does not leave the geometry
+# invariant: the across-channel coordinate moves and the exact velocity has to
+# be carried over with the new coordinates (see xi/analytic below).  What it
+# does preserve is containment.  In this frame the two plates run
 #
-# With x_min = -0.2 the lower plate meets the LEFT face at y = -0.78214 and the
-# upper plate at y = +0.55120, so the inlet is the complete D-tall cross-section
-# [-0.78214, 0.55120]; the outlet at x = 1 is [-0.08932, 1.24402], also
-# complete.  Both plates therefore lie entirely inside the box and terminate
-# exactly on the inlet and outlet faces -- no clipping -- which is what the
-# benchmark figure shows.  Set Y_MIN=-0.25 and X_MIN=0 to reproduce the quoted
-# truncation instead.
-# Box matched to the benchmark's setup figure, which is clearly wider than the
-# quoted [0,1] and shows the channel end to end with both plates as dotted
-# marker lines and both ends as open cross-sections.
+#     lower  xi=-D/2 :  Y = 0.18900 (X=0) -> 1.34370 (X=2.25)
+#     upper  xi=+D/2 :  Y = 1.52233 (X=0) -> 2.67703 (X=2.25)
 #
-#     x in [-0.9, 2.6] ,  y in [-1.4, 3.4]
-#
-# Checked against the plate lines y = (x*sin +- D/2)/cos:
-#   lower plate  y(-0.9) = -1.18636 ->  y(2.6) = +1.01884
-#   upper plate  y(-0.9) = -0.03167 ->  y(2.6) = +2.17353
-# so both plates run the full width, terminate exactly on the inlet/outlet
-# faces, and stay inside the box with margin; the inlet and outlet are complete
-# D-tall cross-sections.  A slightly smaller box (x in [-0.2, 1]) also works
-# and was used first; set X_MIN/X_MAX/Y_MIN/Y_MAX to reproduce either.
-X_MIN = float(os.environ.get("X_MIN", "-0.9"))
-X_MAX = float(os.environ.get("X_MAX", "2.6"))
-Y_MIN = float(os.environ.get("Y_MIN", "-1.4"))
-Y_MAX = float(os.environ.get("Y_MAX", "3.4"))
+# so both plates run the full width, terminate on the left/right faces, and the
+# channel stays inside the box.
+X_MIN = float(os.environ.get("X_MIN", "0.0"))
+X_MAX = float(os.environ.get("X_MAX", "2.25"))
+Y_MIN = float(os.environ.get("Y_MIN", "0.0"))
+Y_MAX = float(os.environ.get("Y_MAX", "3.1"))
+
+# Origin of the benchmark frame expressed in this frame.
+SHIFT_X = 0.25
 
 # --------------------------------------------------------------------------
 # Slanted channel
@@ -116,11 +107,34 @@ H_CHANNEL = 1.0                       # channel width in its horizontal config
 D_CHANNEL = H_CHANNEL / COS_T         # true (perpendicular) channel width
 R_HALF = 0.5 * D_CHANNEL              # >0 : xi in [0, h]; profile peaks at r/2
 
+# SHIFT_Y is DERIVED, not hand-picked, so that the lowest point of the lower
+# plate sits a small margin above Y=0.  The lower plate is
+#     Y = SHIFT_Y + (X*sin - R)/cos
+# which increases with X, so its minimum over the box is at X = X_MIN; that is
+# what guarantees the lower-left corner sits on the origin with the whole
+# channel inside.
+PLATE_MARGIN = 0.1
+# lower plate at X = X_MIN:  Y = SHIFT_Y + ((X_MIN - SHIFT_X)*sin - R)/cos
+# require that to equal PLATE_MARGIN:
+SHIFT_Y = float(os.environ.get("SHIFT_Y", repr(
+    PLATE_MARGIN - ((X_MIN - SHIFT_X) * SIN_T - R_HALF) / COS_T)))
+
 # --------------------------------------------------------------------------
 # Physics
 # --------------------------------------------------------------------------
-RHO = 1.0
-MU = 0.5
+# NOTE ON UNITS
+# -------------
+# The benchmark states its parameters in CGS: H = 1.0 cm, rho = 1.0 g/cm^3,
+# mu_s = mu_p = 0.05 Pa.s (total 0.1 Pa.s = 1.0 poise), lambda = 0.1 s.  This
+# demo therefore runs in cm, g, s:
+#     length cm   mass g   time s
+#     viscosity poise (= g/(cm s))   density g/cm^3
+#     velocity cm/s   body force dyn/cm^3
+# 1 Pa.s = 10 poise, so mu_s + mu_p = 0.1 Pa.s = 1.0 poise.
+# With H = 1.0 cm the profile amplitude is A = (dP/L)/(2 mu H) = 0.5, giving
+# u_max = A (D/2)^2 = 0.1666667 cm/s and Re = rho*u_max*D/mu = 0.1925.
+RHO = 1.0        # g/cm^3  (benchmark: 1.0 g/cm^3)
+MU = 1.0         # poise   (benchmark: mu_s + mu_p = 0.05 + 0.05 Pa.s = 1.0 P)
 DP_DL = float(os.environ.get("DP_DL", "1.0"))   # -dp/ds along the channel axis
 
 # Self-consistent profile amplitude and the resulting peak velocity.
@@ -142,8 +156,10 @@ BOX_L = float(NX) * DX                # >= X_MAX - X_MIN
 BOX_H = float(NY) * DX                # >= Y_MAX - Y_MIN
 CELLS_PER_UNIT = 1.0 / DX
 
-DT_FACTOR = float(os.environ.get("DT_FACTOR", "0.15"))
+DT_FACTOR = float(os.environ.get("DT_FACTOR", "0.2"))   # benchmark: dt = 0.2h
 DT = DT_FACTOR * DX
+if os.environ.get("DT_OVERRIDE"):
+    DT = float(os.environ["DT_OVERRIDE"])
 
 # --------------------------------------------------------------------------
 # Immersed-boundary penalty for the two (stationary, rigid) plates
@@ -160,6 +176,21 @@ DAMP = float(os.environ.get("DAMP", "1.0e3"))
 # well sampled).
 LAGRANGIAN_DIV = int(os.environ.get("LAGRANGIAN_DIV", "2"))
 DS_LAG = DX / LAGRANGIAN_DIV
+
+# Physical thickness of the plates.  AFSI's immersed-boundary distributor takes
+# an integration weight per Lagrangian point (its w), i.e. the reference volume
+# that point represents; for a thin plate in 2-D that is ds * PLATE_THICKNESS.
+# (The distributor's default w = 1 means "one full Eulerian cell volume", which
+# is only right for a volume-filling solid.)
+PLATE_THICKNESS = float(os.environ.get("PLATE_THICKNESS", str(DX)))
+W_LAGRANGIAN = DS_LAG * PLATE_THICKNESS
+
+# Where the IB kernel map is evaluated.  False (default, classic Peskin): at the
+# CURRENT Lagrangian positions, so the delta function travels with the plates.
+# True: at the REFERENCE positions, i.e. the penalty is applied by a fixed
+# spatial kernel.
+MAP_AT_REFERENCE = os.environ.get("MAP_AT_REFERENCE", "0") not in ("0", "false")
+
 
 # --- implicit penalty on the plates ----------------------------------------
 # The body-force route is applied EXPLICITLY (it enters ns_solver.f, which is
@@ -197,7 +228,19 @@ FORCE_ORDER = 2          # Lagrange order on the Lagrangian (plate) mesh
 # --------------------------------------------------------------------------
 # Time loop
 # --------------------------------------------------------------------------
-T_END = float(os.environ.get("T_END", "20.0"))
+T_END = float(os.environ.get("T_END", "2.0"))   # benchmark: 20*lambda = 2.0 s
+# Linear ramp of the driving from rest; the benchmark starts the channel from
+# rest and runs to steady state.  Default = lambda = 0.1 s.  0 disables.
+RAMP_T = float(os.environ.get("RAMP_T", "0.1"))
+
+# Driving mechanism.
+#   False (benchmark-faithful): the flow is driven by the prescribed steady
+#     analytic solution used as the inflow condition, ramped from rest over
+#     RAMP_T.  No body force is applied, so it is not double-driven.
+#   True : drive with the equivalent constant body force -grad(p) and keep the
+#     analytic velocity as a boundary condition as well (the earlier setup).
+USE_BODY_FORCE = os.environ.get("USE_BODY_FORCE", "0") not in ("0", "false")
+DT_OVERRIDE = os.environ.get("DT_OVERRIDE")
 NSTEPS = int(round(T_END / DT))
 SMOKE = bool(os.environ.get("SMOKE"))
 SMOKE_STEPS = int(os.environ.get("SMOKE_STEPS", "50"))
@@ -217,77 +260,54 @@ CHANNEL_CELLS = D_CHANNEL / DX
 # --------------------------------------------------------------------------
 # Analytic solution and the channel geometry inside the rectangle
 # --------------------------------------------------------------------------
-def xi(x, y):
-    """Coordinate across the channel, measured from the centreline.
+def xi(X, Y):
+    """Across-channel coordinate in THIS frame, measured from the centreline.
 
-    The physical range is xi in [-D/2, +D/2]; the channel walls are at
-    xi = -D/2 and xi = +D/2, where the profile vanishes.
+    In the benchmark frame it is ``xi = y*cos(theta) - x*sin(theta)`` with the
+    plates at ``xi = +-D/2``.  Substituting ``x = X - SHIFT_X`` and
+    ``y = Y - SHIFT_Y`` gives the form used here:
+
+        xi = (Y - SHIFT_Y)*cos(theta) - (X - SHIFT_X)*sin(theta)
+
+    Absorbing the translation into the coordinate is all the "variable
+    transformation of the velocity equation" amounts to: the body force is
+    spatially constant and the pressure enters only through its gradient, so
+    both are invariant under a rigid translation, while ``xi`` -- and hence u --
+    picks up the constants.  The velocity field is therefore unchanged; only
+    its argument is rewritten.
     """
-    return y * COS_T - x * SIN_T
+    return (Y - SHIFT_Y) * COS_T - (X - SHIFT_X) * SIN_T
 
 
-def analytic(x, y):
+def analytic(X, Y):
     """Exact velocity at a point (numpy-broadcasting friendly).
 
-    Plane Poiseuille in the coordinate across the channel: with the walls at
-    xi = +-D/2 the profile is the symmetric parabola
+    Plane Poiseuille in the across-channel coordinate, unchanged in form:
 
-        u_s(x,y) = (dP/L)/(2*mu) * ( (D/2)^2 - xi^2 )
+        u_s = (dP/L)/(2*mu) * ( (D/2)^2 - xi^2 )
 
     which equals ``A*(D/2)^2 = u_max`` on the centreline and vanishes at both
-    walls, and the velocity vector points along the channel axis (cos, sin).
-
-    NOTE: an earlier version of this function built the profile from the
-    shifted coordinate ``t = xi + D/2`` as ``-A*t*(t-h)``.  That expansion is
-
-        A*(R^2 - xi^2) - A*R*xi        (R = D/2)
-
-    i.e. it carries a spurious ODD term ``-A*R*xi``, which breaks the symmetry
-    of the parabola and leaves the xi=+D/2 wall with a non-zero velocity.  The
-    symmetric form above is the correct one.
+    plates, with the velocity vector along the channel axis (cos, sin).
     """
-    t = xi(x, y)
+    t = xi(X, Y)
     prof = (DP_DL / (2.0 * MU)) * (R_HALF**2 - t**2)
     return prof * COS_T, prof * SIN_T
 
 
+def wall_y(X, side):
+    """Y of the plate `side` (+1 upper, -1 lower) at a given X, this frame."""
+    return SHIFT_Y + ((X - SHIFT_X) * SIN_T + side * R_HALF) / COS_T
+
+
 def wall_endpoints(side):
-    """The segment of a channel wall that lies inside the domain rectangle.
+    """The two endpoints of a plate, in this frame.
 
-    ``side`` = -1 for the xi=-D/2 wall and +1 for the xi=+D/2 wall.  The wall
-    is the line ``y = (off + x*sin)/cos``; it is clipped against all four faces
-    of the rectangle, because with this geometry
-
-      * the LOWER wall (side=-1) starts at y=-2/3, i.e. below Y_MIN, and
-        therefore enters the domain through the BOTTOM face at x = 1/(2*sqrt3),
-        leaving through the right face at y=-0.0893;
-      * the UPPER wall (side=+1) runs from y=+2/3 to y=+1.2440, entirely
-        inside, entering at x=0 and leaving through the right face.
-
-    So the two walls are NOT symmetric about the domain: the inlet is the
-    partial face for one of them.
+    With the box sized and SHIFT_Y derived as above, both plates lie wholly
+    inside the box and span its full width, terminating exactly on the inlet
+    (X = X_MIN) and outlet (X = X_MAX) faces -- so no clipping is needed and
+    both ends are complete channel cross-sections.
     """
-    off = side * R_HALF
-
-    def y_at(x):
-        return (off + x * SIN_T) / COS_T
-
-    def x_at(y):
-        return (y * COS_T - off) / SIN_T
-
-    # candidate boundary crossings, in increasing x
-    cand = []
-    for x in (X_MIN, X_MAX):
-        if Y_MIN <= y_at(x) <= Y_MAX:
-            cand.append((x, y_at(x)))
-    for y in (Y_MIN, Y_MAX):
-        x = x_at(y)
-        if X_MIN <= x <= X_MAX:
-            cand.append((x, y))
-    if len(cand) < 2:
-        raise ValueError(f"wall {side} does not cross the domain")
-    cand = sorted(set(cand))
-    return [cand[0], cand[-1]]
+    return [(X_MIN, wall_y(X_MIN, side)), (X_MAX, wall_y(X_MAX, side))]
 
 
 def inlet_interval():
@@ -308,6 +328,18 @@ def outlet_interval():
             if abs(x - X_MAX) < 1e-12:
                 ys.append(y)
     return (min(ys), max(ys))
+
+
+def solid_mesh_path():
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, "plot",
+                        f"solid-426-N{int(1.0 / DX)}-t{PLATE_THICKNESS:g}.xdmf")
+
+
+# Exact plate geometry, for the mesh-area guard.
+PLATE_LENGTH = float(np.hypot(*(np.subtract(wall_endpoints(+1)[1],
+                                            wall_endpoints(+1)[0]))))
+PLATE_AREA_TARGET = PLATE_LENGTH * PLATE_THICKNESS
 
 
 def output_path():

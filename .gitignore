@@ -34,3 +34,9 @@ afsic/demo/demo_337/data/plot/lv_ellipsoid-problem*/
 afsic/demo/demo_424/plot/_logs/
 afsic/demo/demo_425/plot/_logs/
 afsic/demo/demo_426/plot/_logs/
+
+# demo_426 calibration scratch (logs, per-beta histories, sweep dirs)
+afsic/demo/demo_426/_tune*.log
+afsic/demo/demo_426/hist_beta*.csv
+afsic/demo/demo_426/plot/_beta_sweep/
+afsic/demo/demo_426/plot/_sweep*.log
