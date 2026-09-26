@@ -257,43 +257,53 @@ and comes out around `8e11` while its standard deviation is `0.84` and its range
   is documented rather than silently patched; if the intended target really is
   `U_max = 0.25`, run with `DP_DL=0.75`.
 
-## Immersed-boundary spreading: a measured normalisation defect
+## Immersed-boundary spreading normalisation (RETRACTED — the operators are fine)
 
-A proper IB discretisation requires the interpolation and spreading operators to
-be adjoints (`I = S*`); otherwise the coupling injects spurious momentum.  This
-was measured directly with random fields on a unit square:
+**The "`1/h^2` over-injection" reported below was a measurement artifact and has
+been retracted; `SPREAD_NORM` now defaults to `none` (no scaling).**  A proper IB
+discretisation needs the interpolation and spreading operators to be adjoints,
+and they are: the fluid-side inner product must carry the cell area,
 
-    <u, S F>  vs  <S* u, F>
+    <u, S F>_Omega = sum_ij u_ij (S F)_ij * dx * dy ,   dx = 1/(2N)
 
-| N | h | ratio `<S*u,F>/<u,SF>` | 1/ratio | power-law index |
+With that weighting the measured ratio is **exactly 1.000000** at
+N = 16/32/64/128, i.e. no correction is needed
+(`afsic/tests/test_duality.py` has always used this weighting and passes).  The
+ratios quoted in the table below are precisely `dx*dy` — the factor that was
+missing from the *unweighted* node sum used at the time:
+
+| N | dx | `<S*u,F>` / `<u,SF>` (node sum, unweighted) | `dx*dy` | ratio with the volume weight |
 |---|---|---|---|---|
-| 16 | 0.0625 | 9.766e-04 | 1024 | - |
-| 32 | 0.03125 | 2.441e-04 | 4096 | 2.0000 |
-| 64 | 0.015625 | 6.104e-05 | 16384 | 2.0000 |
+| 16 | 0.03125 | 9.765625e-04 | 9.765625e-04 | 1.000000 |
+| 32 | 0.015625 | 2.441406e-04 | 2.441406e-04 | 1.000000 |
+| 64 | 0.0078125 | 6.103516e-05 | 6.103516e-05 | 1.000000 |
+| 128 | 0.00390625 | 1.525879e-05 | 1.525879e-05 | 1.000000 |
 
-The ratio scales **exactly as `h^2`**, so AFSI's distributor
-(`f_node += F*W*w/(dx*dy)` against an interpolation with no `h` factor) injects
-`1/h^2` too much momentum for a *thin* structure.  For a volume-filling solid
-`w = dx*dy` and the factors cancel, which is why demo_424 tolerates it.
+Consequently `SPREAD_NORM=h2` did not restore adjointness — it multiplied the
+Lagrangian force by `DX^2` = 9.77e-4, weakening the immersed coupling by 1024x.
+With it the plates exerted essentially no force: in the committed
+`plot/N32_ipcs_smoke` run the plates were passive tracers carried downstream at
+~0.37 `u_max`, the fluid *outside* the channel reached 0.37 `u_max` (i.e. there
+was no confined channel at all), and the in-channel error was 34.7 %.
 
-`SPREAD_NORM` applies a correction in the Python layer:
+`SPREAD_NORM` remains as a calibration knob (`none` = as shipped, the default;
+`h2` = the old 1024x attenuation; `<number>` = explicit factor).
 
-| SPREAD_NORM | meaning |
-|---|---|
-| `none` | as shipped |
-| `h2` (default) | the measured `h^2` factor, i.e. `I = S*` restored |
-| `<number>` | explicit factor, for calibration |
+### What actually limits the explicit (tether) route
 
-### Effect at kappa = 60, dt = 0.2h, T = 2.0 s (320 steps)
+The explicit, frozen-force penalty carries a per-step gain
+`~ beta*dt^2/rho`.  At `dt = 0.2*DX` a 0.5-cell perturbation of the plates is
+*amplified* for `beta >= ~1e5` (at `beta = 1e6` the run diverges within a few
+steps), while the same tether in demo_424 (`beta = 1e7`, `dt = 2e-4`) relaxes
+the perturbation — giving demo_424 the same 31x larger time step would blow it
+up too.  So the tether is not usable at this demo's time step, and the
+**implicit** drag band (`USE_IMPLICIT_DRAG=1`, the default) is what holds the
+plates: measured in-channel error 5.3 %, plate slip 0.005 `u_max`, zero drift.
 
-| | delta | x (h/2) | fluid \|u\| on the plates |
-|---|---|---|---|
-| `none` | 0.14335 | 9.17 | 0.0880 |
-| `h2` | 0.12455 | **7.97** | 0.0673 |
-
-So the correction is real and helps (delta -13 %, plate velocity -24 %), and it
-also removes the pathological `delta` growth with `kappa`, but it does **not**
-satisfy the `h/2` criterion.
+The measurements behind this section (hold tests, the 2x2x2 driving/plate sweep,
+the duality re-measurement) are recorded in
+`docs/demo-426-ib-coupling-findings.md`; how to run the demos on this machine is
+in `docs/run-demo-424-426.md`.
 
 Diagnostic: with `h2`, `kappa` = 60/200/600 give delta = 0.12455/0.12459/0.12470
 —— i.e. **delta is independent of kappa**, so the tether is not what is holding

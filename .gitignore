@@ -42,3 +42,18 @@ afsic/demo/demo_426/plot/_beta_sweep/
 afsic/demo/demo_426/plot/_sweep*.log
 afsic/demo/demo_426/plot/cgs_bcramp/
 afsic/demo/demo_426/plot/_sweep*/
+
+# demo_424/426 排查用的临时实验目录（demo 副本、日志、对照脚本）
+/.diag426/
+
+# demo_402 (Turek FSI2) 运行输出与日志（脚本本身入库）
+afsic/demo/demo_402/plot/compare_*/
+afsic/demo/demo_402/plot/coarse_*/
+afsic/demo/demo_402/plot/*.log
+afsic/demo/demo_402/plot/rebuild_*
+afsic/demo/demo_402/plot/summary_*
+afsic/demo/demo_402/turek_mesh.*
+
+# 结果打包（供下载，不入库）
+/afsi-results-*.tar.gz
+/afsi-figures-*.tar.gz

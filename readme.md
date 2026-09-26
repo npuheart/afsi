@@ -36,6 +36,11 @@ Documentation
 
 Some demos are under the directory: `afsic/demo`.
 
+How to run `demo_424` (tethered aorta) and `demo_426` (slanted-channel IB
+benchmark) with the environment shipped in this checkout, including the verified
+parameter sets and the known pitfalls: `docs/run-demo-424-426.md`.
+Measured evidence behind those pitfalls: `docs/demo-426-ib-coupling-findings.md`.
+
 Installation
 ------------
 Currently, AFSI requires FEniCSx version 0.10.0. The following steps outline one method for installing FEniCSx:

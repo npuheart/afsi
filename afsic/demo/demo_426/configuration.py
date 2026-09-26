@@ -247,24 +247,22 @@ USE_BODY_FORCE = os.environ.get("USE_BODY_FORCE", "0") not in ("0", "false")
 IB_ITERATIONS = int(os.environ.get("IB_ITERATIONS", "1"))
 DIAG_IB = bool(os.environ.get("DIAG_IB"))
 
-# --- correction of the immersed-boundary spreading normalisation -----------
-# AFSI's distributor spreads as  f_node += F * W * w / (dx*dy)  while the
-# interpolator is  U_particle += u_node * W  (no h factor).  For a proper IB
-# discretisation the two must be adjoints (I = S*); measured directly on a
-# unit square the adjointness ratio scales as
-#     <S* u, F> / <u, S F> = h^2      (power law index 2.0000 for N=16,32,64)
-# so the spreading operator injects 1/h^2 too much momentum.  For a volume
-# filling solid (w = dx*dy per point) the factors happen to cancel, which is why
-# demo_424 tolerates it; for a thin structure they do not.
-# SPREAD_NORM multiplies the Lagrangian force before spreading:
-#     "h2"   -> apply the measured h^2 correction (default)
-#     "none" -> leave the operator as shipped
-# SPREAD_NORM selects the correction factor applied to the Lagrangian force:
-#     "none"    -> as shipped by AFSI
-#     "h2"      -> the measured h^2 adjointness correction (makes I = S*, but
-#                  the resulting force is negligibly small -- see readme)
-#     a number  -> explicit factor, for calibration
-_sn = os.environ.get("SPREAD_NORM", "h2").lower()
+# --- immersed-boundary spreading normalisation ------------------------------
+# 历史说明（commit 00d7d8c 已回退）：当时测得对偶性比值 <S*u,F>/<u,SF> 按 h^2 变化，
+# 据此认为 distributor 多注入了 1/h^2 的动量并加了 h2 修正。**该测量漏掉了流体侧内积
+# 的网格面积 dx*dy**：AFSI 的扩散 f_node += F*W*w/(dx*dy)（w=1）与插值 U += u_node*W
+# 本来就是精确伴随的，前提是流体侧用体积权内积
+#     sum_ij u_ij (S F)_ij * dx * dy   (dx = 1/(2N) = 流体网格步长的一半)
+# 实测（N=16/32/64/128）：节点和比值恒等于 dx*dy，体积权比值恒等于 1.000000
+# （afsic/tests/test_duality.py 本来就是按体积权写的，一直通过）。
+# 因此默认不再缩放；SPREAD_NORM 只是留给标定的旋钮：
+#     "none"    -> 按 AFSI 原样（默认，IB 力不做任何缩放）
+#     "h2"      -> 旧行为：乘 DX^2，等于把 IB 力削弱 1024 倍（N=32），板子会失去约束
+#     a number  -> 显式缩放因子
+# 注意：显式（冻结力）tether 路线本身受时间步限制，突变增益 ∝ beta*dt^2/rho。实测在
+# dt = 0.2*DX 下 beta >= ~1e4 就会发散（beta=1e6 几步内爆）；静止板请用隐式 drag 带
+# （USE_IMPLICIT_DRAG=1，默认）。详见 docs/demo-426-ib-coupling-findings.md。
+_sn = os.environ.get("SPREAD_NORM", "none").lower()
 if _sn == "none":
     SPREAD_SCALE = 1.0
 elif _sn == "h2":

@@ -127,7 +127,7 @@ tdim = mesh.topology.dim
 class InletVelocity:
     def __init__(self, Um, Ly):
         self.t = 0.0
-        self.t_ramp = 2.0
+        self.t_ramp = float(os.environ.get("RAMP_T", "2.0"))  # 0 = 无斜坡（论文未提斜坡）
         self.Um = Um
         self.Ly = Ly
         self.scale = 0.0
@@ -174,7 +174,21 @@ bcp_outlet = dirichletbc(
 bcu = [bcu_inlet, bcu_bottom, bcu_top]
 bcp = [bcp_outlet]
 # Define Solver
-ns_solver = ChorinSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu"])
+# SOLVER=chorin (默认) 或 SOLVER=ipcs，便于同一算例下的方法对比。
+# 注意两者的动量方程里 f 的符号相反：Chorin 的 F1 里是 -inner(f,v)（L1 得到 +f），
+# IPCS 的 F1 里是 +dot(f,v)（L1 得到 -f），所以 IPCS 的浸没边界力要取负号，
+# 与 demo_424 的 force_scale 约定一致。
+SOLVER = os.environ.get("SOLVER", config.get("nssolver", "chorin")).lower()
+if SOLVER.startswith("ipcs"):
+    ns_solver = IPCSSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu"])
+    force_scale = -1.0
+    if MPI.COMM_WORLD.rank == 0:
+        print("solver: IPCSSolver (incremental pressure correction)")
+else:
+    ns_solver = ChorinSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu"])
+    force_scale = 1.0
+    if MPI.COMM_WORLD.rank == 0:
+        print("solver: ChorinSolver (projection / fractional step)")
 
 ###########################################################################################################
 ##########################################  Structure  ####################################################
@@ -216,6 +230,18 @@ mu_s = config["mu_s"]
 lambda_s = config["lambda_s"]
 beta = config["beta"]
 
+# 圆柱系绳罚参数：PENALTY_MODE=beta（默认，用 config["beta"]）或 paper
+#   paper: kappa_s = kappa_hat * rho * dx / dt^2   （论文形式 kappa_s = 5e4 Δx/Δt²，
+#          这里折算成本代码 beta 的单位 dyne/cm^3；kappa_hat 就是无量纲组 beta*dt^2/(rho*dx)）
+PENALTY_MODE = os.environ.get("PENALTY_MODE", "beta").lower()
+KAPPA_HAT = float(os.environ.get("KAPPA_HAT", "5.0e4"))
+if PENALTY_MODE.startswith("paper"):
+    _dx = config["Lx"] / config["Nx"]
+    beta = KAPPA_HAT * config["rho"] * _dx / config["dt"] ** 2
+    if MPI.COMM_WORLD.rank == 0:
+        print(f"penalty(paper form): kappa_hat={KAPPA_HAT:g} -> beta={beta:.6g} "
+              f"dyne/cm^3  (dx={_dx:.6g} cm, dt={config['dt']:.6g} s)")
+
 FF = grad(solid_coords)
 J = det(FF)
 
@@ -227,11 +253,21 @@ x_constraint = solid_coords[0] - X0[0]
 y_constraint = solid_coords[1] - X0[1]
 solid_constraint = as_vector((x_constraint, y_constraint))
 
-# Neo-Hookean: P = mu_s*(F - F^-T) + lambda_s*ln(J)*F^-T
-I1 = inner(FF, FF)
-P_iso = mu_s * J ** (-2.0 / 2.0) * (FF - (I1 / 2.0) * inv(FF).T)
-P_vol = lambda_s * ln(J) * inv(FF).T
-P_s = P_iso + P_vol
+# 固体本构：SOLID_LAW=neo_hookean（默认，原行为）或 svk（论文的 Saint Venant-Kirchhoff）
+SOLID_LAW = os.environ.get("SOLID_LAW", "neo_hookean").lower()
+if SOLID_LAW.startswith("svk"):
+    # S = lambda_s*tr(E)*I + 2*mu_s*E,  E = (F^T F - I)/2,  P = F·S
+    # （二维平面应变：E_33 = 0，故用三维 lambda_s 直接写面内分量）
+    from ufl import tr as _tr
+    _E = 0.5 * (dot(FF.T, FF) - Identity(gdim))
+    _S = lambda_s * _tr(_E) * Identity(gdim) + 2.0 * mu_s * _E
+    P_s = dot(FF, _S)
+else:
+    # Neo-Hookean: P = mu_s*(F - F^-T) + lambda_s*ln(J)*F^-T
+    I1 = inner(FF, FF)
+    P_iso = mu_s * J ** (-2.0 / 2.0) * (FF - (I1 / 2.0) * inv(FF).T)
+    P_vol = lambda_s * ln(J) * inv(FF).T
+    P_s = P_iso + P_vol
 
 # Circle (facet tag 3, cell tag 1) is fixed via penalty; tail (cell tag 2) deforms freely
 L_hat = form(
@@ -240,7 +276,8 @@ L_hat = form(
     - beta * inner(solid_constraint, dVs) * dxx(1)
     #  - beta*inner(circum_constraint, dVs)*dss(3)
 )
-b1 = create_vector(L_hat)
+# dolfinx 0.10: create_vector 需要函数空间，而不是 Form
+b1 = create_vector(Vs)
 
 ###########################################################################################################
 ##########################################  Interaction  ##################################################
@@ -308,7 +345,7 @@ for step in range(config["num_steps"]):
     assemble_vector(b1, L_hat)
     b1.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
     with b1.getBuffer() as arr:
-        solid_force.x.array[: len(arr)] = arr[:]
+        solid_force.x.array[: len(arr)] = force_scale * arr[:]
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
 

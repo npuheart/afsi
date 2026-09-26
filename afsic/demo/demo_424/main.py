@@ -153,6 +153,45 @@ def make_bcp(value):
     return [dirichletbc(PETSc.ScalarType(value), dofs_inlet, Q), bcp_outlet]
 
 
+# ==========================================================================
+# VELOCITY-ONLY boundary conditions (alternative driving)
+# ==========================================================================
+# The standard demo_424 drives the box with a pressure Dirichlet pair at the two
+# open ends.  This variant instead prescribes VELOCITY on every boundary: the
+# fully developed plane-Poiseuille profile
+#
+#     u(y) = G/(2 mu) * ((a^2 - (y - Y_C)^2)) ,   G = DP / BOX_L
+#
+# on the two open ends (ramped in time), and no-slip on the side walls.  No
+# pressure BC is imposed at all, so the pressure is determined only by
+# incompressibility (bcp is empty).
+G_DRIVE = cfg.DP / cfg.BOX_L
+
+
+def _profile(y):
+    return (G_DRIVE / (2.0 * cfg.MU)) * (cfg.A_LUMEN**2 - (y - cfg.Y_C)**2)
+
+
+u_open = Function(V)
+
+
+def _set_open(scale):
+    c = V.tabulate_dof_coordinates()
+    ux = np.zeros(len(c))
+    ly = np.abs(c[:, 1] - cfg.Y_C) <= cfg.A_LUMEN
+    ux[ly] = scale * _profile(c[ly, 1])
+    u_open.x.array[:] = np.column_stack([ux, np.zeros(len(c))]).reshape(-1)
+    u_open.x.scatter_forward()
+
+
+_set_open(0.0)
+VELOCITY_BC = os.environ.get("VELOCITY_BC", "0") not in ("0", "false")
+dofs_open = np.ascontiguousarray(
+    np.hstack([locate_dofs_topological(V, fdim, facet_tag.find(m))
+               for m in (MARKER_INLET, MARKER_OUTLET)]), dtype=np.int32)
+bc_open = dirichletbc(u_open, dofs_open, None)
+
+# The pressure BCs are still built (cheap) but only used when VELOCITY_BC is off.
 bcp = make_bcp(0.0)
 ds_inlet = Measure("ds", domain=mesh, subdomain_data=facet_tag)(MARKER_INLET)
 
@@ -177,6 +216,9 @@ if MPI.COMM_WORLD.rank == 0:
         print(f"edge drag coefficient: {EDGE_DRAG:g} "
               f"(band {EDGE_BAND:g} m)")
 
+if VELOCITY_BC:
+    bcu = bcu + [bc_open]
+    bcp = []
 if cfg.SOLVER == "chorin":
     ns_solver = ChorinSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU,
                              drag=drag_coeff)
@@ -286,7 +328,10 @@ for step in range(cfg.NSTEPS):
     t = step * cfg.DT
 
     p_target = cfg.p_inlet(t)
-    if cfg.SOLVER == "chorin":
+    if VELOCITY_BC:
+        # ramp the prescribed inflow; no pressure datum anywhere
+        _set_open(p_target / cfg.DP if cfg.DP else 1.0)
+    elif cfg.SOLVER == "chorin":
         ns_solver.bcp = make_bcp(p_target)
     else:
         # IPCS accumulates the pressure increment phi into p_ and uses the
