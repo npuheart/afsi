@@ -1,3 +1,5 @@
+import os
+
 from petsc4py import PETSc
 
 from dolfinx.fem import (Constant, Function, form, set_bc)
@@ -5,6 +7,10 @@ from dolfinx.fem.petsc import (apply_lifting, assemble_matrix, assemble_vector,
                                create_vector, create_matrix)
 from ufl import (FacetNormal, TestFunction, TrialFunction,
                  div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs)
+
+# 实验开关：NO_CONVECTION=1 关闭对流项；IPCS_VISC_BE=1 粘性改用隐式欧拉（默认 CN）
+_NO_CONVECTION = os.environ.get("NO_CONVECTION", "0").lower() not in ("0", "", "false", "no")
+_VISC_BE = os.environ.get("IPCS_VISC_BE", "0").lower() not in ("0", "", "false", "no")
 
 class IPCSSolver:
     def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw,
@@ -50,8 +56,13 @@ class IPCSSolver:
 
         f = Function(V)
         F1 = rho / k * dot(u - u_n, v) * dx
-        F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
-        F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
+        if not _NO_CONVECTION:
+            F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
+        if _VISC_BE:
+            F1 += mu * inner(grad(u), grad(v)) * dx
+        else:
+            F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx
+        F1 -= dot(p_, div(v)) * dx
         F1 += dot(f, v) * dx
         if drag is not None:
             # Implicit linear damping: adds drag * u to the momentum LHS.

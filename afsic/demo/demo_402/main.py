@@ -190,6 +190,12 @@ else:
     if MPI.COMM_WORLD.rank == 0:
         print("solver: ChorinSolver (projection / fractional step)")
 
+# 实验开关：显式覆盖浸没边界力符号（排查 f 约定问题时用，如 FORCE_SCALE=1.0）
+if "FORCE_SCALE" in os.environ:
+    force_scale = float(os.environ["FORCE_SCALE"])
+    if MPI.COMM_WORLD.rank == 0:
+        print(f"force_scale override: {force_scale:+.1f}")
+
 ###########################################################################################################
 ##########################################  Structure  ####################################################
 ###########################################################################################################

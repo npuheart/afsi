@@ -81,10 +81,14 @@ def _sum_n(a):
 
 
 def _global_mean(sel_mask, disp):
-    """掩码选出的局部 dof 位移的全局分量平均（MPI 安全）。"""
-    if sel_mask.sum():
-        return _sum_n(disp[sel_mask])
-    return np.zeros(disp.shape[1]), 0
+    """掩码选出的局部 dof 位移的全局分量平均（MPI 安全）。
+
+    注意：不能按 sel_mask 是否为空提前返回——所有 rank 都必须进入 _sum_n
+    的集合通信（尾尖节点只存在于个别 rank，提前返回会导致 MPI 归约错位，
+    非持有点的 rank 上 tip 位移变成 nan）。没命中的 rank 用空数组参与。
+    """
+    local = disp[sel_mask] if sel_mask.sum() else np.zeros((0, disp.shape[1]))
+    return _sum_n(local)
 
 
 def _tip(coords_ref, cur):

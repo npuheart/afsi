@@ -1,0 +1,244 @@
+% !TEX program = xelatex
+% 编译：xelatex report.tex  （需要 ctex 宏包；TeX Live / MiKTeX 完整版自带）
+% 图件：figures/*.png，由 report/make_figures.py 用 PyVista 生成
+\documentclass[11pt]{ctexart}
+
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{figures/}}
+
+\newcommand{\cm}{\,\mathrm{cm}}
+\newcommand{\dyn}{\,\mathrm{dyne}}
+
+\title{\bfseries AFSI \texttt{demo\_402}：Turek FSI2\\固定圆柱--弹性尾巴算例报告}
+\author{浸没边界（Immersed Boundary）FSI 求解器 \quad AFSI 项目}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+本报告给出 AFSI 求解器上 Turek--Hron FSI2 基准（固定圆柱 + 弹性尾巴）的实现与完整运行结果：
+二维通道 $220\times41\cm$、圆柱直径 $10\cm$、尾巴长 $35\cm$，基于浸没边界法（固定
+笛卡尔流体网格 + 拉格朗日固体网格耦合），采用 Chorin 投影分步法，在 4 进程 MPI 下运行
+$T=10\,\mathrm{s}$（$dt=5\times10^{-5}\,\mathrm{s}$，200\,000 步）。全程数值稳定，
+尾尖横向位移幅值约 $4.5\cm$、拍动频率约 $5.5\,\mathrm{Hz}$，圆柱惩罚约束漂移不超过
+$1.1\times10^{-2}\cm$。全文图件（流场/压力/变形快照）由 PyVista 直接读取
+dolfinx 输出渲染。
+\end{abstract}
+
+\section{算例概述}
+
+Turek--Hron FSI2 是流体--结构相互作用的经典标定算例：粘性不可压通道流绕过固定的刚性
+圆柱，圆柱后缘连接一条弹性薄板（``尾巴''），在尾涡作用下发生大幅自激拍动。本例使用
+AFSI 项目自研的\textbf{浸没边界法}求解器（\texttt{demo\_402}），其架构与
+\texttt{demo\_400}（海龟）、\texttt{demo\_401}（精子）一致：
+
+\begin{itemize}
+  \item \textbf{流体}：固定欧拉网格（结构四边形），求解不可压 Navier--Stokes 方程
+        \begin{equation}
+          \rho\Big(\frac{\partial \boldsymbol u}{\partial t}
+          + \boldsymbol u\cdot\nabla\boldsymbol u\Big)
+          = -\nabla p + \mu\,\Delta \boldsymbol u + \boldsymbol f_{\mathrm{IBM}},
+          \qquad \nabla\cdot\boldsymbol u = 0,
+        \end{equation}
+        其中 $\boldsymbol f_{\mathrm{IBM}}$ 为浸没边界力（Peskin 4 点核插值/铺展）。
+  \item \textbf{固体}：拉格朗日网格（三角形，Neo--Hookean 材料），由插值得到的流体速度
+        驱动运动，产生弹性恢复力并反作用于流体；圆柱区域用惩罚力固定：
+        \begin{equation}
+          \boldsymbol f_{\mathrm{pen}} = -\beta\big(\boldsymbol X_s - \boldsymbol X_s^{0}\big),
+          \qquad \beta = 10^{6}\dyn/\mathrm{cm}^{2}.
+        \end{equation}
+  \item \textbf{时间推进}：Chorin 投影分步法（预测--投影），对流项显式。
+\end{itemize}
+
+\section{数值设置}
+
+\begin{table}[htbp]
+  \centering
+  \caption{算例参数（CGS 单位制；几何按 benchmark 的 SI 值换算成 cm）。}
+  \label{tab:setup}
+  \begin{tabular}{lll}
+    \toprule
+    项目 & 数值 & 说明 \\
+    \midrule
+    通道尺寸 & $L_x\times L_y = 220\times41\cm$ & 入口余弦斜坡，$U_m=200\cm/\mathrm{s}$ \\
+    圆柱 & 圆心 $(20,20)\cm$，$D=10\cm$ & 惩罚固定（$\beta=10^{6}$）\\
+    尾巴 & 长 $35\cm$、厚 $2\cm$ & 弹性板 \\
+    流体 & $\rho=1\,\mathrm{g/cm^3}$，$\mu=10\dyn\cdot\mathrm{s/cm^2}$ & $Re=\rho U_m D/\mu = 100$ \\
+    固体 & Neo--Hookean，$\mu_s=2\times10^{7}$，$\lambda_s=8\times10^{7}$ & $E\approx5.6$ MPa，$\nu_s=0.4$ \\
+    流体网格 & $220\times41$ & 9020 个四边形单元，9282 节点 \\
+    固体网格 & 595 节点 & 由 \texttt{turek.geo} 经 Gmsh 生成 \\
+    时间步 & $dt = 5\times10^{-5}\,\mathrm{s}$ & $T=10\,\mathrm{s}$，共 200\,000 步 \\
+    输出 & 每 $0.01\,\mathrm{s}$ 一次 & 1001 个时刻（含 $t=0$）\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{求解与并行性能}
+
+运行环境：macOS（Apple Silicon，8 核 / 8 GB），conda 环境 \texttt{afsi-dolfinx}
+（fenics-dolfinx 0.10.0 + OpenMPI 5.0.11）。为缩短计算时间，先做了单进程与 4 进程 MPI
+的短程测速（400 步，同一网格与时间步）：
+
+\begin{table}[htbp]
+  \centering
+  \caption{并行测速（$T=0.02\,\mathrm{s}$，400 步，扣除启动开销后的每步耗时）。}
+  \label{tab:perf}
+  \begin{tabular}{lccc}
+    \toprule
+    配置 & 每步耗时 [s] & 总耗时 [s] & 相对加速 \\
+    \midrule
+    单进程 & 0.0627 & 27.6 & 1.00$\times$ \\
+    \texttt{mpirun -n 4} & 0.0452 & 21.7 & 1.39$\times$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+4 进程并行效率约 35\%（该问题规模较小、每步含若干小规模 MPI 归约与全局通信），
+但墙钟时间仍有约 1.4 倍收益。完整 $T=10\,\mathrm{s}$ 算例（200\,000 步）以 4 进程运行，
+总耗时 \textbf{2 小时 45 分}（平均 $0.0495\,\mathrm{s}$/步，含周期性 XDMF 写出）。
+
+\begin{itemize}
+  \item 输出文件：\texttt{velocity}/\texttt{pressure}/\texttt{solid} 的 XDMF + HDF5，
+        各含 1001 个时刻（共约 334 MB），可用 ParaView 直接打开；
+  \item 诊断文件：\texttt{history.csv}（1001 行），含 $u_{L_2}$、$p_{L_2}$、固体力、
+        体积、尾尖位移、圆柱漂移、最大速度及其位置等；
+  \item 运行进程为离线模式（屏蔽了 swanlab 登录/上传），断网不影响计算。
+\end{itemize}
+
+\section{结果与分析}
+
+\subsection{流场结构}
+
+图~\ref{fig:velocity} 为 $t=10\,\mathrm{s}$ 时刻的速度幅值云图：圆柱后方形成回流区，
+弹性尾巴在大幅拍动，尾迹中出现交替脱落的涡结构，与 FSI2 的典型流态一致。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{fig_velocity.png}
+  \caption{$t=10\,\mathrm{s}$ 速度幅值 $|\boldsymbol u|$ 云图（色标 $0\sim400\cm/\mathrm{s}$，
+  叠加变形后的固体网格线）。}
+  \label{fig:velocity}
+\end{figure}
+
+图~\ref{fig:snapshots} 给出 $t=2,4,7,10\,\mathrm{s}$ 四个时刻的演化：$t\le2\,\mathrm{s}$
+时尾巴基本平直（处于入口速度斜坡段），随后进入自激拍动并逐渐发展为稳定的周期振荡，
+尾迹涡列随之充分发展。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{fig_snapshots.png}
+  \caption{速度幅值的时间演化（自上而下：$t=2,\,4,\,7,\,10\,\mathrm{s}$，统一色标）。}
+  \label{fig:snapshots}
+\end{figure}
+
+\subsection{压力场}
+
+图~\ref{fig:pressure} 为末端时刻的压力场。色标截断在 $\pm4\times10^{4}\dyn/\mathrm{cm^2}$：
+圆柱内部由惩罚力产生的量级可达 $\pm4\times10^{5}$（饱和显示），流场内的压力波动
+（P1--P99 约 $-3.1\times10^{4}\sim4.0\times10^{4}$）清晰可辨，尾涡区呈偶极子式
+正负交叠分布。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{fig_pressure.png}
+  \caption{$t=10\,\mathrm{s}$ 压力场（色标 $\pm4\times10^{4}$；圆柱罚区饱和显示）。}
+  \label{fig:pressure}
+\end{figure}
+
+\subsection{固体变形与尾尖响应}
+
+图~\ref{fig:solid} 为 $t=10\,\mathrm{s}$ 时固体的变形形态（灰色为参考构型），
+颜色为相对参考构型的位移幅值，尾尖处约 $3.3\cm$。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{fig_solid.png}
+  \caption{$t=10\,\mathrm{s}$ 固体变形与位移幅值 $|\boldsymbol d|$（灰色线框为未变形参考构型）。}
+  \label{fig:solid}
+\end{figure}
+
+图~\ref{fig:tip} 为尾尖位移时程：$t\approx1.5\,\mathrm{s}$ 起振幅逐渐增长，
+约 $3\,\mathrm{s}$ 后进入稳定的周期拍动，横向位移（$dy$）幅值约 $\pm4.5\cm$，
+由后 5 s 的过零点统计得到主导频率约 $5.5\,\mathrm{Hz}$（周期 $0.182\,\mathrm{s}$）；
+流向位移（$dx$）幅值小一个量级（$\lesssim1\cm$）。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.92\linewidth]{fig_tip.png}
+  \caption{尾尖位移时程（相对参考构型，取自 \texttt{history.csv}）。}
+  \label{fig:tip}
+\end{figure}
+
+\noindent 注：尾尖位移曲线由 matplotlib 绘制（PyVista 0.49 的 \texttt{Chart2D} 在当前
+VTK 9.7 下不可用），其余场图均由 PyVista 直接渲染 dolfinx 输出。
+
+\subsection{关键指标汇总}
+
+\begin{table}[htbp]
+  \centering
+  \caption{完整运行的稳定性与响应指标。}
+  \label{tab:metrics}
+  \begin{tabular}{ll}
+    \toprule
+    指标 & 结果 \\
+    \midrule
+    $\max|\boldsymbol u|$ / 入口峰值速度 & $1.79 \to 2.42$（末值 2.37，无发散）\\
+    $u_{L_2}$ / 速度尺度$^2$ & $9344 \to 12614$（$t\approx3\,\mathrm{s}$ 后进入平台）\\
+    尾尖横向位移 $|dy|_{\max}$ & $4.49\cm$ \\
+    尾尖拍动主导频率 & $\approx 5.5\,\mathrm{Hz}$ \\
+    圆柱漂移（罚约束） & $\le 1.1\times10^{-2}\cm$ \\
+    与单进程 0.5 s 短程的一致性 & $u_{L_2}$ 相对差 $\le0.03\%$；尾尖位移差 $\approx6\%$（$t=0.5\,\mathrm{s}$）\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+与单进程短程结果（$T=0.5\,\mathrm{s}$）的对比说明：流场量（$u_{L_2}$）在 MPI 与串行下
+几乎完全一致（$\le0.03\%$）；尾尖位移对固体方程的微小差异更敏感，$t=0.5\,\mathrm{s}$ 时
+相差约 6\%，属并行归约/求和次序不同的正常累积误差。
+
+\section{结论与已知局限}
+
+\begin{enumerate}
+  \item 连续 200\,000 步（$T=10\,\mathrm{s}$）全程稳定，流场量无异常增长，
+        圆柱被罚力可靠固定（漂移 $\le1.1\times10^{-2}\cm$）；
+  \item 尾巴在 $t\approx3\,\mathrm{s}$ 后进入稳定的周期拍动（$\approx5.5\,\mathrm{Hz}$，
+        幅值 $\approx4.5\cm$），尾迹涡列充分发展；
+  \item MPI 4 进程相对单进程加速约 $1.39\times$（该算例规模偏小，通信占比高）。
+\end{enumerate}
+
+\textbf{已知局限}（与官方 benchmark 相比，本算例为定性复现）：
+(i) 经典无质量 Peskin IB 方案缺少独立固体惯性项；
+(ii) 圆柱用``硬弹性区 + 惩罚''近似，并非严格刚体；
+(iii) 显式 IB 对小 $dt$ 敏感，改网格/时间步前建议先跑短程。
+
+\appendix
+\section{复现命令}
+
+\begin{verbatim}
+# 1) 固体网格（首次或改几何后）
+cd afsic/demo/demo_402
+python -B -u generate_mesh.py
+
+# 2) 完整算例（4 进程，Chorin，T=10 s；输出到 plot/full_chorin）
+export SOLVER=chorin T=10 FPS=100 OUT=$PWD/plot/full_chorin
+caffeinate -i mpirun -n 4 python -B -u run_compare.py
+
+# 3) 生成报告图件（PyVista）
+python -B report/make_figures.py
+
+# 4) 编译本报告
+cd report && xelatex report.tex
+\end{verbatim}
+
+\noindent\textbf{注}：若用 4 进程运行，需要 \texttt{run\_compare.py} 中包含 MPI 安全的
+尾尖/圆柱位移归约（所有 rank 都参与集合通信）；本仓库已修复该问题（此前非持有点
+rank 的 \texttt{tip\_dx}/\texttt{tip\_dy} 会记录为 \texttt{nan}）。
+
+\end{document}

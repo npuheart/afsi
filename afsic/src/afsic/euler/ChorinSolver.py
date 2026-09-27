@@ -1,4 +1,6 @@
 
+import os
+
 from mpi4py import MPI
 from petsc4py import PETSc
 
@@ -7,6 +9,10 @@ from dolfinx.fem.petsc import (assemble_matrix, assemble_vector, apply_lifting,
                                create_vector, set_bc)
 from ufl import (TestFunction, TrialFunction,
                  div, dot, ds, dx, inner, lhs, nabla_grad, grad, rhs)
+
+# 实验开关：NO_CONVECTION=1 关闭对流项；CHORIN_VISC_CN=1 粘性改用 Crank-Nicolson（默认 BE）
+_NO_CONVECTION = os.environ.get("NO_CONVECTION", "0").lower() not in ("0", "", "false", "no")
+_VISC_CN = os.environ.get("CHORIN_VISC_CN", "0").lower() not in ("0", "", "false", "no")
 
 
 # Solver
@@ -41,8 +47,12 @@ class ChorinSolver:
 
         # Define the variational problem for the first step
         F1 = rho * dot((u - u_n) / k, v) * dx
-        F1 += rho * inner(dot(grad(u_n), u_n), v)*dx
-        F1 += inner(mu * grad(u), grad(v)) * dx
+        if not _NO_CONVECTION:
+            F1 += rho * inner(dot(grad(u_n), u_n), v)*dx
+        if _VISC_CN:
+            F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx
+        else:
+            F1 += inner(mu * grad(u), grad(v)) * dx
         F1 -= inner(f, v) * dx
         if drag is not None:
             # Implicit linear damping: adds drag * u to the momentum LHS.

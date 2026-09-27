@@ -57,3 +57,4 @@ afsic/demo/demo_402/turek_mesh.*
 # 结果打包（供下载，不入库）
 /afsi-results-*.tar.gz
 /afsi-figures-*.tar.gz
+afsic/demo/demo_402/plot/smoke_chorin/history.csv
