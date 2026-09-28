@@ -172,12 +172,12 @@ band.  Reproducing Fig. 23 needs the kernel choice to be selectable in
 cd afsic/demo/demo_426
 python main.py                                  # full run: T_END=20 (~50 min)
 SMOKE=1 SMOKE_STEPS=300 python main.py          # quick check
-USE_IMPLICIT_DRAG=0 DAMP=0.1 SMOKE=1 python main.py   # explicit-Peskin route
+USE_IMPLICIT_DRAG=0 BETA=8e3 SMOKE=1 SMOKE_STEPS=320 python main.py  # tether route
 ```
 
 Environment overrides: `N`, `DP_DL`, `THETA_DEG`, `Y_MIN`, `DT_FACTOR`,
 `T_END`, `SMOKE`, `SMOKE_STEPS`, `PLATE_DRAG`, `PLATE_DRAG_BAND`,
-`USE_IMPLICIT_DRAG`, `BETA`, `DAMP`, `SOLVER`.
+`USE_IMPLICIT_DRAG`, `BETA`, `DAMP`, `SOLVER`, `IB_DIRECT_LOAD`.
 
 ## Files
 
@@ -289,16 +289,31 @@ was no confined channel at all), and the in-channel error was 34.7 %.
 `SPREAD_NORM` remains as a calibration knob (`none` = as shipped, the default;
 `h2` = the old 1024x attenuation; `<number>` = explicit factor).
 
-### What actually limits the explicit (tether) route
+### What limits the explicit (tether) route — revised 2026-09-28
 
-The explicit, frozen-force penalty carries a per-step gain
-`~ beta*dt^2/rho`.  At `dt = 0.2*DX` a 0.5-cell perturbation of the plates is
-*amplified* for `beta >= ~1e5` (at `beta = 1e6` the run diverges within a few
-steps), while the same tether in demo_424 (`beta = 1e7`, `dt = 2e-4`) relaxes
-the perturbation — giving demo_424 the same 31x larger time step would blow it
-up too.  So the tether is not usable at this demo's time step, and the
-**implicit** drag band (`USE_IMPLICIT_DRAG=1`, the default) is what holds the
-plates: measured in-channel error 5.3 %, plate slip 0.005 `u_max`, zero drift.
+Two independent effects were conflated in the earlier analysis:
+
+1. **A sign error (fixed 2026-09-28).**  The tether force used to be stored
+   with the opposite sign on both solver branches (net effect `-J^T F`), so the
+   spring *pushed the plates away* when the fluid displaced them — an
+   unconditional amplifier at any stiffness.  Controlled check: `BETA = -8e3`
+   (mathematically identical to the old sign) diverges to plate displacement
+   209x `h/2` within 320 steps, while `BETA = +8e3` is stable and accurate.
+   With the unified `-∫f·v` convention (same as demo_424) the tether is stored
+   as the physical force and the plates are held: the 320-step smoke gives
+   in-channel error **0.63 %**, plate slip <= 2 % of `u_max` — better than the
+   drag band.
+2. **An explicit-coupling time-step budget (real).**  The frozen-force penalty
+   carries a per-step gain `~ BETA*dt^2/rho`.  Measured stable at
+   `BETA = 8e3` and `1.2e4` (`BETA*dt^2/rho = 0.31` and `0.47` at
+   `dt = 0.2*DX`); larger stiffness approaches the explicit stability limit.
+
+Within the budget the tether route is now usable, but the plates keep
+**creeping** at the residual slip velocity (~0.1 cell/s; 1.3 cells after
+`t = 10 s` at `BETA = 8e3`) — they are not pinned.  For a stationary geometry
+use the **implicit** drag band (`USE_IMPLICIT_DRAG=1`, the default): measured
+in-channel error **5.33 %** at `PLATE_DRAG = 1e4`, zero drift (reproduced on
+the current code).
 
 The measurements behind this section (hold tests, the 2x2x2 driving/plate sweep,
 the duality re-measurement) are recorded in

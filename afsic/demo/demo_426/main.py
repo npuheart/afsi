@@ -202,14 +202,26 @@ if cfg.USE_IMPLICIT_DRAG:
     drag_coeff = Function(Q)
     _set_scalar(drag_coeff, cfg.plate_drag_coefficient)
 
+# 实验开关：IB_DIRECT_LOAD=1 使用与采样算子互为伴随的直接 IB 载荷
+# （b_ib = V_h·f_stored；与 demo_402/424 的验证一致；不得与弱式载荷同时使用）。
+IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "0").lower() not in ("0", "", "false", "no")
+
 if cfg.SOLVER == "chorin":
-    ns_solver = ChorinSolver(V, Q, bcu, cfg.DT, cfg.RHO, cfg.MU,
-                             drag=drag_coeff)
-    force_sign = -1.0    # ChorinSolver carries -f in the momentum equation
+    # 修复（2026-09-28）：原调用缺少 bcp 位置参数（ChorinSolver 现签名
+    # 为 (V, Q, bcu, bcp, ...)），chorin 分支此前无法运行。
+    ns_solver = ChorinSolver(V, Q, bcu, [], cfg.DT, cfg.RHO, cfg.MU,
+                             drag=drag_coeff,
+                             ib_body_force=not IB_DIRECT_LOAD)
 else:
     ns_solver = IPCSSolver(V, Q, bcu, [], cfg.DT, cfg.RHO, cfg.MU,
-                           drag=drag_coeff)
-    force_sign = +1.0    # IPCSSolver carries +f in the momentum equation
+                           drag=drag_coeff,
+                           ib_body_force=not IB_DIRECT_LOAD)
+if IB_DIRECT_LOAD:
+    # 直接载荷（与 demo_402/424 同模式）：b_ib = V_h·f_stored，
+    # V_h = (DX/VELOCITY_ORDER)²（IB 点阵间距 = DX/order）。
+    _b_direct = create_vector(V)
+    ns_solver.ib_load = _b_direct
+    _Vh = (cfg.DX / cfg.VELOCITY_ORDER) ** 2
 phase(f"solver assembly ({cfg.SOLVER})")
 
 # ==========================================================================
@@ -350,7 +362,9 @@ for step in range(n_steps):
             b1.ghostUpdate(addv=PETSc.InsertMode.ADD,
                            mode=PETSc.ScatterMode.REVERSE)
             with b1.getBuffer() as arr:
-                solid_force.x.array[: len(arr)] = force_sign * arr[:]
+                # 统一符号约定（2026-09-28，两个求解器均为 -∫f·v）：按物理值
+                # 存放装配力 b1；修正前的存放符号整体反号（见 findings 文档 §7）。
+                solid_force.x.array[: len(arr)] = arr[:]
             solid_force.x.array[:] *= cfg.SPREAD_SCALE
             solid_force.x.scatter_forward()
             # 4) spread and re-solve the momentum predictor with the new force
@@ -367,8 +381,12 @@ for step in range(n_steps):
                           f"|f_fluid|max={_fm:.4g} delta={_dn:.4g} "
                           f"spread_scale={cfg.SPREAD_SCALE:.4g}")
             if cfg.USE_BODY_FORCE:
-                ns_solver.f.x.array[:] += force_sign * rfac * f_body.x.array[:]
+                ns_solver.f.x.array[:] += rfac * f_body.x.array[:]
             ns_solver.f.x.scatter_forward()
+            if IB_DIRECT_LOAD:
+                # 直接载荷：b_ib = V_h·f_stored（= J^T F 的等价右端量）
+                ns_solver.f.x.petsc_vec.copy(result=_b_direct)
+                _b_direct.scale(_Vh)
             step_vel = float(np.max(np.abs(v_ib)))
             if it + 1 < max(cfg.IB_ITERATIONS, 1):
                 ns_solver.solve_one_step()
