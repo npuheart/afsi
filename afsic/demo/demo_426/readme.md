@@ -110,7 +110,6 @@ widening the box would silently coarsen the grid.  At `N = 32`,
 `dx = 0.03125` and the grid is `112 x 154`.
 
 ## Boundary conditions
-## Boundary conditions
 
 | boundary | condition |
 |---|---|
@@ -125,6 +124,29 @@ space is fixed by the projection step, and only incompressibility determines
 the field.  The inlet/outlet Dirichlet dofs are selected by the geometric
 channel interval on those faces, so the no-slip wall segments share the faces
 with the analytic openings.
+
+### Driving modes (2026-09-28)
+
+As run, the flow is driven by the analytic **velocity** Dirichlet on the two
+openings (the `f_body` route is off by default).  A **pressure**-driven variant
+was added:
+
+* `DRIVING=velocity` (default) — analytic velocity on the openings; unchanged,
+  bit-identical to previous runs.
+* `DRIVING=pressure` — pressure Dirichlet on the openings (velocity free
+there); `P_FACE=exact` prescribes the linear analytic pressure
+`p = -DP_DL*(x cos + y sin)` on each opening, `P_FACE=const` prescribes one
+constant per face.  IPCS uses the `ds_p`/`p_traction` fix (demo_424 scheme).
+
+Measured (320-step smoke, tether `BETA=8e3`, ipcs): in-channel relative L2 =
+**0.63 % (velocity)**, **7.9 % (pressure, exact)** and **17.2 % (pressure,
+const)**.  The pressure modes are stable but less accurate: the openings are
+oblique 30-degree cuts, and the predictor's remaining natural condition there
+(`mu du/dn = 0`) is not what the exact solution satisfies on such a cut, so
+the boundary mismatch propagates a few percent into the channel (core-window
+error 4.2 %, decaying away from the ends; end `max|u|` runs +4.5 % high).
+For benchmark-grade accuracy with pressure driving, extend the channel and/or
+impose the full exact traction (pressure + viscous part) on the openings.
 
 ## The plate penalty: explicit vs implicit
 
@@ -177,7 +199,8 @@ USE_IMPLICIT_DRAG=0 BETA=8e3 SMOKE=1 SMOKE_STEPS=320 python main.py  # tether ro
 
 Environment overrides: `N`, `DP_DL`, `THETA_DEG`, `Y_MIN`, `DT_FACTOR`,
 `T_END`, `SMOKE`, `SMOKE_STEPS`, `PLATE_DRAG`, `PLATE_DRAG_BAND`,
-`USE_IMPLICIT_DRAG`, `BETA`, `DAMP`, `SOLVER`, `IB_DIRECT_LOAD`.
+`USE_IMPLICIT_DRAG`, `BETA`, `DAMP`, `SOLVER`, `IB_DIRECT_LOAD`, `DRIVING`,
+`P_FACE`.
 
 ## Files
 

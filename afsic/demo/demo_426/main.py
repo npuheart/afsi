@@ -149,6 +149,83 @@ sel_out = (x_out[:, 1] > y_lo_out + 1e-9) & (x_out[:, 1] < y_hi_out - 1e-9)
 dofs_in_channel = dofs_inlet[sel_in]
 dofs_out_channel = dofs_outlet[sel_out]
 
+# ---------------------------------------------------------------------------
+# Driving mode.  DRIVING=velocity (default): analytic velocity Dirichlet on
+# the two channel openings (current behaviour).  DRIVING=pressure: the
+# openings carry a pressure Dirichlet and the velocity there is free (natural
+# condition); IPCS additionally gets the ds_p/p_traction fix (the same
+# construction as demo_424 -- the boundary term dropped by the volume form is
+# restored explicitly, otherwise the predictor imposes zero total traction
+# instead of the prescribed pressure).  P_FACE picks the opening pressure
+# distribution: "exact" = linear analytic p = -DP_DL*(cos,sin).x (consistent
+# with the exact solution, default); "const" = one constant per face
+# (reservoir style, inconsistent on the oblique cut).
+# ---------------------------------------------------------------------------
+DRIVING = os.environ.get("DRIVING", "velocity").lower()
+P_FACE = os.environ.get("P_FACE", "exact").lower()
+
+_ds_p_measure = None
+_p_traction = None
+_p_bc_fn = None
+_dofs_p_in = _dofs_p_out = None
+_pbase_in = _pbase_out = None
+_pscale = [0.0]
+
+if DRIVING == "pressure":
+    def _p_shape(x, y):
+        """Analytic pressure: grad p = -DP_DL*(cos, sin), i.e. p = -DP_DL*s."""
+        return -cfg.DP_DL * (x * cfg.COS_T + y * cfg.SIN_T)
+
+    dofs_p_in_all = locate_dofs_topological(Q, fdim, facet_tag.find(MARKER_INLET))
+    dofs_p_out_all = locate_dofs_topological(Q, fdim, facet_tag.find(MARKER_OUTLET))
+    coords_q = Q.tabulate_dof_coordinates()
+    xq_in = coords_q[dofs_p_in_all]
+    xq_out = coords_q[dofs_p_out_all]
+    sel_p_in = (xq_in[:, 1] > y_lo_in + 1e-9) & (xq_in[:, 1] < y_hi_in - 1e-9)
+    sel_p_out = (xq_out[:, 1] > y_lo_out + 1e-9) & (xq_out[:, 1] < y_hi_out - 1e-9)
+    _dofs_p_in = dofs_p_in_all[sel_p_in]
+    _dofs_p_out = dofs_p_out_all[sel_p_out]
+    xq_in_sel = xq_in[sel_p_in]
+    xq_out_sel = xq_out[sel_p_out]
+
+    if P_FACE == "const":
+        _pin_c = float(_p_shape(cfg.X_MIN, 0.5 * (y_lo_in + y_hi_in)))
+        _pout_c = float(_p_shape(cfg.X_MAX, 0.5 * (y_lo_out + y_hi_out)))
+
+        def _p_point(x, y):  # noqa: F811
+            return np.where(x < 0.5 * (cfg.X_MIN + cfg.X_MAX), _pin_c, _pout_c)
+    else:
+        def _p_point(x, y):  # noqa: F811
+            return _p_shape(x, y)
+
+    _pbase_in = np.asarray(_p_point(xq_in_sel[:, 0], xq_in_sel[:, 1]),
+                           dtype=float)
+    _pbase_out = np.asarray(_p_point(xq_out_sel[:, 0], xq_out_sel[:, 1]),
+                            dtype=float)
+
+    _p_bc_fn = Function(Q)
+
+    def set_pressure(alpha):
+        """Set the opening pressure Dirichlet data, scaled by the ramp."""
+        _p_bc_fn.x.array[_dofs_p_in] = alpha * _pbase_in
+        _p_bc_fn.x.array[_dofs_p_out] = alpha * _pbase_out
+
+    def _opening(x):
+        return ((np.isclose(x[0], cfg.X_MIN)
+                 & (x[1] > y_lo_in) & (x[1] < y_hi_in))
+                | (np.isclose(x[0], cfg.X_MAX)
+                   & (x[1] > y_lo_out) & (x[1] < y_hi_out)))
+
+    open_facets = np.sort(locate_entities(mesh, fdim, _opening)).astype(np.int32)
+    ft_open = meshtags(mesh, fdim, open_facets,
+                       np.ones(len(open_facets), dtype=np.int32))
+    _ds_p_measure = Measure("ds", domain=mesh, subdomain_data=ft_open)
+    _p_traction = Function(Q)   # full opening pressure, updated every step
+
+    if MPI.COMM_WORLD.rank == 0:
+        print(f"driving: pressure ({P_FACE} mode); opening dofs "
+              f"in/out = {len(_dofs_p_in)}/{len(_dofs_p_out)}")
+
 # Non-constant Dirichlet data.  dolfinx 0.10 requires a fem.Function for this
 # (a raw ndarray is interpreted as a Constant and rejected unless its size
 # equals the block size), and the working call form is
@@ -177,7 +254,17 @@ def make_bcu():
     return bcu_all + [bc_inlet, bc_outlet]
 
 
-bcu = make_bcu()
+if DRIVING == "pressure":
+    # no velocity constraint on the openings: no-slip only on the wall parts
+    # of the inlet/outlet faces; the channel intervals are pressure-driven
+    bcu = [bcu_all[2], bcu_all[3],
+           dirichletbc(u_zero, dofs_inlet[~sel_in], V),
+           dirichletbc(u_zero, dofs_outlet[~sel_out], V)]
+    bcp = [dirichletbc(_p_bc_fn, _dofs_p_in, None),
+           dirichletbc(_p_bc_fn, _dofs_p_out, None)]
+else:
+    bcu = make_bcu()
+    bcp = []
 if MPI.COMM_WORLD.rank == 0:
     print(f"channel opening dofs: inlet {len(dofs_in_channel)}, "
           f"outlet {len(dofs_out_channel)}")
@@ -209,11 +296,15 @@ IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "0").lower() not in ("0", "", 
 if cfg.SOLVER == "chorin":
     # 修复（2026-09-28）：原调用缺少 bcp 位置参数（ChorinSolver 现签名
     # 为 (V, Q, bcu, bcp, ...)），chorin 分支此前无法运行。
-    ns_solver = ChorinSolver(V, Q, bcu, [], cfg.DT, cfg.RHO, cfg.MU,
+    ns_solver = ChorinSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU,
                              drag=drag_coeff,
                              ib_body_force=not IB_DIRECT_LOAD)
 else:
-    ns_solver = IPCSSolver(V, Q, bcu, [], cfg.DT, cfg.RHO, cfg.MU,
+    # 压力驱动（DRIVING=pressure）时附带 ds_p/p_traction（被体积形式丢掉的
+    # 边界牵引项，demo_424 方案）；速度驱动时两者为 None（行为不变）。
+    ns_solver = IPCSSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU,
+                           ds_p=_ds_p_measure,
+                           p_traction=_p_traction,
                            drag=drag_coeff,
                            ib_body_force=not IB_DIRECT_LOAD)
 if IB_DIRECT_LOAD:
@@ -313,8 +404,21 @@ ib_hist = []
 for step in range(n_steps):
     t = step * cfg.DT
     rfac = ramp_factor(t)
-    # ramp the prescribed inflow (Dirichlet data are time dependent)
-    set_inflow(rfac)
+    if DRIVING == "pressure":
+        # update the opening pressure data for this step
+        if cfg.SOLVER == "chorin":
+            set_pressure(rfac)                       # full pressure datum
+        else:
+            set_pressure(rfac - _pscale[0])          # IPCS accumulates: increment
+            _set_scalar(_p_traction,
+                        lambda x, y: rfac * np.asarray(_p_point(x, y),
+                                                       dtype=float))
+            _pscale[0] = rfac
+        ns_solver.bcp = [dirichletbc(_p_bc_fn, _dofs_p_in, None),
+                         dirichletbc(_p_bc_fn, _dofs_p_out, None)]
+    else:
+        # ramp the prescribed inflow (Dirichlet data are time dependent)
+        set_inflow(rfac)
 
     # --- solve the fluid step with the force assembled at the end of the
     #     previous step (the body force plus the IB penalty) --------------
