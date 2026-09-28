@@ -18,7 +18,16 @@ _VISC_CN = os.environ.get("CHORIN_VISC_CN", "0").lower() not in ("0", "", "false
 # Solver
 class ChorinSolver:
 
-    def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw, drag=None):
+    def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw, drag=None,
+                 ib_body_force=True):
+        """Chorin projection solver.
+
+        ib_body_force : bool, default True
+            True  —— 动量弱式包含 IB 体力项 -∫f·v（原有行为）。
+            False —— 省略该弱式项，改由调用方通过 ``self.ib_load`` 每步提供一个
+                     "已装配、已含符号"的 IB 载荷 PETSc 向量（直接载荷模式，
+                     对应 main.py 的 IB_DIRECT_LOAD；两种方式不得同时使用）。
+        """
         self.bcu = bcu
         self.bcp = bcp
 
@@ -53,7 +62,8 @@ class ChorinSolver:
             F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx
         else:
             F1 += inner(mu * grad(u), grad(v)) * dx
-        F1 -= inner(f, v) * dx
+        if ib_body_force:
+            F1 -= inner(f, v) * dx
         if drag is not None:
             # Implicit linear damping: adds drag * u to the momentum LHS.
             F1 += dot(drag * u, v) * dx
@@ -121,6 +131,11 @@ class ChorinSolver:
         self.p_ = p_
         self.p_n = p_n
         self.f = f
+        # 直接载荷接口（默认 None）：由调用方每步提供一个已装配、已含符号的 IB 载荷
+        # PETSc 向量（与 b1 同布局）。在 lifting 之后、set_bc 之前加到动量右端 owned
+        # 自由度（每个全局自由度只加一次；f 经全局 gather/scatter 已完整，此处不得
+        # 再做反向 ghost 累加）。需配合 ib_body_force=False 使用，否则重复计入。
+        self.ib_load = None
 
     def solve_one_step(self):
         # Step 1: Tentative velocity step
@@ -130,6 +145,8 @@ class ChorinSolver:
         apply_lifting(self.b1, [self.a1], [self.bcu])
         self.b1.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES,
                             mode=PETSc.ScatterMode.REVERSE)
+        if self.ib_load is not None:
+            self.b1.axpy(1.0, self.ib_load)
         set_bc(self.b1, self.bcu)
         self.solver1.solve(self.b1, self.u_.x.petsc_vec)
         self.u_.x.scatter_forward()

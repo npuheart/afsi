@@ -58,3 +58,5 @@ afsic/demo/demo_402/turek_mesh.*
 /afsi-results-*.tar.gz
 /afsi-figures-*.tar.gz
 afsic/demo/demo_402/plot/smoke_chorin/history.csv
+*.DS_Store
+*history.csv
