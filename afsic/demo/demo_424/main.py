@@ -216,20 +216,31 @@ if MPI.COMM_WORLD.rank == 0:
         print(f"edge drag coefficient: {EDGE_DRAG:g} "
               f"(band {EDGE_BAND:g} m)")
 
+# 实验开关：IB_DIRECT_LOAD=1 使用与采样算子互为伴随的直接 IB 载荷
+# （b_ib = V_h·f_stored，不再经弱式质量矩阵；与 demo_402 的验证一致）。
+IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "0").lower() not in ("0", "", "false", "no")
+
 if VELOCITY_BC:
     bcu = bcu + [bc_open]
     bcp = []
 if cfg.SOLVER == "chorin":
     ns_solver = ChorinSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU,
-                             drag=drag_coeff)
-    # ChorinSolver uses -f in the momentum equation, IPCSSolver uses +f
-    force_scale = 1.0
+                             drag=drag_coeff,
+                             ib_body_force=not IB_DIRECT_LOAD)
 else:
     p_traction = Constant(mesh, PETSc.ScalarType(0.0))
     ns_solver = IPCSSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU,
                            ds_p=ds_inlet, p_traction=p_traction,
-                           drag=drag_coeff)
-    force_scale = -1.0
+                           drag=drag_coeff,
+                           ib_body_force=not IB_DIRECT_LOAD)
+
+if IB_DIRECT_LOAD:
+    # 直接载荷：由求解器在 lifting 之后、set_bc 之前把
+    # b_ib = V_h·f_stored（= J^T F 的等价右端量）加到动量右端的 owned 自由度。
+    _b_direct = create_vector(V)
+    ns_solver.ib_load = _b_direct
+    _Vh = (cfg.BOX_L / (cfg.VELOCITY_ORDER * cfg.NX)) * (
+        cfg.BOX_W / (cfg.VELOCITY_ORDER * cfg.NY))
 
 # ==========================================================================
 # Solid: tethered aortic wall (+ occluding membrane when CASE=closed)
@@ -355,11 +366,15 @@ for step in range(cfg.NSTEPS):
     assemble_vector(b1, L_hat)
     b1.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
     with b1.getBuffer() as arr:
-        solid_force.x.array[: len(arr)] = force_scale * arr[:]
+        solid_force.x.array[: len(arr)] = arr[:]
 
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object,
                                     solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
+    if IB_DIRECT_LOAD:
+        # 直接载荷：b_ib = V_h·f_stored（= J^T F 的等价右端量）
+        ns_solver.f.x.petsc_vec.copy(result=_b_direct)
+        _b_direct.scale(_Vh)
 
     if (step + 1) % max(cfg.NSTEPS // 10, 1) == 0:
         umax = np.max(np.linalg.norm(

@@ -94,7 +94,8 @@ CASE=open NY=45 T_END=0.2 python test_channel.py
 ```
 
 Environment overrides: `CASE`, `NY`, `SOLID_DIV`, `DT`, `T_END`, `RAMP_T`,
-`SOLVER`, `DP_MMHG`, `BETA`, `DIAG=1`.
+`SOLVER`, `DP_MMHG`, `BETA`, `DIAG=1`, `IB_DIRECT_LOAD=1`
+(direct adjoint IB load, the same scheme as demo_402's `IB_DIRECT_LOAD`).
 
 ## Files
 

@@ -29,7 +29,8 @@ class IPCSSolver:
         Parameters
         ----------
         ib_body_force : bool, default True
-            True  —— 动量弱式包含 IB 体力项 ∫f·v（原有行为）。
+            True  —— 动量弱式包含 -∫f·v 项（与 ChorinSolver 符号一致；调用方直接
+                     存放物理力 b1 的原值即可，无需符号补偿）。
             False —— 省略该弱式项，改由调用方通过 ``self.ib_load`` 每步提供一个
                      "已装配、已含符号"的 IB 载荷 PETSc 向量（直接载荷模式，
                      对应 main.py 的 IB_DIRECT_LOAD；两种方式不得同时使用）。        ds_p : ufl.Measure, optional
@@ -78,7 +79,9 @@ class IPCSSolver:
         if not _NO_LAG:
             F1 -= dot(p_, div(v)) * dx
         if ib_body_force:
-            F1 += dot(f, v) * dx
+            # 符号与 ChorinSolver 一致（-∫f·v）：调用方直接存放物理力 b1 的原值，
+            # 无需任何 force_scale 类补偿（demo_402/423/424/425/336 已统一）。
+            F1 -= dot(f, v) * dx
         if drag is not None:
             # Implicit linear damping: adds drag * u to the momentum LHS.
             # Used to make a fluid region behave like a porous/static medium.

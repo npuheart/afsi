@@ -35,7 +35,6 @@ N=32 CELL_TYPE=triangle python generate_mesh.py
 N=32 python main.py
 
 # Try the incremental pressure correction solver (IPCS)
-# FORCE_SCALE is set automatically to -1.0 for IPCS.
 N=32 SOLVER=ipcs python main.py
 ```
 

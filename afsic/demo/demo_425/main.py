@@ -154,13 +154,12 @@ if MPI.COMM_WORLD.rank == 0 and drag_coeff is not None:
 if cfg.SOLVER == "chorin":
     ns_solver = ChorinSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU,
                              drag=drag_coeff)
-    force_scale = 1.0          # ChorinSolver uses -f
 else:
     p_traction = Constant(mesh, PETSc.ScalarType(0.0))
     ns_solver = IPCSSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU,
                            ds_p=ds_inlet, p_traction=p_traction,
                            drag=drag_coeff)
-    force_scale = -1.0         # IPCSSolver uses +f
+# 两个求解器共享同一 IB 力符号约定（-∫f·v），b1 按物理值原样存放。
 phase("fluid mesh, BCs, solver assembly")
 
 # ==========================================================================
@@ -255,7 +254,7 @@ for step in range(n_steps):
     assemble_vector(b1, L_hat)
     b1.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
     with b1.getBuffer() as arr:
-        solid_force.x.array[: len(arr)] = force_scale * arr[:]
+        solid_force.x.array[: len(arr)] = arr[:]
 
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object,
                                     solid_force._cpp_object)

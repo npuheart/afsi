@@ -18,11 +18,10 @@ Note on force scaling
 The current afsic `IBInterpolation.solid_to_fluid` spreads the assembled FE
 force vector as point forces with a fixed Lagrangian weight w = 1.  For this
 static pressure benchmark this makes the resulting Eulerian body-force field
-one half of the continuum IB force.  We therefore multiply the assembled solid
-force by `force_scale = 1.0` (default).  An earlier version of this demo used
-a factor ~2 because the custom quadrilateral mesh used the wrong DOLFINx vertex
-ordering, which corrupted the solid FE integrals.  After fixing the mesh
-ordering no empirical force scaling is needed.
+one half of the continuum IB force.  No empirical factor is applied: an
+earlier version of this demo used a factor ~2 because the custom quadrilateral
+mesh used the wrong DOLFINx vertex ordering, which corrupted the solid FE
+integrals; after fixing the mesh ordering no empirical force scaling is needed.
 """
 import os
 from mpi4py import MPI
@@ -53,10 +52,8 @@ N = int(os.environ.get("N", "32"))        # fluid elements along one side
 STEPS = int(os.environ.get("STEPS", "100"))
 DT = float(os.environ.get("DT", "1.0e-4"))
 SOLVER = os.environ.get("SOLVER", "chorin").lower()
-# IPCSSolver uses +f in the momentum equation while ChorinSolver uses -f.
-# Keep the physical force sign consistent by flipping the default scale.
-_DEFAULT_FORCE_SCALE = "-1.0" if SOLVER == "ipcs" else "1.0"
-FORCE_SCALE = float(os.environ.get("FORCE_SCALE", _DEFAULT_FORCE_SCALE))
+# Both solvers carry -∫f·v in the momentum form (same convention), so the
+# assembled physical force b1 is stored as-is; no force_scale compensation.
 
 R = 0.25          # inner radius
 w = 0.0625        # annulus width
@@ -85,7 +82,6 @@ config = {
     "mu_s": mu_s,
     "R": R,
     "w": w,
-    "force_scale": FORCE_SCALE,
 }
 config["num_steps"] = STEPS
 
@@ -252,9 +248,8 @@ for step in range(config["num_steps"]):
     assemble_vector(b1, L_hat)
     b1.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
     with b1.getBuffer() as arr:
-        # Nodal IB spreading: no separate w is used.  The factor is an
-        # empirical calibration for this static pressure benchmark.
-        solid_force.x.array[: len(arr)] = config["force_scale"] * arr[:]
+        # Nodal IB spreading: the assembled physical force b1 is stored as-is.
+        solid_force.x.array[: len(arr)] = arr[:]
 
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object,
                                     solid_force._cpp_object)
@@ -347,7 +342,7 @@ mean_p_shift = assemble_scalar(form(p_shift * dx_fluid)) / area
 
 if MPI.COMM_WORLD.rank == 0:
     print("=" * 60)
-    print(f"N={N}, M={2 * N // 16}, force_scale={config['force_scale']}")
+    print(f"N={N}, M={2 * N // 16}")
     print(f"Steps={config['num_steps']}, dt={config['dt']}, "
           f"T={config['T']}")
     print(f"e_v_L2 = {e_v_L2:.6e}")

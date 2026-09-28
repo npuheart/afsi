@@ -177,7 +177,7 @@ bcp = [bcp_outlet]
 # 实验开关：IB 载荷处理方式（三选一，默认原始实现；不得组合使用）。
 #   默认            : 铺展 f_raw=(1/V_h)J^T F 作为节点值，由弱式经质量矩阵组装（与采样不互相伴）。
 #   IB_CONSISTENT=1 : 解 M f = V_h f_raw，使组装载荷 = J^T F（质量一致方案）。
-#   IB_DIRECT_LOAD=1: 动量弱式去掉 ∫f·v 项，直接把 b_ib = solver_sign·V_h·f_stored 加到右端
+#   IB_DIRECT_LOAD=1: 动量弱式去掉 ∫f·v 项，直接把 b_ib = V_h·f_stored 加到右端
 #                     （J^T F 的等价直接载荷，省去质量矩阵求解）。
 IB_CONSISTENT = os.environ.get("IB_CONSISTENT", "0").lower() not in ("0", "", "false", "no")
 IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "0").lower() not in ("0", "", "false", "no")
@@ -186,31 +186,19 @@ if IB_CONSISTENT and IB_DIRECT_LOAD:
 
 # Define Solver
 # SOLVER=chorin (默认) 或 SOLVER=ipcs，便于同一算例下的方法对比。
-# 注意两者的动量方程里 f 的符号相反：Chorin 的 F1 里是 -inner(f,v)（L1 得到 +f），
-# IPCS 的 F1 里是 +dot(f,v)（L1 得到 -f），所以 IPCS 的浸没边界力要取负号，
-# 与 demo_424 的 force_scale 约定一致。
+# 两个求解器的动量弱式现在使用同一符号约定（都含 -∫f·v 项），因此两种方法都直接
+# 存放物理 IB 力 b1 的原值，无需任何 force_scale 类符号补偿（已移除）。
 SOLVER = os.environ.get("SOLVER", config.get("nssolver", "chorin")).lower()
 if SOLVER.startswith("ipcs"):
     ns_solver = IPCSSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu"],
                            ib_body_force=not IB_DIRECT_LOAD)
-    force_scale = -1.0
     if MPI.COMM_WORLD.rank == 0:
         print("solver: IPCSSolver (incremental pressure correction)")
 else:
     ns_solver = ChorinSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu"],
                              ib_body_force=not IB_DIRECT_LOAD)
-    force_scale = 1.0
     if MPI.COMM_WORLD.rank == 0:
         print("solver: ChorinSolver (projection / fractional step)")
-# 求解器约定符号（ipcs: -1, chorin: +1），在 FORCE_SCALE 覆盖前捕获：
-# 直接载荷 b_ib = _ib_rhs_sign·V_h·f_stored 需要它（存储量里已含 force_scale，不再重复反号）。
-_ib_rhs_sign = force_scale
-
-# 实验开关：显式覆盖浸没边界力符号（排查 f 约定问题时用，如 FORCE_SCALE=1.0）
-if "FORCE_SCALE" in os.environ:
-    force_scale = float(os.environ["FORCE_SCALE"])
-    if MPI.COMM_WORLD.rank == 0:
-        print(f"force_scale override: {force_scale:+.1f}")
 
 # 实验开关：FREEZE_SOLID=1 冻结固体坐标（约束残差≈0 → f≈0），
 # 用于"纯流体、无固体反馈"对照实验。
@@ -337,14 +325,14 @@ ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
 #  * IB_CONSISTENT=1：解 M f = V_h f_raw（质量矩阵求解不做任何边界条件处理，全局 SPD
 #    问题），使弱式组装载荷 = J^T F，与速度采样算子 J 互为伴随。
 #  * IB_DIRECT_LOAD=1：动量弱式不含 ∫f·v 项（ib_body_force=False），由求解器在 lifting
-#    之后、set_bc 之前把 b_ib = _ib_rhs_sign·V_h·f_stored 加到右端 owned 自由度。
+#    之后、set_bc 之前把 b_ib = V_h·f_stored 加到右端 owned 自由度。
 if IB_CONSISTENT or IB_DIRECT_LOAD:
     _hx = config["Lx"] / (config["velocity_order"] * config["Nx"])
     _hy = config["Ly"] / (config["velocity_order"] * config["Ny"])
     _Vh = _hx * _hy
     if MPI.COMM_WORLD.rank == 0:
         _mode = ("mass-consistent (M f = V_h f_raw)" if IB_CONSISTENT
-                 else "direct load (b_ib = sign*V_h*f_stored)")
+                 else "direct load (b_ib = V_h*f_stored)")
         print(f"IB load fix: {_mode} enabled (V_h={_Vh:g})")
 if IB_CONSISTENT:
     _A_mass = assemble_matrix(form(inner(TrialFunction(V), TestFunction(V)) * dx))
@@ -407,7 +395,7 @@ for step in range(config["num_steps"]):
         assemble_vector(b1, L_hat)
         b1.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
         with b1.getBuffer() as arr:
-            solid_force.x.array[: len(arr)] = force_scale * arr[:]
+            solid_force.x.array[: len(arr)] = arr[:]
         ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
         ns_solver.f.x.scatter_forward()
         if IB_CONSISTENT:
@@ -417,10 +405,9 @@ for step in range(config["num_steps"]):
             _ksp_mass.solve(_b_ib, ns_solver.f.x.petsc_vec)
             ns_solver.f.x.scatter_forward()
         elif IB_DIRECT_LOAD:
-            # 直接载荷方案：b_ib = solver_sign·V_h·f_stored = J^T F 的等价右端量
-            # （存储量已含 force_scale，这里用求解器约定符号 _ib_rhs_sign，不再重复反号）。
+            # 直接载荷方案：b_ib = V_h·f_stored = J^T F 的等价右端量。
             ns_solver.f.x.petsc_vec.copy(result=_b_direct)
-            _b_direct.scale(float(_ib_rhs_sign) * _Vh)
+            _b_direct.scale(_Vh)
 
     data_log = {}
     if time_manager.should_output(step):

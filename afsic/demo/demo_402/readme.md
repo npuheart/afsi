@@ -53,7 +53,7 @@ $RUN python -B -u generate_mesh.py
 
 # 2) 直接用 main.py（默认 Chorin，完整 T=10 s 需要很久）
 SOLVER=chorin $RUN python -B -u main.py
-SOLVER=ipcs   $RUN python -B -u main.py        # IPCS（含 f 的符号约定处理）
+SOLVER=ipcs   $RUN python -B -u main.py        # IPCS（增量压力修正）
 
 # 3) 脱离网络跑 + 记录对比曲线（推荐）：run_compare.py
 SOLVER=chorin T=0.5 FPS=100 $RUN python -B -u run_compare.py
@@ -80,9 +80,9 @@ SOLVER=ipcs   T=0.5 FPS=100 $RUN python -B -u run_compare.py
 
 ### 求解器切换（`SOLVER=`）
 
-`main.py` 里 IPCS 与 Chorin 的动量方程中 `f` 的符号相反（Chorin 的 `F1` 是
-`-inner(f,v)`，`rhs` 得到 `+f`；IPCS 是 `+dot(f,v)`，`rhs` 得到 `-f`），所以 IPCS 的浸没
-边界力要乘 `force_scale = -1`；切换后两者在早期时刻的场量差 0.02 %（见下面结果）。
+两个求解器的动量弱式现在使用同一符号约定（都含 `-∫f·v` 项），浸没边界力按物理值
+原样存放，不再需要 `force_scale` 补偿（已从代码中移除）；切换后两者在早期时刻的
+场量差 0.02 %（见下面结果）。
 
 ## 文件
 
@@ -123,7 +123,7 @@ $RUN python -B plot/compare_from_output.py plot/coarse_chorin plot/coarse_ipcs \
 
 1. **发散前两者一致**：t = 0.01 s 时 `max|u|/scale` = 1.913（Chorin）vs 1.912（IPCS），
    `u_L2/scale²` = 9399 vs 9404（差 0.05 %），尾尖位移差 0.2 %。说明 `SOLVER=` 切换时的
-   浸没边界力符号约定（IPCS 取 `force_scale = -1`）是对的。
+   浸没边界力符号约定是对的（现已统一到求解器内部，无需 `force_scale`）。
 2. **IPCS 在前 0.1 s 内因 IB 处的局部速度尖峰而发散**，Chorin 稳定：
 
    | 网格 / dt | IPCS 首发散时刻 | 尖峰位置 | 峰值 max\|u\| | 之后 | Chorin |
@@ -151,6 +151,22 @@ $RUN python -B plot/compare_from_output.py plot/coarse_chorin plot/coarse_ipcs \
 
 > 注意：本结论**只针对这个算例/这套显式 IB 耦合**，不能推广成"IPCS 不行"——demo_423/424/426
 > 里 IPCS 用在别的配置上是正常的。
+
+### IPCS 稳定化：IB 载荷一致性修复（已解决上面第 2 条的发散）
+
+上面的自激来自 IB 载荷与速度采样算子**不互为伴随**：旧路径把铺展场 `f` 经质量矩阵组装
+（`M f`）进弱式，而速度采样算子是 `J`，两者功失配实测 −2.3 %~−5.3 %，闭环
+`u → 固体运动 → 惩罚力 → 铺展 → 滞后压力` 把它放大成自激。`main.py` 内置两个修复
+（互为等价、任选其一，不得同开）：
+
+- `IB_DIRECT_LOAD=1`（推荐）：动量弱式去掉 `∫f·v` 项，直接把 `b_ib = V_h·f_stored`
+  （= `J^T F` 的等价右端量）加到动量右端；**已验证 IPCS 稳定跑满 T = 10 s**
+  （200000 步、KSP 零失败，结果在 `plot/full_ipcs_direct/`）。
+- `IB_CONSISTENT=1`：先解 `M f = V_h f_raw` 再经弱式组装（与上者数值等价、稍慢）；
+  已确认 T = 0.5 s（`plot/ksp_check/ipcs_consist_T05/`，与 `ipcs_direct_T05`
+  一致到 1e-10 量级）。
+
+不开启任一项时保留默认装配式载荷（未修复路径，即上面第 2 条的发散行为）供对照。
 
 ## 出厂密度 220×41 跑满 ramp（T = 2 s）实测
 

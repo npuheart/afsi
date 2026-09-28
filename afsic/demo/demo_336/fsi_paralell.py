@@ -133,7 +133,21 @@ bcp = [bcp_point]
 
 
 # Define Solver
-ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'])
+# SOLVER=chorin（默认）/ ipcs；IB_DIRECT_LOAD=1 使用与采样算子互为伴随的直接 IB 载荷
+# （b_ib = V_h * f_stored，不再经弱式质量矩阵；与 demo_402 的验证一致）。
+SOLVER = os.environ.get("SOLVER", "chorin").lower()
+IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "0").lower() not in ("0", "", "false", "no")
+if SOLVER.startswith("ipcs"):
+    ns_solver = IPCSSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'],
+                           ib_body_force=not IB_DIRECT_LOAD)
+else:
+    ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'],
+                             ib_body_force=not IB_DIRECT_LOAD)
+if IB_DIRECT_LOAD:
+    _b_direct = create_vector(V)
+    ns_solver.ib_load = _b_direct
+    _Vh = ((config["Lx"] / (config["velocity_order"] * config["Nx"]))
+           * (config["Ly"] / (config["velocity_order"] * config["Ny"])))
 
 ###########################################################################################################
 ##########################################  Structure  ####################################################
@@ -164,7 +178,8 @@ FF = grad(solid_coords)
 
 # L_hat = form(-inner(mu_s*(FF-inv(FF).T) + lambda_s*ln(det(FF))*inv(FF).T, grad(dVs))*dx)
 L_hat = form(-inner(mu_s*(FF-inv(FF).T), grad(dVs))*dx)
-b1 = create_vector(L_hat)
+# dolfinx 0.10: create_vector 需传函数空间（原为 create_vector(L_hat)）
+b1 = create_vector(Vs)
 
 ###########################################################################################################
 ##########################################  Interaction  ##################################################
@@ -220,6 +235,10 @@ for step in range(config['num_steps']):
         solid_force.x.array[:len(arr)] = arr[:]
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
+    if IB_DIRECT_LOAD:
+        # 直接载荷：b_ib = V_h * f_stored（= J^T F 的等价右端量）
+        ns_solver.f.x.petsc_vec.copy(result=_b_direct)
+        _b_direct.scale(_Vh)
 
     data_log = {}
     if time_manager.should_output(step):

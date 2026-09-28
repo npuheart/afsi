@@ -78,7 +78,8 @@ class IPCSSolverTraction(IPCSSolver):
                     v) * dx
         F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx
         F1 -= dot(p_, div(v)) * dx
-        F1 += dot(f, v) * dx
+        # IB force sign follows the unified solver convention (-∫f·v).
+        F1 -= dot(f, v) * dx
         # the boundary term that the volume form drops, with p = p_D known
         F1 += dot(p_traction * n, v) * ds_p
 
