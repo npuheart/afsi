@@ -1,0 +1,21 @@
+demo_426 — flow through a slanted channel (2-D IB benchmark)
+domain          : [0.0, 2.25] x [0.0, 3.1]
+channel         : theta=30 deg, h=1 m, D=h/cos=1.154701 m (36.95 cells)
+inlet  (x=0) : y in [0.100000, 1.433333]  (height 1.333333)
+outlet (x=2.25) : y in [1.399038, 2.732371]  (height 1.333333)
+fluid           : rho=1, mu=1, nu=1
+driving         : -dp/ds = 1 Pa/m along the axis (body force, NOT a pressure BC)
+profile         : A=0.5, u_max=0.166667 m/s (paper quotes 0.25; see docstring)
+grid            : N=32, dx=0.03125, nx x ny = 72 x 99 (box 2.25 x 3.09375)
+time            : dt=0.00625 (= 0.2 dx), steps=320 (T_end 2 s)
+scales          : Re=0.1925, Courant=0.0333, nu*dt/dx^2=6.4000
+penalty         : BETA=8000, DAMP=1000, ds_lag=0.015625 (dx/2)
+solver          : chorin
+------------------------------------------------------------------------------
+channel opening dofs: inlet 85, outlet 85
+  [setup] fluid mesh, boundaries, BC dofs                   0.01 s (total    0.01 s)
+Traceback (most recent call last):
+  File "/Users/pengfei/GitHub/afsi/afsic/demo/demo_426/main.py", line 206, in <module>
+    ns_solver = ChorinSolver(V, Q, bcu, cfg.DT, cfg.RHO, cfg.MU,
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: ChorinSolver.__init__() missing 1 required positional argument: 'mu_raw'

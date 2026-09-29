@@ -1,0 +1,64 @@
+demo_426 — flow through a slanted channel (2-D IB benchmark)
+domain          : [0.0, 2.25] x [0.0, 3.1]
+channel         : theta=30 deg, h=1 m, D=h/cos=1.154701 m (36.95 cells)
+inlet  (x=0) : y in [0.100000, 1.433333]  (height 1.333333)
+outlet (x=2.25) : y in [1.399038, 2.732371]  (height 1.333333)
+fluid           : rho=1, mu=1, nu=1
+driving         : -dp/ds = 1 Pa/m along the axis (body force, NOT a pressure BC)
+profile         : A=0.5, u_max=0.166667 m/s (paper quotes 0.25; see docstring)
+grid            : N=32, dx=0.03125, nx x ny = 72 x 99 (box 2.25 x 3.09375)
+time            : dt=0.00625 (= 0.2 dx), steps=320 (T_end 2 s)
+scales          : Re=0.1925, Courant=0.0333, nu*dt/dx^2=6.4000
+penalty         : BETA=-8000, DAMP=1000, ds_lag=0.015625 (dx/2)
+solver          : ipcs
+------------------------------------------------------------------------------
+channel opening dofs: inlet 85, outlet 85
+  [setup] fluid mesh, boundaries, BC dofs                   0.03 s (total    0.03 s)
+  [setup] solver assembly (ipcs)                            0.09 s (total    0.13 s)
+  [setup] solid mesh (1336 triangles)                       0.02 s (total    0.15 s)
+ld: warning: duplicate -rpath '/Users/pengfei/miniconda3/envs/afsi-dolfinx/lib' ignored
+  [setup] IB mesh + map on the 2-D plates                   1.46 s (total    1.61 s)
+  step      1/320  t=0.00625  max|u|=0.000000e+00
+  step     32/320  t=0.2  max|u|=5.042263e-01
+  step     64/320  t=0.4  max|u|=1.166239e+01
+  step     96/320  t=0.6  max|u|=9.776402e+00
+  step    128/320  t=0.8  max|u|=8.984882e+00
+  step    160/320  t=1  max|u|=5.252067e+00
+  step    192/320  t=1.2  max|u|=4.052767e+00
+  step    224/320  t=1.4  max|u|=3.324731e+00
+  step    256/320  t=1.6  max|u|=2.339884e+00
+  step    288/320  t=1.8  max|u|=1.672090e+00
+  step    320/320  t=2  max|u|=1.276511e+00
+==============================================================================
+verification report  (demo_426, N=32, dx=0.03125, theta=30 deg, ipcs)
+==============================================================================
+  u_max analytic                                   1.666667e-01 m/s
+  (benchmark text quotes)                          2.500000e-01 m/s
+-- velocity error ------------------------------------------------
+  relative L2 error (whole box)                    1.573728e+00 
+  Linf error (whole box)                           1.977063e+00 m/s
+  mean |u_exact| (whole box)                       4.379634e-01 m/s
+    NOTE: the whole-box numbers are NOT an accuracy measure for this
+    case.  The exact parabola grows without bound OUTSIDE the channel
+    (it reaches 2.67 in this box) while the physical flow there is
+    stagnant, so this metric is dominated by a spurious reference.
+    The CHANNEL numbers below are the meaningful ones.
+  relative L2 error (channel only)                 3.932031e+00 
+  Linf error (channel only)                        1.055316e+00 m/s
+-- profile across the channel (Fig. 23) ----------------------------
+  |u| Linf error across the profile                6.597163e-01 m/s
+  |u| relative L2 error across the profile         3.600800e+00 
+  numerical u_max                                  7.127336e-01 m/s
+  relative error in u_max                          3.276401e+00 
+  u_max location (xi)                              1.905256e-01 m
+-- immersed plates -------------------------------------------------
+  plate max |displacement| from reference          3.266390e+00 m
+  plate Lagrangian nodes                           3.350000e+03 
+  fluid |u| on the plates (should be 0)            1.252863e+00 m/s
+  fluid mean |u| on the plates                     2.698757e-01 m/s
+==============================================================================
+history written to /Users/pengfei/GitHub/afsi/afsic/demo/demo_426/plot/N32_ipcs_smoke/history.csv
+verify.json written to /Users/pengfei/GitHub/afsi/afsic/demo/demo_426/plot/N32_ipcs_smoke/verify.json
+solid displacement: max 3.266390e+00  mean 1.711382e+00  = 209.05 x (h/2)
+solid output written to /Users/pengfei/GitHub/afsi/afsic/demo/demo_426/plot/N32_ipcs_smoke/solid_*.xdmf
+elapsed 39.2 s
