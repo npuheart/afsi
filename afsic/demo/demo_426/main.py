@@ -264,7 +264,25 @@ if DRIVING == "pressure":
            dirichletbc(_p_bc_fn, _dofs_p_out, None)]
 else:
     bcu = make_bcu()
-    bcp = []
+    # 压力基准（gauge，2026-09-29）：速度驱动时压力没有任何 Dirichlet 数据，
+    # 校正方程是纯 Neumann 问题（解只到相差一个常数）；而 IPCS 存的是累积量
+    # （p_ += phi），在奇异系统上每步的伪常数会累积——320 步实测漂移到 ~7.8e11，
+    # 让存出的 pressure.xdmf 形同常数。钉住一个参考自由度使压力系统非奇异、p_
+    # 保持物理值（相差一个常数不影响动力学：动量方程里只有 grad(p)）。
+    # 参考点取"通道内、距入口沿对角方向 3 格的内部节点"（避开开口边缘的边界层），
+    # 使输出场与解析解只差一个小常数（~0.3），便于直接对照。
+    _q_dof_xyz = Q.tabulate_dof_coordinates()
+    _p_ref_target = np.array([cfg.X_MIN + 3.0 * cfg.DX,
+                              y_lo_in + 3.0 * cfg.DX])
+    _p_ref_dof = int(np.argmin(np.linalg.norm(
+        _q_dof_xyz[:, :2] - _p_ref_target, axis=1)))
+    _p_ref_fn = Function(Q)                    # 恒零的基准值
+    bcp = [dirichletbc(_p_ref_fn,
+                       np.array([_p_ref_dof], dtype=np.int32), None)]
+    if MPI.COMM_WORLD.rank == 0:
+        print(f"pressure gauge: ref dof {_p_ref_dof} at "
+              f"({_q_dof_xyz[_p_ref_dof, 0]:.4g}, "
+              f"{_q_dof_xyz[_p_ref_dof, 1]:.4g})")
 if MPI.COMM_WORLD.rank == 0:
     print(f"channel opening dofs: inlet {len(dofs_in_channel)}, "
           f"outlet {len(dofs_out_channel)}")
@@ -278,10 +296,13 @@ phase("fluid mesh, boundaries, BC dofs")
 # ==========================================================================
 # Solver
 # ==========================================================================
-# The flow is driven by the body force, so the pressure has NO Dirichlet data
-# anywhere: bcp is empty and the pressure null space is handled by the
-# projection step (the pressure is fixed up to a constant, which is all that is
-# needed when no pressure datum is prescribed).
+# Pressure datum: the velocity-driven runs pin ONE pressure dof to zero (see
+# the "pressure gauge" branch above) so the pressure system is non-singular and
+# the accumulated IPCS p_ stays physical; the dynamics only see grad(p), so
+# the datum does not change the flow.  (Before 2026-09-29 bcp was empty and p_
+# on the singular pure-Neumann system drifted by ~7.8e11 after 320 steps.)
+# Pressure-driven runs prescribe the analytic opening pressure instead (bcp
+# above).
 # Implicit plate penalty: `drag` is assembled into the momentum LHS, so unlike
 # the body-force route it carries no time-step restriction.
 drag_coeff = None

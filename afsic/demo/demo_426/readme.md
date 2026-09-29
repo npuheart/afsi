@@ -118,12 +118,21 @@ widening the box would silently coarsen the grid.  At `N = 32`,
 | every other boundary segment | no-slip `u = 0` |
 | the two plates inside the box | immersed-boundary penalty |
 
-The flow is driven by the **body force**, not by a pressure condition, so no
-pressure BC is imposed anywhere: the pressure has no Dirichlet data, its null
-space is fixed by the projection step, and only incompressibility determines
-the field.  The inlet/outlet Dirichlet dofs are selected by the geometric
-channel interval on those faces, so the no-slip wall segments share the faces
-with the analytic openings.
+The openings carry the analytic **velocity** Dirichlet (the `f_body` route is
+off by default) and every other boundary segment is no-slip; the inlet/outlet
+dofs are selected by the geometric channel interval on those faces, so the
+wall segments share the faces with the openings.
+
+Pressure has no *physical* datum in the velocity-driven runs — only `grad(p)`
+enters the momentum equations — but the solver pins ONE reference dof instead
+of leaving the pure-Neumann system singular.  The IPCS stores the ACCUMULATED
+correction (`p_ += phi`); with no datum the singular system lets that constant
+drift every step, and the saved `pressure.xdmf` degenerated into a ~`7.8e11`
+constant (measured 2026-09-28).  Since 2026-09-29 the dof 3 cells diagonally
+inside the inlet opening is fixed to `p = 0`, which makes the system
+non-singular and the stored field physical: in-channel it equals
+`0.989 * p_analytic + 0.33` (corr `0.9995`, span 3.1).  Pressure-driven runs
+prescribe the analytic opening pressure instead (see below).
 
 ### Driving modes (2026-09-28)
 
@@ -131,8 +140,11 @@ As run, the flow is driven by the analytic **velocity** Dirichlet on the two
 openings (the `f_body` route is off by default).  A **pressure**-driven variant
 was added:
 
-* `DRIVING=velocity` (default) — analytic velocity on the openings; unchanged,
-  bit-identical to previous runs.
+* `DRIVING=velocity` (default) — analytic velocity on the openings; one
+  reference pressure dof is pinned to `p = 0` (see *Boundary conditions*).
+  Re-verified against the pre-pin runs (320-step tether smoke): in-channel L2
+  `0.6260 %` (was `0.6277 %`), plate slip `+0.3 %`, plate drift `+0.2 %` — the
+  same solution reached through a slightly different linear-solver path.
 * `DRIVING=pressure` — pressure Dirichlet on the openings (velocity free
 there); `P_FACE=exact` prescribes the linear analytic pressure
 `p = -DP_DL*(x cos + y sin)` on each opening, `P_FACE=const` prescribes one
