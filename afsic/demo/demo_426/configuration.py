@@ -2,59 +2,50 @@
 
 Benchmark
 ---------
-Grüninger et al., "An immersed boundary method for the simulation of ..." (the
-two-dimensional slanted-channel case): steady plane-Poiseuille flow through a
-channel inclined at theta = pi/6 about the origin, in the rectangular domain
-Omega = [0,1] x [-0.25,2], with the two channel walls handled by an immersed
-boundary penalty so that the walls are deliberately NOT grid-aligned.  The
-point of the benchmark is to compare how different IB kernels reproduce the
-exact solution inside a confined stationary geometry.
+The two-dimensional slanted-channel benchmark as used by Li et al. (2025),
+section "4.3.1 Slanted channel flow" (originating from Gruninger et al.,
+2024, section "4.1 Oldroyd-B flow through an inclined channel"): steady
+plane-Poiseuille flow through a channel inclined at theta = pi/6, in the
+rectangular domain Omega = [0,1] x [-0.25,2], with the two channel walls
+handled by an immersed-boundary penalty so that the walls are deliberately
+NOT grid-aligned.  The point of the benchmark is to compare how different IB
+kernels reproduce the exact solution inside a confined stationary geometry.
 
-Exact solution
---------------
-With the axial coordinate measured across the channel,
+Exact solution (benchmark Eq. (48))
+-----------------------------------
+With the wall coordinate
 
-    xi(x,y) = y*cos(theta) - x*sin(theta)
+    xi~(x,y) = y*cos(theta) - x*sin(theta)
 
 the exact steady state is unidirectional plane Poiseuille along the channel:
 
-    u(x,y) = -A * xi * (xi - h) * cos(theta)
-    v(x,y) = -A * xi * (xi - h) * sin(theta)
+    u(x,y) = (dP/L)/(2*mu) * xi~ * (h - xi~) * cos(theta)
+    v(x,y) = (dP/L)/(2*mu) * xi~ * (h - xi~) * sin(theta)
 
 which satisfies div(u) = 0 exactly and balances the constant body force
 
     f = -(dP/L) * (cos(theta), sin(theta))
 
 (the pressure gradient points opposite to the flow).  The channel walls sit at
-xi = 0 and xi = h, where the profile vanishes by construction, so the no-slip
-condition on the walls is exactly compatible with the analytic field.
+xi~ = 0 and xi~ = h = 1, where the profile vanishes by construction, so the
+no-slip condition on the walls is exactly compatible with the analytic field.
+Measured from the centreline (xi = xi~ - h/2, walls at xi = +-h/2) this is the
+usual parabola, used below.
 
-Self-consistency of A (IMPORTANT)
----------------------------------
-The benchmark paper writes the coefficient as (dP/L)/(2*mu*L).  That is not
-dimensionally consistent: A must have units of 1/(length^2), so a length must
-appear squared in the denominator.  With the standard plane-Poiseuille result
+Consistency of U_max (CHECKED)
+------------------------------
+With the benchmark's parameters (mu = 0.5, dP/L = 1, h = 1) the peak speed is
 
-    u_max = (dP/L) * (D/2)^2 / (2*mu)
+    U_max = (dP/L) * h^2 / (8*mu) = 0.25
 
-the self-consistent coefficient is
+which matches the U_max = 0.25 quoted in the benchmark text.  (An earlier
+version of this demo placed the channel differently: the CENTRELINE passed
+through the origin and the perpendicular width was D = h/cos(theta); in that
+geometry the quoted U_max appeared to disagree with (dP/L, mu).  The geometry
+was corrected on 2026-09-30 to the one above: the perpendicular channel width
+is h, and the LOWER wall (xi~ = 0) passes through the origin.)
 
-    A = (dP/L) / (2*mu*h)        [h = 1 here, so numerically A = dP/L/(2*mu)]
-
-which gives u_max = A*(D/2)^2.  Taking the paper's stated values mu = 0.5 and
-dP/L = 1.0 then fixes A = 1.0 and, with D/2 = h/(2*cos(theta)) = 0.57735,
-
-    u_max = 1.0 * 0.57735^2 = 1/3 = 0.333333
-
-NOT the 0.25 quoted in the paper.  The two stated numbers (dP/L = 1, mu = 0.5)
-and U_max = 0.25 cannot both hold; the 25 % gap is resolved here by keeping the
-paper's *primary* parameters (mu, dP/L, h, theta, domain, N, dt) and treating
-U_max as a DERIVED quantity, so the discrete problem is driven by exactly the
-same body force as the reference solution and the comparison is a genuine
-discretisation-error study.  To reproduce U_max = 0.25 instead one would need
-dP/L = 0.75 with mu = 0.5; set DP_DL=0.75 in the environment to do that.
-
-All quantities are SI-consistent (the benchmark is in normalised units).
+All quantities are in the benchmark's normalised units.
 """
 import math
 import os
@@ -64,37 +55,32 @@ import numpy as np
 # --------------------------------------------------------------------------
 # Space-time domain
 # --------------------------------------------------------------------------
-# The benchmark's box is 2 x 2 with the channel entering on the left and leaving
-# on the right.  It is TRANSLATED here so its lower-left corner sits on the
-# origin, as an AFSI case requires:
+# The benchmark's box is Omega = [0,1] x [-0.25,2].  It is TRANSLATED here so
+# its lower-left corner sits on the origin, as an AFSI case requires:
 #
-#     paper frame :  x in [-0.25, 2] ,  y in [-1, 1]
-#     shift       :  X = x + 0.25 ,  Y = y + SHIFT_Y
-#     this demo   :  X in [0, 2.25] ,  Y in [0, 2.5]
-#
-# The paper's box is 2.5 units tall and its width is kept here, but its HEIGHT
-# is not enough: over X in [0, 2.25] the channel spans 2.45271 in Y, so the
-# quoted 2.0-tall box cuts the lower plate at (1.155, 0).  SHIFT_Y is therefore
-# chosen to centre the channel in a 2.5-tall box (0.15 of margin top and
-# bottom) while keeping the lower-left corner on the origin.
+#     paper frame :  x in [0, 1] ,  y in [-0.25, 2]
+#     shift       :  X = x ,  Y = y + 0.25
+#     this demo   :  X in [0, 1] ,  Y in [0, 2.25]
 #
 # The shift is NOT along the channel axis, so it does not leave the geometry
 # invariant: the across-channel coordinate moves and the exact velocity has to
 # be carried over with the new coordinates (see xi/analytic below).  What it
-# does preserve is containment.  In this frame the two plates run
+# does preserve is containment: in this frame the two plates run
 #
-#     lower  xi=-D/2 :  Y = 0.18900 (X=0) -> 1.34370 (X=2.25)
-#     upper  xi=+D/2 :  Y = 1.52233 (X=0) -> 2.67703 (X=2.25)
+#     lower  (xi~=0) :  Y = 0.25000 (X=0) -> 0.82735 (X=1)
+#     upper  (xi~=h) :  Y = 1.40470 (X=0) -> 1.98205 (X=1)
 #
-# so both plates run the full width, terminate on the left/right faces, and the
-# channel stays inside the box.
+# so both plates run the full width, terminate exactly on the left/right faces
+# (both ends are complete channel cross-sections), and the channel stays inside
+# the box, with 0.25 of margin below the lower plate corner and 0.268 above the
+# upper plate at the outlet.
 X_MIN = float(os.environ.get("X_MIN", "0.0"))
-X_MAX = float(os.environ.get("X_MAX", "2.25"))
+X_MAX = float(os.environ.get("X_MAX", "1.0"))
 Y_MIN = float(os.environ.get("Y_MIN", "0.0"))
-Y_MAX = float(os.environ.get("Y_MAX", "3.1"))
+Y_MAX = float(os.environ.get("Y_MAX", "2.25"))
 
 # Origin of the benchmark frame expressed in this frame.
-SHIFT_X = 0.25
+SHIFT_X = 0.0
 
 # --------------------------------------------------------------------------
 # Slanted channel
@@ -103,51 +89,43 @@ THETA_DEG = float(os.environ.get("THETA_DEG", "30.0"))
 THETA = math.radians(THETA_DEG)
 COS_T, SIN_T = math.cos(THETA), math.sin(THETA)
 
-H_CHANNEL = 1.0                       # channel width in its horizontal config
-D_CHANNEL = H_CHANNEL / COS_T         # true (perpendicular) channel width
-R_HALF = 0.5 * D_CHANNEL              # >0 : xi in [0, h]; profile peaks at r/2
+H_CHANNEL = 1.0                    # perpendicular channel width h (= 1)
+D_CHANNEL = H_CHANNEL / COS_T      # "slanted channel width" D = h/cos(theta):
+                                   # the VERTICAL distance between the plates
+R_HALF = 0.5 * H_CHANNEL           # perpendicular half-width: walls at xi = +-R
 
-# SHIFT_Y is DERIVED, not hand-picked, so that the lowest point of the lower
-# plate sits a small margin above Y=0.  The lower plate is
-#     Y = SHIFT_Y + (X*sin - R)/cos
-# which increases with X, so its minimum over the box is at X = X_MIN; that is
-# what guarantees the lower-left corner sits on the origin with the whole
-# channel inside.
-PLATE_MARGIN = 0.1
-# lower plate at X = X_MIN:  Y = SHIFT_Y + ((X_MIN - SHIFT_X)*sin - R)/cos
-# require that to equal PLATE_MARGIN:
-SHIFT_Y = float(os.environ.get("SHIFT_Y", repr(
-    PLATE_MARGIN - ((X_MIN - SHIFT_X) * SIN_T - R_HALF) / COS_T)))
+# SHIFT_Y places the paper-frame box [0,1] x [-0.25,2] on the origin:
+#     Y = y + SHIFT_Y with SHIFT_Y = 0.25
+# so the box bottom y = -0.25 becomes Y = 0.  The channel's lower wall
+# (xi~ = 0, which passes through the paper-frame origin) accordingly meets the
+# inlet face at Y = SHIFT_Y = 0.25.
+SHIFT_Y = float(os.environ.get("SHIFT_Y", "0.25"))
 
 # --------------------------------------------------------------------------
 # Physics
 # --------------------------------------------------------------------------
-# NOTE ON UNITS
-# -------------
-# The benchmark states its parameters in CGS: H = 1.0 cm, rho = 1.0 g/cm^3,
-# mu_s = mu_p = 0.05 Pa.s (total 0.1 Pa.s = 1.0 poise), lambda = 0.1 s.  This
-# demo therefore runs in cm, g, s:
-#     length cm   mass g   time s
-#     viscosity poise (= g/(cm s))   density g/cm^3
-#     velocity cm/s   body force dyn/cm^3
-# 1 Pa.s = 10 poise, so mu_s + mu_p = 0.1 Pa.s = 1.0 poise.
-# With H = 1.0 cm the profile amplitude is A = (dP/L)/(2 mu H) = 0.5, giving
-# u_max = A (D/2)^2 = 0.1666667 cm/s and Re = rho*u_max*D/mu = 0.1925.
-RHO = 1.0        # g/cm^3  (benchmark: 1.0 g/cm^3)
-MU = 1.0         # poise   (benchmark: mu_s + mu_p = 0.05 + 0.05 Pa.s = 1.0 P)
+# The benchmark's normalised parameters: rho = 1, mu = 0.5, dP/L = 1.  The
+# solver is unit-agnostic; lengths (and hence DX) are "metres" only by
+# convention.
+RHO = 1.0        # benchmark: 1.0
+MU = float(os.environ.get("MU", "0.5"))         # benchmark: 0.5
 DP_DL = float(os.environ.get("DP_DL", "1.0"))   # -dp/ds along the channel axis
 
-# Self-consistent profile amplitude and the resulting peak velocity.
-A_COEF = DP_DL / (2.0 * MU * H_CHANNEL)
+# Profile coefficient: with xi measured from the CENTRELINE (walls at +-R_HALF)
+#     u_s = (dP/L)/(2*mu) * (R_HALF^2 - xi^2)
+# which is exactly Eq. (48) rewritten about the centreline, and peaks at
+#     U_max = (dP/L)/(2*mu) * (h/2)^2 = (dP/L) h^2 / (8 mu) = 0.25
+# (mu = 0.5, dP/L = 1, h = 1) -- the value quoted by the benchmark.
+A_COEF = DP_DL / (2.0 * MU)
 U_MAX = A_COEF * R_HALF**2
 U_MAX_PAPER = 0.25                    # as quoted in the benchmark text
 
 # --------------------------------------------------------------------------
 # Grid and time stepping
 # --------------------------------------------------------------------------
-# dx is fixed by the benchmark's N = L/N convention with L = 1, and the cell
-# count is then DERIVED from the (extended) box -- not the other way round,
-# otherwise widening the box would silently coarsen the grid.
+# dx is fixed by the benchmark's dx = L/N convention with L = 1; the cell
+# counts are derived from the box.  At N = 32 the box [0,1] x [0,2.25] is
+# exactly 32 x 72 cells (no padding needed).
 N = int(os.environ.get("N", "32"))
 DX = 1.0 / N                          # = 0.03125
 NX = int(round((X_MAX - X_MIN) / DX))
@@ -156,7 +134,7 @@ BOX_L = float(NX) * DX                # >= X_MAX - X_MIN
 BOX_H = float(NY) * DX                # >= Y_MAX - Y_MIN
 CELLS_PER_UNIT = 1.0 / DX
 
-DT_FACTOR = float(os.environ.get("DT_FACTOR", "0.2"))   # benchmark: dt = 0.2h
+DT_FACTOR = float(os.environ.get("DT_FACTOR", "0.15"))  # benchmark: dt = 0.15 dx
 DT = DT_FACTOR * DX
 if os.environ.get("DT_OVERRIDE"):
     DT = float(os.environ["DT_OVERRIDE"])
@@ -228,7 +206,7 @@ FORCE_ORDER = 2          # Lagrange order on the Lagrangian (plate) mesh
 # --------------------------------------------------------------------------
 # Time loop
 # --------------------------------------------------------------------------
-T_END = float(os.environ.get("T_END", "2.0"))   # benchmark: 20*lambda = 2.0 s
+T_END = float(os.environ.get("T_END", "2.0"))   # run to steady state (t >> RAMP_T)
 # Linear ramp of the driving from rest; the benchmark starts the channel from
 # rest and runs to steady state.  Default = lambda = 0.1 s.  0 disables.
 RAMP_T = float(os.environ.get("RAMP_T", "0.1"))
@@ -292,12 +270,16 @@ CHANNEL_CELLS = D_CHANNEL / DX
 def xi(X, Y):
     """Across-channel coordinate in THIS frame, measured from the centreline.
 
-    In the benchmark frame it is ``xi = y*cos(theta) - x*sin(theta)`` with the
-    plates at ``xi = +-D/2``.  Substituting ``x = X - SHIFT_X`` and
-    ``y = Y - SHIFT_Y`` gives the form used here:
+    In the benchmark frame the wall coordinate is
 
-        xi = (Y - SHIFT_Y)*cos(theta) - (X - SHIFT_X)*sin(theta)
+        xi~ = y*cos(theta) - x*sin(theta),    plates at xi~ = 0 and xi~ = h.
 
+    Substituting ``x = X - SHIFT_X``, ``y = Y - SHIFT_Y`` and measuring from
+    the CENTRELINE (xi~ = h/2 = R_HALF) gives the form used here:
+
+        xi = (Y - SHIFT_Y)*cos(theta) - (X - SHIFT_X)*sin(theta) - R_HALF
+
+    so the plates sit at ``xi = +-R_HALF`` and the profile peaks at ``xi = 0``.
     Absorbing the translation into the coordinate is all the "variable
     transformation of the velocity equation" amounts to: the body force is
     spatially constant and the pressure enters only through its gradient, so
@@ -305,18 +287,18 @@ def xi(X, Y):
     picks up the constants.  The velocity field is therefore unchanged; only
     its argument is rewritten.
     """
-    return (Y - SHIFT_Y) * COS_T - (X - SHIFT_X) * SIN_T
+    return ((Y - SHIFT_Y) * COS_T - (X - SHIFT_X) * SIN_T) - R_HALF
 
 
 def analytic(X, Y):
     """Exact velocity at a point (numpy-broadcasting friendly).
 
-    Plane Poiseuille in the across-channel coordinate, unchanged in form:
+    Plane Poiseuille in the across-channel coordinate (benchmark Eq. (48)):
 
-        u_s = (dP/L)/(2*mu) * ( (D/2)^2 - xi^2 )
+        u_s = (dP/L)/(2*mu) * ( (h/2)^2 - xi^2 )
 
-    which equals ``A*(D/2)^2 = u_max`` on the centreline and vanishes at both
-    plates, with the velocity vector along the channel axis (cos, sin).
+    which equals ``U_max`` on the centreline and vanishes at both plates, with
+    the velocity vector along the channel axis (cos, sin).
     """
     t = xi(X, Y)
     prof = (DP_DL / (2.0 * MU)) * (R_HALF**2 - t**2)
@@ -324,17 +306,22 @@ def analytic(X, Y):
 
 
 def wall_y(X, side):
-    """Y of the plate `side` (+1 upper, -1 lower) at a given X, this frame."""
-    return SHIFT_Y + ((X - SHIFT_X) * SIN_T + side * R_HALF) / COS_T
+    """Y of the plate `side` (+1 upper, -1 lower) at a given X, this frame.
+
+    The plates are the lines xi~ = 0 (lower) and xi~ = h (upper).
+    """
+    offset = 0.0 if side < 0 else H_CHANNEL
+    return SHIFT_Y + ((X - SHIFT_X) * SIN_T + offset) / COS_T
 
 
 def wall_endpoints(side):
     """The two endpoints of a plate, in this frame.
 
-    With the box sized and SHIFT_Y derived as above, both plates lie wholly
-    inside the box and span its full width, terminating exactly on the inlet
+    With SHIFT_Y = 0.25 the box is [0,1] x [0,2.25] and both plates lie wholly
+    inside it, spanning its full width and terminating exactly on the inlet
     (X = X_MIN) and outlet (X = X_MAX) faces -- so no clipping is needed and
-    both ends are complete channel cross-sections.
+    both ends are complete channel cross-sections (0.25 of margin below the
+    lower plate corner, 0.268 above the upper plate at the outlet).
     """
     return [(X_MIN, wall_y(X_MIN, side)), (X_MAX, wall_y(X_MAX, side))]
 
@@ -360,8 +347,9 @@ def outlet_interval():
 
 
 def solid_mesh_path():
+    # 2026-09-30：固体网格直接放在 demo 文件夹下（原为 plot/ 子目录）。
     here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(here, "plot",
+    return os.path.join(here,
                         f"solid-426-N{int(1.0 / DX)}-t{PLATE_THICKNESS:g}.xdmf")
 
 
@@ -372,11 +360,19 @@ PLATE_AREA_TARGET = PLATE_LENGTH * PLATE_THICKNESS
 
 
 def output_path():
+    """Output folder for this run: <demo>/<DRIVING>[_solver][_smoke]/ (2026-09-30).
+
+    两种驱动模式（velocity / pressure）输出的文件名完全相同（velocity.xdmf,
+    pressure.xdmf, solid_coords.xdmf, solid_displacement.xdmf），因此以驱动模式
+    作为子目录名区分，直接位于 demo_426 文件夹下（原为 plot/N{N}_{solver}/）。
+    """
     here = os.path.dirname(os.path.abspath(__file__))
-    tag = f"N{N}_{SOLVER}"
+    tag = os.environ.get("DRIVING", "velocity").lower()
+    if SOLVER != "ipcs":
+        tag += f"_{SOLVER}"
     if SMOKE:
         tag += "_smoke"
-    out = os.path.join(here, "plot", tag)
+    out = os.path.join(here, tag)
     os.makedirs(out, exist_ok=True)
     return out + os.sep
 
@@ -387,8 +383,9 @@ def summary():
     lines = [
         "demo_426 — flow through a slanted channel (2-D IB benchmark)",
         f"domain          : [{X_MIN}, {X_MAX}] x [{Y_MIN}, {Y_MAX}]",
-        f"channel         : theta={THETA_DEG:g} deg, h={H_CHANNEL:g} m, "
-        f"D=h/cos={D_CHANNEL:.6f} m ({CHANNEL_CELLS:.2f} cells)",
+        f"channel         : theta={THETA_DEG:g} deg, h={H_CHANNEL:g} "
+        f"(perpendicular), D=h/cos={D_CHANNEL:.6f} (vertical, "
+        f"{CHANNEL_CELLS:.2f} cells)",
         f"inlet  (x={X_MIN:g}) : y in [{yl:.6f}, {yu:.6f}]  "
         f"(height {yu - yl:.6f})",
         f"outlet (x={X_MAX:g}) : y in [{ol:.6f}, {ou:.6f}]  "
@@ -397,7 +394,7 @@ def summary():
         f"driving         : -dp/ds = {DP_DL:g} Pa/m along the axis "
         f"(body force, NOT a pressure BC)",
         f"profile         : A={A_COEF:g}, u_max={U_MAX:.6f} m/s "
-        f"(paper quotes {U_MAX_PAPER}; see docstring)",
+        f"(benchmark quotes {U_MAX_PAPER})",
         f"grid            : N={N}, dx={DX:g}, nx x ny = {NX} x {NY} "
         f"(box {BOX_L:g} x {BOX_H:g})",
         f"time            : dt={DT:g} (= {DT_FACTOR:g} dx), "

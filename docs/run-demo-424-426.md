@@ -5,6 +5,11 @@
 `conda activate afsi-dolfinx` 在本机**不适用**（本机 PATH 里既没有 `conda` 也没有
 `micromamba`，环境是仓库内的一份 micromamba 前缀，入口脚本见下）。
 
+> **2026-09-30 变更（demo_426）**：几何已按基准重修（`[0,1] x [0,2.25]`、通道下壁
+> 过原点、`mu = 0.5`、`u_max = 0.25`、`dt = 0.15 dx`，见 demo 内 `readme.md` 顶部
+> 说明）；输出目录改为 `<demo_426>/<DRIVING>/`（`velocity/`、`pressure/`），固体
+> 网格在 demo 根下 —— §3.3 里旧的 `plot/<tag>/` 路径自此不再适用。
+
 ---
 
 ## 1. 环境与统一入口

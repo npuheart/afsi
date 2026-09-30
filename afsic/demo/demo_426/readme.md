@@ -1,71 +1,69 @@
 # demo_426 — flow through a slanted channel (2-D), IB benchmark
 
-Steady plane-Poiseuille flow through a channel inclined at `theta = pi/6` about
-the origin, in a rectangular box, with the two channel walls represented as
-immersed boundaries so that they are deliberately **not** grid-aligned.  This
-follows the two-dimensional slanted-channel benchmark of Grüninger et al.,
-whose purpose is to compare how different IB kernels reproduce the exact
-solution inside a confined, stationary geometry (their Fig. 22 velocity field
-and Fig. 23 profile at `x = 0.5`).
+Steady plane-Poiseuille flow through a channel inclined at `theta = pi/6`, in a
+rectangular box, with the two channel walls represented as immersed boundaries
+so that they are deliberately **not** grid-aligned.  This follows the
+two-dimensional slanted-channel benchmark as used by Li et al. (2025, §4.3.1;
+originating from Grüninger et al. 2024, §4.1), whose purpose is to compare how
+different IB kernels reproduce the exact solution inside a confined, stationary
+geometry (Fig. 22 velocity field, Fig. 23 profile at `x = 0.5`).
+
+> **Geometry corrected 2026-09-30.**  The domain, channel position and
+> parameters now match the benchmark text exactly: `Omega = [0,1] x [-0.25,2]`
+> (translated to `[0,1] x [0,2.25]` here), walls at `xi~ = 0` and `xi~ = h = 1`,
+> `mu = 0.5`, `U_max = 0.25`, `dt = 0.15*dx`.  An earlier version of this demo
+> used a larger box and placed the channel *centreline* through the origin
+> (perpendicular width `D = h/cos(theta)`), which made the quoted `U_max` look
+> inconsistent; that reading was wrong.  Results below were re-measured on the
+> corrected geometry (runs of 2026-09-30; older outputs are kept in
+> `velocity_oldbox/` and `pressure_oldbox/`).
 
 ## Exact solution
 
-With the coordinate across the channel,
+With the wall coordinate
 
 ```
-xi(x, y) = y*cos(theta) - x*sin(theta)          walls at xi = +-D/2
+xi~(x, y) = y*cos(theta) - x*sin(theta)         walls at xi~ = 0 and xi~ = h
 ```
 
-the exact steady state is unidirectional plane Poiseuille along the axis:
+the exact steady state (benchmark Eq. (48)) is unidirectional plane Poiseuille
+along the axis:
 
 ```
-u(x, y) = (dP/L)/(2*mu) * ( (D/2)^2 - xi^2 ) * (cos(theta), sin(theta))
-v(x, y) = (dP/L)/(2*mu) * ( (D/2)^2 - xi^2 ) * (sin(theta), ...)
+u(x, y) = (dP/L)/(2*mu) * xi~ * (h - xi~) * (cos(theta), sin(theta))
 ```
 
-driven by the constant body force `f = -(dP/L)*(cos(theta), sin(theta))`
-(the axial pressure gradient points opposite to the flow).  This field is
-divergence-free and satisfies the momentum balance exactly, and it vanishes on
-both plates by construction, so no-slip on the walls is exactly compatible with
-it.  `configuration.py` exposes all three identities and they were checked
-numerically before writing the solver.
+equivalently `(dP/L)/(2*mu) * ((h/2)^2 - xi^2) * (cos, sin)` with `xi` measured
+from the centreline.  It is divergence-free, satisfies the momentum balance
+exactly, and vanishes on both plates by construction, so no-slip on the walls
+is exactly compatible with it.  `configuration.py` exposes the identities and
+they were checked numerically before writing the solver.
 
 ## Parameters
 
-The benchmark text lists `h = 1`, `D = h/cos(theta)`, `mu = 0.5`, `rho = 1`,
-`dP/L = 1.0`, `U_max = 0.25`, `N = 32`, `dt = 0.15*dx`.
-
-**These are not all mutually consistent.**  Plane Poiseuille gives
+The benchmark lists `h = 1` (perpendicular channel width), `D = h/cos(theta)`
+(vertical width between the plates), `mu = 0.5`, `rho = 1`, `dP/L = 1.0`,
+`U_max = 0.25`, `N = 32`, `dt = 0.15*dx`.  These are mutually consistent:
+Eq. (48) peaks at
 
 ```
-u_max = (dP/L) * (D/2)^2 / (2*mu) = 1.0 * 0.57735^2 / 1.0 = 1/3 = 0.33333
+U_max = (dP/L) * h^2 / (8*mu) = 1.0 * 1 / (8 * 0.5) = 0.25
 ```
-
-so `U_max = 0.25` disagrees with `dP/L = 1`, `mu = 0.5` by 25 %.  The
-coefficient as printed in the benchmark, `(dP/L)/(2*mu*L)`, is also not
-dimensionally consistent (it must carry a squared length in the denominator).
-
-**Resolution used here:** keep the benchmark's *primary* parameters
-(`mu`, `dP/L`, `h`, `theta`, box, `N`, `dt`) and treat `U_max` as a derived
-quantity.  The discrete problem is then driven by exactly the same body force
-as the reference solution, which is what makes the comparison a genuine
-discretisation-error study.  Set `DP_DL=0.75` to reproduce `U_max = 0.25`
-instead.
 
 | quantity | value |
 |---|---|
 | `theta` | 30° (`cos = 0.866025`, `sin = 0.5`) |
-| channel width `D` | 1.154701 |
-| radius `D/2` | 0.577350 |
+| perpendicular width `h` | 1.0 |
+| vertical width `D = h/cos` | 1.154701 |
 | `rho`, `mu` | 1.0, 0.5 |
-| `dP/L` | 1.0 (body force) |
-| **`u_max` (derived)** | **0.333333** (benchmark text: 0.25) |
+| `dP/L` | 1.0 |
+| `U_max` | 0.25 |
 | `N`, `dx` | 32, 0.03125 |
 | `dt` | 0.0046875 (`0.15*dx`) |
 | channel width in cells | 36.95 |
-| grid | `112 x 154` on box `3.5 x 4.8125` |
-| `Re = rho*u_max*D/mu` | 0.770 |
-| Courant | 0.050 |
+| grid | `32 x 72` on box `1 x 2.25` |
+| `Re = rho*u_max*D/mu` | 0.5774 |
+| Courant | 0.0375 |
 | `nu*dt/dx^2` | 2.400 |
 
 `nu*dt/dx^2 = 2.4` exceeds the explicit-diffusion limit of 0.25, but the
@@ -73,48 +71,36 @@ viscous term is treated **implicitly** by both solvers, so there is no
 diffusion restriction here; only advection matters, and the Courant number is
 small.
 
-## The box: the quoted one does not contain the channel
+## The box and channel position
 
-The benchmark quotes `Omega = [0,1] x [-0.25,2]`.  That rectangle does **not**
-contain the slanted channel.  The walls are `y = (x*sin +- D/2)/cos`, so over
-`x in [0,1]` the channel spans `y in [-0.66667, 1.24402]` (width 1.9107 =
-1.6547*D): the quoted box cuts the lower plate off below `y = -0.25`, truncating
-the inlet cross-section by 37 %.
+The benchmark box is `Omega = [0,1] x [-0.25,2]`, with the channel entering the
+left face and leaving the right face.  Eq. (48) vanishes on `xi~ = 0` and
+`xi~ = h`, i.e. the **lower wall passes through the origin**; on the left face
+the channel therefore spans `y in [0, 1/cos(theta)] = [0, 1.1547]`, and at
+`x = 1` it spans `[0.5774, 1.7321]` — the whole channel is inside the quoted
+box (0.25 of clearance below the channel at the inlet, 0.268 above it at the
+outlet).
 
-The benchmark's own setup figure settles the intent: **both** plates appear as
-dotted Lagrangian-marker lines running the full length of the box, and both
-ends are open channel cross-sections.  The box must therefore be extended
-**downward** (and, to let the lower plate reach the left face, leftward) — and
-the figure is also clearly *wider* than `[0,1]`, showing the channel end to end.
-
-Domain used here, matched to that figure:
+Like every AFSI case, the demo translates the box so that its lower-left
+corner sits on the origin:
 
 ```
-Omega = [-0.9, 2.6] x [-1.4, 3.4]        (box 3.5 x 4.8125)
+X = x ,  Y = y + 0.25      =>   X in [0, 1],  Y in [0, 2.25]
 ```
 
-| | `y` at `x = -0.9` | `y` at `x = 2.6` |
-|---|---|---|
-| lower plate `xi = -D/2` | −1.18628 | +0.83444 |
-| upper plate `xi = +D/2` | −0.03167 | +2.16778 |
+so the channel's lower-left corner sits at `(0, 0.25)`.  At `N = 32` the box is
+exactly `32 x 72` cells of `dx = 1/32` (no padding).  Both plates run the full
+width and terminate **exactly** on the inlet and outlet faces, so both ends are
+complete channel cross-sections.
 
-Both plates run the full width, stay strictly inside the box, and terminate
-**exactly** on the inlet and outlet faces, so both ends are complete 1.3333-tall
-cross-sections and no plate needs clipping.  `X_MIN`, `X_MAX`, `Y_MIN`, `Y_MAX`
-are all environment-overridable; `X_MIN=0 X_MAX=1 Y_MIN=-0.25` reproduces the
-quoted truncation.
-
-Note `dx` is fixed by the benchmark's `L/N` convention with `L = 1`, and the
-cell counts are *derived* from the box (`NX`, `NY`), not the reverse — otherwise
-widening the box would silently coarsen the grid.  At `N = 32`,
-`dx = 0.03125` and the grid is `112 x 154`.
+`X_MIN`, `X_MAX`, `Y_MIN`, `Y_MAX` and `SHIFT_Y` are environment-overridable.
 
 ## Boundary conditions
 
 | boundary | condition |
 |---|---|
-| inlet `x=0`, channel interval `y in [-2/3, 2/3]` | velocity Dirichlet, **analytic** |
-| outlet `x=1`, channel interval `y in [-0.0893, 1.24402]` | velocity Dirichlet, **analytic** |
+| inlet `X=0`, channel interval `Y in [0.25, 1.4047]` | velocity Dirichlet, **analytic** |
+| outlet `X=1`, channel interval `Y in [0.8274, 1.9821]` | velocity Dirichlet, **analytic** |
 | every other boundary segment | no-slip `u = 0` |
 | the two plates inside the box | immersed-boundary penalty |
 
@@ -129,12 +115,13 @@ of leaving the pure-Neumann system singular.  The IPCS stores the ACCUMULATED
 correction (`p_ += phi`); with no datum the singular system lets that constant
 drift every step, and the saved `pressure.xdmf` degenerated into a ~`7.8e11`
 constant (measured 2026-09-28).  Since 2026-09-29 the dof 3 cells diagonally
-inside the inlet opening is fixed to `p = 0`, which makes the system
-non-singular and the stored field physical: in-channel it equals
-`0.989 * p_analytic + 0.33` (corr `0.9995`, span 3.1).  Pressure-driven runs
+inside the inlet opening is fixed to `p = 0` (on the corrected geometry: node
+`(0.09375, 0.34375)`, dof 106), which makes the system non-singular and the
+stored field physical: in-channel it equals `1.017 * p_analytic + 0.209`
+(corr `0.99947`, measured on the 2026-09-30 run).  Pressure-driven runs
 prescribe the analytic opening pressure instead (see below).
 
-### Driving modes (2026-09-28)
+### Driving modes (2026-09-28; re-measured 2026-09-30)
 
 As run, the flow is driven by the analytic **velocity** Dirichlet on the two
 openings (the `f_body` route is off by default).  A **pressure**-driven variant
@@ -142,23 +129,26 @@ was added:
 
 * `DRIVING=velocity` (default) — analytic velocity on the openings; one
   reference pressure dof is pinned to `p = 0` (see *Boundary conditions*).
-  Re-verified against the pre-pin runs (320-step tether smoke): in-channel L2
-  `0.6260 %` (was `0.6277 %`), plate slip `+0.3 %`, plate drift `+0.2 %` — the
-  same solution reached through a slightly different linear-solver path.
 * `DRIVING=pressure` — pressure Dirichlet on the openings (velocity free
-there); `P_FACE=exact` prescribes the linear analytic pressure
-`p = -DP_DL*(x cos + y sin)` on each opening, `P_FACE=const` prescribes one
-constant per face.  IPCS uses the `ds_p`/`p_traction` fix (demo_424 scheme).
+  there); `P_FACE=exact` prescribes the linear analytic pressure
+  `p = -DP_DL*((X-SHIFT_X) cos + (Y-SHIFT_Y) sin)` on each opening,
+  `P_FACE=const` prescribes one constant per face.  IPCS uses the
+  `ds_p`/`p_traction` fix (demo_424 scheme: the volume form drops the opening
+  pressure-traction term, so the predictor would otherwise be inconsistent
+  there).
 
-Measured (320-step smoke, tether `BETA=8e3`, ipcs): in-channel relative L2 =
-**0.63 % (velocity)**, **7.9 % (pressure, exact)** and **17.2 % (pressure,
-const)**.  The pressure modes are stable but less accurate: the openings are
-oblique 30-degree cuts, and the predictor's remaining natural condition there
+Measured on the corrected benchmark geometry (T = 2 s, 427 steps, tether
+`BETA=8e3`, ipcs; outputs in `velocity/`, `pressure/`): in-channel relative L2
+= **0.46 % (velocity)** vs **11.9 % (pressure, exact)**.  Both are stable; the
+pressure mode is less accurate **by construction**: the openings are oblique
+30-degree cuts, and the predictor's remaining natural condition there
 (`mu du/dn = 0`) is not what the exact solution satisfies on such a cut, so
-the boundary mismatch propagates a few percent into the channel (core-window
-error 4.2 %, decaying away from the ends; end `max|u|` runs +4.5 % high).
-For benchmark-grade accuracy with pressure driving, extend the channel and/or
-impose the full exact traction (pressure + viscous part) on the openings.
+the boundary mismatch propagates inward (end `max|u|` runs +6.8 % high).  On
+the benchmark's (smaller) box the openings sit closer to the measurement
+station, which is why the error is larger here than on the earlier extended
+box (7.9 %).  For benchmark-grade accuracy with pressure driving, extend the
+channel and/or impose the full exact traction (pressure + viscous part) on the
+openings.
 
 ## The plate penalty: explicit vs implicit
 
@@ -204,62 +194,81 @@ band.  Reproducing Fig. 23 needs the kernel choice to be selectable in
 
 ```bash
 cd afsic/demo/demo_426
-python main.py                                  # full run: T_END=20 (~50 min)
-SMOKE=1 SMOKE_STEPS=300 python main.py          # quick check
-USE_IMPLICIT_DRAG=0 BETA=8e3 SMOKE=1 SMOKE_STEPS=320 python main.py  # tether route
+python generate_mesh.py               # (re)build the plate mesh; needed after
+                                      # N / PLATE_THICKNESS / geometry changes
+python main.py                        # 427 steps, T = 2 s (~15 s per run)
+USE_IMPLICIT_DRAG=0 BETA=8e3 python main.py                     # tether route,
+                                      # velocity-driven (default DRIVING)
+USE_IMPLICIT_DRAG=0 BETA=8e3 DRIVING=pressure P_FACE=exact python main.py
 ```
 
-Environment overrides: `N`, `DP_DL`, `THETA_DEG`, `Y_MIN`, `DT_FACTOR`,
-`T_END`, `SMOKE`, `SMOKE_STEPS`, `PLATE_DRAG`, `PLATE_DRAG_BAND`,
-`USE_IMPLICIT_DRAG`, `BETA`, `DAMP`, `SOLVER`, `IB_DIRECT_LOAD`, `DRIVING`,
-`P_FACE`.
+Outputs go to `<demo>/<DRIVING>/` directly under the demo folder
+(`velocity/`, `pressure/`): `velocity.xdmf/.h5`, `pressure.xdmf/.h5`,
+`solid_coords.xdmf/.h5`, `solid_displacement.xdmf/.h5`, `history.csv`,
+`verify.json`, `run.log`.
+
+Environment overrides: `N`, `DP_DL`, `MU`, `THETA_DEG`, `X_MIN`, `X_MAX`,
+`Y_MIN`, `Y_MAX`, `SHIFT_Y`, `DT_FACTOR`, `T_END`, `SMOKE`, `SMOKE_STEPS`,
+`PLATE_DRAG`, `PLATE_DRAG_BAND`, `USE_IMPLICIT_DRAG`, `BETA`, `DAMP`,
+`SOLVER`, `IB_DIRECT_LOAD`, `DRIVING`, `P_FACE`, `X_PROFILE`.
 
 ## Files
 
 | file | description |
 |---|---|
-| `configuration.py` | parameters, exact solution, channel clipping to the box |
+| `configuration.py` | parameters, exact solution, channel geometry |
 | `verify.py` | analytic references, sampling, error metrics |
 | `main.py` | box, boundaries, IB plates, time loop, report |
+| `generate_mesh.py` | builds the 2-D triangular plate strips read by `main.py` |
+| `aaa.md` | benchmark text excerpt (Li et al. §4.3.1 and Figs. 22/23) |
+| `velocity/`, `pressure/` | outputs of the two driving-mode runs (2026-09-30) |
+| `velocity_oldbox/`, `pressure_oldbox/` | the same runs on the pre-2026-09-30 geometry |
 
-## Results (N = 32, `dx = 0.03125`, `dt = 0.15*dx`, T = 20)
+## Results (N = 32, `dx = 0.03125`, `dt = 0.15*dx`, T = 2)
 
-Steady state is reached early: `max|u|` settles to 0.34690 by t ~ 2 and is
-unchanged to 5 digits through t = 20, so the metrics below are converged values.
+Both driving modes, tether plates (`USE_IMPLICIT_DRAG=0 BETA=8e3`), ipcs, 427
+steps; outputs in `velocity/` and `pressure/` (runs of 2026-09-30 on the
+corrected benchmark geometry):
 
-| metric | value |
-|---|---|
-| relative L2 error in the channel | **6.76 %** |
-| Linf error in the channel | 3.79e-2 m/s |
-| profile relative L2 (at `x = 0.5`) | 7.10 % |
-| profile Linf | 3.82e-2 m/s |
-| numerical `u_max` | 0.34307 m/s (analytic 0.33333, **+2.92 %**) |
-| `u_max` location in `xi` | 0.000 (exactly on the centreline) |
-| fluid `|u|` on the plates | max 1.27e-2, mean 2.61e-3 m/s |
-| plate displacement from reference | identically 0 |
-| elapsed | 2922 s (4267 steps, 112 x 154 grid) |
+| metric | velocity-driven | pressure-driven (`exact`) |
+|---|---|---|
+| relative L2 error in the channel | **0.464 %** | 11.87 % |
+| Linf error in the channel | 3.26e-3 m/s | 4.50e-2 m/s |
+| profile relative L2 (at `x = 0.5`) | 0.538 % | 7.48 % |
+| numerical `u_max` | 0.25072 m/s (**+0.29 %**) | 0.26710 m/s (+6.84 %) |
+| `u_max` location in `xi` | 0.000 (centreline) | 0.000 |
+| fluid `\|u\|` on the plates (max) | 3.39e-3 m/s | 5.83e-3 m/s |
+| plate displacement from reference (max) | 1.34e-2 m | 2.02e-2 m |
+| stored in-channel pressure vs analytic | `1.017*p_an + 0.209` (corr 0.99947) | `0.984*p_an - 0.136` (corr 0.99379) |
+| elapsed | 15.5 s | 14.1 s |
 
-The velocity is a few percent **high** with the peak on the centreline, and the
-residual velocity on the plates is the numerical boundary layer produced by the
-penalty band: the analytic profile vanishes on the plates, so any non-zero
-`|u|` there is smearing error.  Widening the box from `[-0.2,1]x[-0.8,2]` to
-`[-0.9,2.6]x[-1.4,3.4]` improved the peak error from +5.4 % to **+2.9 %**,
-presumably because the inlet/outlet now sit further from the measurement
-station and the plates are longer relative to the channel width.
+Notes:
+
+* The velocity-driven run reproduces the analytic peak on the centreline to
+  +0.29 %; the residual `|u|` on the plates is the numerical boundary layer
+  produced by the IB kernel (the exact profile vanishes there).
+* The tether route leaves a slow plate **creep** (see *the tether route*
+  below); over these 2-s runs the maximum displacement is ~0.4-0.7 cells.
+  For a strictly stationary geometry use the implicit drag band
+  (`USE_IMPLICIT_DRAG=1`).
+* The profile sampling line at `x = 0.5` was fixed on 2026-09-30 (it used to
+  ignore the coordinate shift and did not lie on the centreline); the profile
+  metrics above are now meaningful.
 
 ### Why the whole-box error is not reported as an accuracy measure
 
-The whole-box relative L2 error is ~1.0 with Linf ~11.1 m/s.  That is **not** a
-solver error.  The exact parabola `A*((D/2)^2 - xi^2)` grows without bound
-*outside* the channel -- in this box it reaches 11.1 -- while the physical flow
+The whole-box relative L2 error is ~0.93 with Linf ~1.27 m/s.  That is **not**
+a solver error.  The exact parabola `A*((h/2)^2 - xi^2)` keeps growing
+*outside* the channel -- in this box it reaches 1.27 -- while the physical flow
 outside the plates is stagnant.  The metric is therefore dominated by a
 spurious reference value, which is why the channel-restricted numbers are the
 meaningful ones and the profile at `x = 0.5` is the benchmark's own choice.
 
 ## Figures
 
-`plot/N32_ipcs/example_figures/` (see demo_424/plot/PLOTTING_GUIDE.md for the
-workflow; the XDMF is read with meshio and rendered off-screen with OSMesa):
+The archived example figure set (`plot/N32_ipcs/example_figures/`, removed in
+the 2026-09-30 cleanup) can be regenerated from the XDMF outputs in
+`velocity/` with the demo_424/plot workflow (meshio + off-screen rendering):
 
 | figure | contents |
 |---|---|
@@ -272,25 +281,25 @@ workflow; the XDMF is read with meshio and rendered off-screen with OSMesa):
 | `06_history_matplotlib.png` | `max|u|` history against the analytic `u_max` |
 | `index.html` | preview page |
 
-Pressure is plotted as `p - mean(p)`: with no pressure Dirichlet datum anywhere
-(the flow is body-force driven) `p_` is fixed only up to an additive constant
-and comes out around `8e11` while its standard deviation is `0.84` and its range
-`14.5`, all of which are physical.
+Pressure provides only `grad(p)` to the momentum equations, so plots show
+`p - mean(p)`; with the reference dof pinned (see *Boundary conditions*) the
+stored `p_` itself is physical (in-channel it matches the analytic pressure up
+to an affine fit, see *Results*) rather than an arbitrary drifting constant.
 
 ## Status / open items
 
 * **Fig. 23 cannot be reproduced as shipped** — the kernel-support comparison
   needs a selectable kernel in the IB layer, or an implicit treatment of the
   Peskin penalty force.  See above.
-* `u_max` is +4.5 % high; a thinner or stronger penalty band, or the implicit
-  Peskin route once available, should reduce it.  A small sweep over
-  `PLATE_DRAG_BAND` (1.0 to 3.0 `dx`) would show whether the boundary layer
-  thickness behaves as the benchmark describes.
+* Pressure-driven accuracy (~12 % in-channel) is limited by the oblique
+  openings (see *Driving modes*); imposing the full exact traction there would
+  help and is the natural next step.
 * Only `N = 32` is implemented; the benchmark's fine grid is `N = 32` with
   `dx = L/N`, so a convergence sweep would vary `N` (and keep `dt = 0.15*dx`).
-* The `U_max` inconsistency between the benchmark text and its own parameters
-  is documented rather than silently patched; if the intended target really is
-  `U_max = 0.25`, run with `DP_DL=0.75`.
+* The apparent `U_max` inconsistency reported in earlier revisions of this file
+  was an artifact of a wrong channel placement (centreline instead of lower
+  wall through the origin) and is resolved by the 2026-09-30 geometry
+  correction.
 
 ## Immersed-boundary spreading normalisation (RETRACTED — the operators are fine)
 
@@ -316,9 +325,10 @@ missing from the *unweighted* node sum used at the time:
 
 Consequently `SPREAD_NORM=h2` did not restore adjointness — it multiplied the
 Lagrangian force by `DX^2` = 9.77e-4, weakening the immersed coupling by 1024x.
-With it the plates exerted essentially no force: in the committed
-`plot/N32_ipcs_smoke` run the plates were passive tracers carried downstream at
-~0.37 `u_max`, the fluid *outside* the channel reached 0.37 `u_max` (i.e. there
+With it the plates exerted essentially no force: in the archived (since
+removed) `plot/N32_ipcs_smoke` run the plates were passive tracers carried
+downstream at ~0.37 `u_max`, the fluid *outside* the channel reached 0.37
+`u_max` (i.e. there
 was no confined channel at all), and the in-channel error was 34.7 %.
 
 `SPREAD_NORM` remains as a calibration knob (`none` = as shipped, the default;
@@ -337,7 +347,8 @@ Two independent effects were conflated in the earlier analysis:
    With the unified `-∫f·v` convention (same as demo_424) the tether is stored
    as the physical force and the plates are held: the 320-step smoke gives
    in-channel error **0.63 %**, plate slip <= 2 % of `u_max` — better than the
-   drag band.
+   drag band.  (Measured on the earlier extended box; on the corrected
+   benchmark box the same recipe gives 0.46 %, see *Results*.)
 2. **An explicit-coupling time-step budget (real).**  The frozen-force penalty
    carries a per-step gain `~ BETA*dt^2/rho`.  Measured stable at
    `BETA = 8e3` and `1.2e4` (`BETA*dt^2/rho = 0.31` and `0.47` at

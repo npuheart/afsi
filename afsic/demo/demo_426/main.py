@@ -6,12 +6,12 @@ boundary plates so that they are deliberately NOT grid-aligned.  This is the
 two-dimensional slanted-channel benchmark used to compare how different IB
 kernels reproduce the exact solution inside a confined stationary geometry.
 
-Exact solution (see configuration.py for the derivation and for the note on the
-self-consistency of the profile amplitude):
+Exact solution (benchmark Eq. (48); see configuration.py for the details):
 
-    xi(x,y) = y*cos(theta) - x*sin(theta)                 (across the channel)
-    u       = (dP/L)/(2*mu) * ((D/2)^2 - xi^2) * (cos, sin)
+    xi~(x,y) = y*cos(theta) - x*sin(theta)    (walls at xi~ = 0 and h)
+    u        = (dP/L)/(2*mu) * xi~ * (h - xi~) * (cos, sin)
 
+in the benchmark's box [0,1] x [-0.25,2] (translated here to [0,1] x [0,2.25]),
 driven by the constant body force f = -(dP/L)*(cos(theta), sin(theta)).
 
 Boundary conditions
@@ -391,17 +391,22 @@ phase("IB mesh + map on the 2-D plates")
 log.set_log_level(log.LogLevel.WARNING)
 n_steps = cfg.SMOKE_STEPS if cfg.SMOKE else cfg.NSTEPS
 
-# a normal line across the channel at x=0.5, for the profile comparison
+# A normal line across the channel at x = X_PROFILE (the benchmark takes the
+# velocity profile at x = 0.5), centred on the channel CENTRELINE xi~ = h/2:
+#     Y_center = SHIFT_Y + ((X - SHIFT_X)*sin(theta) + R_HALF) / cos(theta)
+# Fixed 2026-09-30: the old sampling line ignored SHIFT_X/SHIFT_Y and did not
+# sit on the centreline at all (the `X_PROFILE` caveat of run-demo-424-426.md).
 X_PROFILE = float(os.environ.get("X_PROFILE", "0.5"))
-s_ax = X_PROFILE * cfg.COS_T
-s_perp = X_PROFILE * cfg.SIN_T
 
 
 def profile_line(npts=201):
-    """Points across the channel at x = X_PROFILE (xi from -D/2 to +D/2)."""
+    """Points across the channel at x = X_PROFILE (t from -R_HALF to +R_HALF)."""
     t = np.linspace(-cfg.R_HALF, cfg.R_HALF, npts)
-    x = s_ax - t * cfg.SIN_T
-    y = s_perp + t * cfg.COS_T
+    xc = X_PROFILE
+    yc = cfg.SHIFT_Y + ((xc - cfg.SHIFT_X) * cfg.SIN_T
+                        + cfg.R_HALF) / cfg.COS_T
+    x = xc - t * cfg.SIN_T
+    y = yc + t * cfg.COS_T
     return t, np.column_stack([x, y, np.zeros_like(x)])
 
 
