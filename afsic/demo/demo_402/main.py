@@ -127,7 +127,8 @@ tdim = mesh.topology.dim
 class InletVelocity:
     def __init__(self, Um, Ly):
         self.t = 0.0
-        self.t_ramp = float(os.environ.get("RAMP_T", "2.0"))  # 0 = 无斜坡（论文未提斜坡）
+        # 论文入口无斜坡（RAMP_T=0）；原 Turek 基准的 2 s 余弦软启动可设 RAMP_T=2
+        self.t_ramp = float(os.environ.get("RAMP_T", "0.0"))
         self.Um = Um
         self.Ly = Ly
         self.scale = 0.0
@@ -180,7 +181,9 @@ bcp = [bcp_outlet]
 #   IB_DIRECT_LOAD=1: 动量弱式去掉 ∫f·v 项，直接把 b_ib = V_h·f_stored 加到右端
 #                     （J^T F 的等价直接载荷，省去质量矩阵求解）。
 IB_CONSISTENT = os.environ.get("IB_CONSISTENT", "0").lower() not in ("0", "", "false", "no")
-IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "0").lower() not in ("0", "", "false", "no")
+# IB_DIRECT_LOAD 默认开启：b_ib = V_h·f_stored 与采样算子互为伴随（推荐路径，
+# 已验证 IPCS 稳定跑满 T=10 s）；旧的装配式载荷可用 IB_DIRECT_LOAD=0 复现。
+IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "1").lower() not in ("0", "", "false", "no")
 if IB_CONSISTENT and IB_DIRECT_LOAD:
     raise ValueError("IB_CONSISTENT 与 IB_DIRECT_LOAD 不能同时开启（会重复处理 IB 载荷）")
 
@@ -224,9 +227,7 @@ with dolfinx.io.XDMFFile(MPI.COMM_WORLD, turek_mesh_path, "r") as xdmf:
     cell_tags = xdmf.read_meshtags(structure, name="cell_tags")
     facet_tags = xdmf.read_meshtags(structure, name="facet_tags")
 
-# Scale from metres to centimetres (geo is in SI units)
-structure.geometry.x[:, 0] *= 100.0
-structure.geometry.x[:, 1] *= 100.0
+# 固体网格已是 CGS（cm）—— turek.geo 直接用 cm 建模，此处不再做 SI->CGS 缩放。
 
 v_cg2_s = element(
     "Lagrange",
@@ -251,17 +252,28 @@ mu_s = config["mu_s"]
 lambda_s = config["lambda_s"]
 beta = config["beta"]
 
-# 圆柱系绳罚参数：PENALTY_MODE=beta（默认，用 config["beta"]）或 paper
-#   paper: kappa_s = kappa_hat * rho * dx / dt^2   （论文形式 kappa_s = 5e4 Δx/Δt²，
-#          这里折算成本代码 beta 的单位 dyne/cm^3；kappa_hat 就是无量纲组 beta*dt^2/(rho*dx)）
-PENALTY_MODE = os.environ.get("PENALTY_MODE", "beta").lower()
-KAPPA_HAT = float(os.environ.get("KAPPA_HAT", "5.0e4"))
+# 圆柱系绳（弹簧）罚参数。论文(SI)给的是 kappa_s = 5.0e4 * Δx/Δt²，其中无量纲组
+#   kappa_hat = kappa_s*Δt²/(ρΔx) 与单位制无关（论文取 5e4）。
+# CGS(g,cm,s) 换算：kappa_s = kappa_hat * ρ * Δx/Δt²  [dyne/cm^4]
+#   ρ=1 g/cm³、Δx=1.9219 cm、Δt=5e-5 s -> κ̂=5e4 ⇔ 3.84e13 dyne/cm^4；
+#   但显式无质量 IB 耦合的预算里 κ̂≳2.5 就爆（实测 2.5 爆 / 1.0 稳），
+#   故默认 κ̂=1.0（=7.69e8 dyne/cm^4；圆柱漂移 ~1e-3 cm，等效刚固）。
+# PENALTY_MODE=beta 时改用 config["beta"] 固定值（旧行为）。
+# 论文的 rigid penalty 力为 F = kappa*(psi - chi) + eta*(V - dchi/dt)（V=0 为静止目标）。
+# 本实现默认只含弹性项（ETA_HAT=0，纯弹簧，即 eta=0 的特例）；ETA_HAT>0 时加入阻尼项
+#   eta = ETA_HAT * ρ * Δx/Δt  [dyne*s/cm^4]，F_damp = -eta * dchi/dt。
+PENALTY_MODE = os.environ.get("PENALTY_MODE", "paper").lower()
+KAPPA_HAT = float(os.environ.get("KAPPA_HAT", "1.0"))
+ETA_HAT = float(os.environ.get("ETA_HAT", "0.0"))
+_dx = config["Lx"] / config["Nx"]
 if PENALTY_MODE.startswith("paper"):
-    _dx = config["Lx"] / config["Nx"]
     beta = KAPPA_HAT * config["rho"] * _dx / config["dt"] ** 2
     if MPI.COMM_WORLD.rank == 0:
         print(f"penalty(paper form): kappa_hat={KAPPA_HAT:g} -> beta={beta:.6g} "
-              f"dyne/cm^3  (dx={_dx:.6g} cm, dt={config['dt']:.6g} s)")
+              f"dyne/cm^4  (dx={_dx:.6g} cm, dt={config['dt']:.6g} s)")
+eta = ETA_HAT * config["rho"] * _dx / config["dt"]
+if ETA_HAT > 0 and MPI.COMM_WORLD.rank == 0:
+    print(f"tether damping: eta_hat={ETA_HAT:g} -> eta={eta:.6g} dyne*s/cm^4")
 
 FF = grad(solid_coords)
 J = det(FF)
@@ -274,8 +286,17 @@ x_constraint = solid_coords[0] - X0[0]
 y_constraint = solid_coords[1] - X0[1]
 solid_constraint = as_vector((x_constraint, y_constraint))
 
-# 固体本构：SOLID_LAW=neo_hookean（默认，原行为）或 svk（论文的 Saint Venant-Kirchhoff）
-SOLID_LAW = os.environ.get("SOLID_LAW", "neo_hookean").lower()
+# 固体本构：SOLID_LAW=svk（默认，论文的 Saint Venant–Kirchhoff）或 neo_hookean（旧默认）
+# 论文(SI) mu_s=1e6 Pa -> CGS 1e7 dyne/cm²；lambda_s=8e6 Pa -> 8e7 dyne/cm²
+# （1 Pa = 10 dyne/cm²）—— 见 configuration.py 的默认值。
+SOLID_LAW = os.environ.get("SOLID_LAW", "svk").lower()
+# 实验开关 BALL_STIFFNESS_FACTOR（默认 1）：圆柱区（tag 1）弹性模量放大系数。
+# 论文的圆柱是 immersed rigid structure（纯罚力、无弹性应力）；本 demo 用"弹性盘+系绳"
+# 近似。实测圆柱残余变形主要来自其自身弹性（κ̂ 0.25→1.0 只降 ~20%），故提供此开关把
+# 圆柱弹硬（×10 稳定、×100 会超出显式无质量耦合的刚度预算而爆）。
+BALL_STIFF = float(os.environ.get("BALL_STIFFNESS_FACTOR", "1.0"))
+if BALL_STIFF != 1.0 and MPI.COMM_WORLD.rank == 0:
+    print(f"ball stiffness factor: {BALL_STIFF:g} (cylinder elastic moduli x{BALL_STIFF:g})")
 if SOLID_LAW.startswith("svk"):
     # S = lambda_s*tr(E)*I + 2*mu_s*E,  E = (F^T F - I)/2,  P = F·S
     # （二维平面应变：E_33 = 0，故用三维 lambda_s 直接写面内分量）
@@ -283,20 +304,31 @@ if SOLID_LAW.startswith("svk"):
     _E = 0.5 * (dot(FF.T, FF) - Identity(gdim))
     _S = lambda_s * _tr(_E) * Identity(gdim) + 2.0 * mu_s * _E
     P_s = dot(FF, _S)
+    if BALL_STIFF != 1.0:
+        _S_ball = (lambda_s * BALL_STIFF) * _tr(_E) * Identity(gdim) \
+            + 2.0 * (mu_s * BALL_STIFF) * _E
+        P_s_ball = dot(FF, _S_ball)
+    else:
+        P_s_ball = P_s
 else:
     # Neo-Hookean: P = mu_s*(F - F^-T) + lambda_s*ln(J)*F^-T
     I1 = inner(FF, FF)
     P_iso = mu_s * J ** (-2.0 / 2.0) * (FF - (I1 / 2.0) * inv(FF).T)
     P_vol = lambda_s * ln(J) * inv(FF).T
     P_s = P_iso + P_vol
+    P_s_ball = P_s
 
 # Circle (facet tag 3, cell tag 1) is fixed via penalty; tail (cell tag 2) deforms freely
-L_hat = form(
-    -inner(P_s, grad(dVs)) * dxx(1)
+_L_expr = (
+    -inner(P_s_ball, grad(dVs)) * dxx(1)
     - inner(P_s, grad(dVs)) * dxx(2)
     - beta * inner(solid_constraint, dVs) * dxx(1)
     #  - beta*inner(circum_constraint, dVs)*dss(3)
 )
+if ETA_HAT > 0:
+    # 论文系绳的阻尼项 -eta*dchi/dt（V=0）：solid_velocity 为本步插值得到的固体速度
+    _L_expr = _L_expr - eta * inner(solid_velocity, dVs) * dxx(1)
+L_hat = form(_L_expr)
 # dolfinx 0.10: create_vector 需要函数空间，而不是 Form
 b1 = create_vector(Vs)
 

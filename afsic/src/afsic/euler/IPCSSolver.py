@@ -118,7 +118,12 @@ class IPCSSolver:
         # Solver for step 2
         solver2 = PETSc.KSP().create(mesh.comm)
         solver2.setOperators(A2)
-        solver2.setType(PETSc.KSP.Type.MINRES)
+        # 压力泊松系统对称正定，用 CG + BoomerAMG。
+        # 注意（2026-10-01 定位）：PETSc 3.25.5 的 KSPMINRES 在该系统上会在 1 次
+        # 迭代后以 reason=6 (KSP_CONVERGED_CG_CONSTRAINED) "收敛"并返回零解
+        # （即使 PC=NONE 也如此；同一矩阵 CG/BCGS 结果一致且正确）。
+        # 原来的 setType(MINRES) 会让压力修正静默失效（p_ 恒为 0），故改为 CG。
+        solver2.setType(PETSc.KSP.Type.CG)
         pc2 = solver2.getPC()
         pc2.setType(PETSc.PC.Type.HYPRE)
         pc2.setHYPREType("boomeramg")

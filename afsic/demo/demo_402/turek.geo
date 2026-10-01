@@ -1,11 +1,13 @@
+// Turek–Hron 改版基准的固体几何 —— CGS 单位 (g, cm, s)
+// 论文(SI, m): 圆心(0.2,0.2) 直径 0.1；梁 0.35 × 0.02 —— 换算 ×100 得 cm。
 SetFactory("OpenCASCADE");
 
-cx = 0.2;
-cy = 0.2;
-R = 0.05;
-flag_L = 0.35;
-flag_h = 0.02;
-eps = 1e-6;
+cx = 20;      // 圆柱圆心 x [cm]   (0.2  m)
+cy = 20;      // 圆柱圆心 y [cm]   (0.2  m)
+R = 5;        // 圆柱半径    [cm]   (d = 0.1 m = 10 cm)
+flag_L = 35;  // 弹性梁长    [cm]   (0.35 m)
+flag_h = 2;   // 弹性梁厚    [cm]   (0.02 m)
+eps = 1e-4;   // 布尔运算容差 [cm]  (= 1e-6 m)
 
 // ---------------------------------------------------------------
 // Geometry
@@ -68,7 +70,8 @@ Physical Curve("lower_edge") = lower_c[];
 Physical Curve("right_tip")  = right_tip_c[];
 
 // ---------------------------------------------------------------
-// Mesh size: fine enough for several elements across the flag
+// Mesh size [cm]: MFAC=0.5 × 流体细网格 Δx=1.9219 cm -> 0.96 cm
+//   （论文 Δx = L/N = 2.46/128 m = 1.9219 cm；MFAC = 固体网格/Δx）
 // ---------------------------------------------------------------
-Mesh.MeshSizeMax = 0.006;
-Mesh.MeshSizeMin = 0.003;
+Mesh.MeshSizeMax = 0.96;
+Mesh.MeshSizeMin = 0.48;
