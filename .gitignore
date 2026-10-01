@@ -60,3 +60,6 @@ afsic/demo/demo_402/turek_mesh.*
 afsic/demo/demo_402/plot/smoke_chorin/history.csv
 *.DS_Store
 *history.csv
+
+*.csv
+*.npz
