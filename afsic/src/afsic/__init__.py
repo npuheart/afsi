@@ -39,3 +39,7 @@ __all__ = [
     "UpVelocity2D", "UpVelocity3D", "TurekInlet", "TurekInlet3D",
     "SinusoidalInlet", "PipeInlet3D",
 ]
+
+from .euler.RTFluidSolver import RTFluidSolver
+from .coupling import RTNodalCoupling
+__all__ += ["RTFluidSolver", "RTNodalCoupling"]

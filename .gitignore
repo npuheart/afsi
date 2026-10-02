@@ -63,3 +63,5 @@ afsic/demo/demo_402/plot/smoke_chorin/history.csv
 
 *.csv
 *.npz
+afsic/tmplq5xrx_o/
+validation/
