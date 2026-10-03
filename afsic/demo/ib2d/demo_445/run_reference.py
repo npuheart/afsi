@@ -1,6 +1,6 @@
 """Run the IB2d reference solution with pyIB2d -- pure Python, no MATLAB.
 
-    python run_reference.py [--tend T] [--out FILE] [--ib2d DIR] [--run DIR]
+    python run_reference.py [--tend T] [--src DIR] [--out FILE] [--ib2d DIR] [--run DIR]
 
 * reads the model parameters from ``ib2d_input/input2d`` (Nx, Ny, dt, Tfinal,
   print_dump, mu, rho; the structure comes from the ``jelly.*`` files),
@@ -56,13 +56,16 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tend", type=float, default=None, help="override Tfinal (s)")
     ap.add_argument("--out", default=os.path.join(HERE, "ib2d_reference.npz"))
+    ap.add_argument("--src", default=os.path.join(HERE, "ib2d_input"),
+                    help="input/geometry directory (default: ib2d_input/; "
+                         "e.g. a make_jelly.py output at another resolution)")
     ap.add_argument("--ib2d", default=os.path.join(REPO, "third_party", "ib2d", "pyIB2d"),
                     help="path of the pyIB2d directory (default third_party)")
     ap.add_argument("--run", default=os.path.join(HERE, "ib2d_run"))
     args = ap.parse_args()
 
     # --- model parameters (single source of truth: our generated input2d) --
-    src = os.path.join(HERE, "ib2d_input")
+    src = args.src
     P = ib2d_io.read_input2d(os.path.join(src, "input2d"))
     Tfinal = args.tend if args.tend is not None else float(P["Tfinal"])
 
