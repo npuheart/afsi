@@ -41,8 +41,9 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_448` | IB2d 心管肌肉泵 | `HeartTube_Muscle`：两条平行弹性壁（弹簧 + 不变梁 + 4 角目标点）+ 153 条 Hill 肌肉带，行波激活（10 Hz）驱动的蠕动泵（128×128, dt=1e-4, T=0.25 s），与 pyIB2d 对照 |
 | `ib2d/demo_449` | IB2d 非不变摆动梁 | `Wobbly_NonInv_Beam`：两端钉住的非不变梁（$\kappa=10^{10}$, C=0，62 段）+ 2 目标点在 1×1 周期盒摆动（32×32, dt=1e-5, T=0.05）；标记点平均偏差 0.74h，与 pyIB2d 对照 |
 | `ib2d/demo_450` | IB2d 重力细胞赛跑 | `Gravity_Cellular_Race`：两个弹性细胞（各 81 点）+ 每点"质量弹簧"（$k=10^6$）连到幽灵粒子（$M\in\{0.05,0.2,1\}$），重力经幽灵拖拽标记（64×64, dt=5e-5, T=0.35）；含 IB2d 质量点"幽灵粒子"模型考证，细胞轨迹偏差 <8e-4 |
-| `ib2d/demo_451` | IB2d 阻抗泵 + 示踪粒子 | `Tracers_In_Impedance_Pump`：上下弹性壁（弹簧+不变梁+4 目标点）+ 11 根跨径泵弹簧（每步 $RL=1-0.9|\sin(2\pi\cdot 10t)|$）+ 110 个被动示踪粒子（5×5 盒, 64×64, T=2 s）；结构匹配 0.25–0.65h、管宽相位一致；净输运离散敏感（两码差 ~20%，128 网格又不同）、tracer 为拉格朗日混沌（参考自身 dt 减半也发散）——离散敏感应力算例，详见其 readme |
+| `ib2d/demo_451` | IB2d 阻抗泵 + 示踪粒子 | `Tracers_In_Impedance_Pump`：上下弹性壁（弹簧+不变梁+4 目标点）+ 11 根跨径泵弹簧（每步 $RL=1-0.9|\sin(2\pi\cdot 10t)|$）+ 110 个被动示踪粒子（5×5 盒, 64×64, T=2 s）；结构 0.2–0.6h；整流流量 γ=0 差 15–20% → **grad-div γ=2.5 修正到 ~5%**；tracer 逐点为拉格朗日混沌（参考自身 dt 减半也发散），详见其 readme |
 | `ib2d/demo_453` | IB2d 多孔滑移橡皮筋 | `Single_Porous_Rubberband`：64 点收缩环（弹簧 $k=10^7$、$L_0=0$）全点 porous 滑移（$\kappa=10^{-4}$，4 阶差分法向；porous 公式与 pyIB2d 逐位一致）（32×32, dt=1e-4, T=0.1）；**塌缩对 grad-div γ 极敏感**——γ=0 时 t≈0.043 崩溃（伪散度漏流），γ=2.5 时全程 dX≤1h、面积轨迹重合 |
+| `ib2d/demo_454` | IB2d 孔弹性橡皮筋 | `Poroelastic_Rubberband`：同 453 的收缩环 + porous 滑移，再加 **poroelastic**（每步额外位移 $\Delta t\,F_{\rm spring}/(\mu c)$，$c=2.5\times10^5$，用 $X_h$ 处弹簧力；驱动用上一步 F 记账）（32×32, dt=1e-4, T=0.1, γ=2.5）；全程 dX≤0.75h、面积轨迹重合（交叉）|
 
 ## 运行环境
 

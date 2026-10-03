@@ -26,7 +26,11 @@ f_ref = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "ib2d_reference
 out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "figures")
 os.makedirs(out, exist_ok=True)
 
-f_afsi = os.path.join(here, "plot", "afsi_result_g0.npz")
+f_afsi = os.path.join(here, "plot", f"afsi_result_g{os.environ.get('GRAD_DIV', '2.5')}.npz")
+if not os.path.exists(f_afsi):
+    f_afsi = os.path.join(here, "plot", "afsi_result_g2.5.npz")
+if not os.path.exists(f_afsi):
+    f_afsi = os.path.join(here, "plot", "afsi_result_g0.npz")
 if not os.path.exists(f_afsi):
     f_afsi = os.path.join(here, "plot", "afsi_result.npz")
 
