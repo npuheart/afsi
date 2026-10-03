@@ -3,6 +3,8 @@
 Same nodal solid load assembly and explicit coordinate update as demo_402.
 Default: a pre-stretched elastic box in a closed unit fluid box.
 --case turek loads demo_402's existing cylinder/tail solid mesh (CGS units).
+--linear-solver block runs the RT solver with a nested 2x2 (fieldsplit) iterative
+path instead of the direct MUMPS factorization of the monolithic system.
 No cloud logging, email or external data upload is performed.
 """
 import argparse
@@ -33,11 +35,26 @@ def main():
     parser.add_argument('--inlet-speed', type=float, default=200.)
     parser.add_argument('--ramp-time', type=float, default=2.)
     parser.add_argument('--kappa-hat', type=float, default=0.1)
+    parser.add_argument('--linear-solver', choices=['direct', 'block'], default='direct')
+    parser.add_argument('--velocity-pc', choices=['lu', 'hypre'], default='lu')
+    parser.add_argument('--pressure-scale', type=lambda s: s if s in ('auto', 'schur-diag', 'lsc', 'simple') else float(s))
+    parser.add_argument('--ksp-max-it', type=int, default=2000)
+    parser.add_argument('--ksp-rtol', type=float, default=1e-10)
     args = parser.parse_args()
     if MPI.COMM_WORLD.size != 1:
         parser.error('This prototype supports a single MPI rank only')
     if args.nx < 2 or args.steps < 1 or args.solid_n < 1 or args.ramp_time <= 0:
         parser.error('Invalid mesh, step count or ramp-time')
+    if args.pressure_scale is not None and not isinstance(args.pressure_scale, str) and args.pressure_scale <= 0:
+        parser.error('pressure-scale must be positive or schur-diag')
+    if args.ksp_max_it < 1:
+        parser.error('ksp-max-it must be positive')
+    if args.ksp_rtol <= 0:
+        parser.error('ksp-rtol must be positive')
+    if args.method != 'rt' and (args.linear_solver != 'direct' or args.velocity_pc != 'lu'
+                                or args.pressure_scale is not None or args.ksp_max_it != 2000
+                                or args.ksp_rtol != 1e-10):
+        parser.error('--linear-solver/--velocity-pc/--pressure-scale/--ksp-max-it/--ksp-rtol apply to --method rt only')
     is_turek = args.case == 'turek'
     solid_path = Path(__file__).resolve().parent.parent / 'demo_402' / 'turek_mesh.xdmf'
     if is_turek and (not solid_path.exists() or not solid_path.with_suffix('.h5').exists()):
@@ -59,7 +76,12 @@ def main():
               else mesh.exterior_facet_indices(fluid.topology))
     if args.method == 'rt':
         solver = RTFluidSolver(fluid, dt, rho, mu, degree=2,
-                               convection=args.convection, dirichlet_facets=facets)
+                               convection=args.convection, dirichlet_facets=facets,
+                               linear_solver=args.linear_solver,
+                               velocity_pc=args.velocity_pc,
+                               pressure_scale=args.pressure_scale,
+                               ksp_rtol=args.ksp_rtol,
+                               ksp_max_it=args.ksp_max_it)
         V, Q = solver.V, solver.Q
         transfer = RTNodalCoupling(V)
     else:
@@ -169,6 +191,7 @@ def main():
                    mean_J=volume/refvolume, sampled_min_J=min_j,
                    kinetic_energy=float(fem.assemble_scalar(kinetic_form)),
                    max_solid_speed=float(np.max(np.linalg.norm(U.x.array.reshape(-1,2), axis=1))),
+                   solver_iterations=int(getattr(solver, 'last_iterations', 0)),
                    elapsed=time.perf_counter()-start)
         if not all(np.isfinite(value) for value in row.values()) or min_j <= 0:
             raise RuntimeError(f'Nonfinite/inverted solid at step {step+1}: {row}')
@@ -183,6 +206,14 @@ def main():
              fluid_coefficients=solver.u_.x.array, pressure_coefficients=solver.p_.x.array)
     summary = dict(method=args.method, case=args.case, nx=args.nx, ny=ny, dt=dt,
                    steps=args.steps, convection=args.convection,
+                   linear_solver=(args.linear_solver if args.method == 'rt' else None),
+                   velocity_pc=(args.velocity_pc if args.method == 'rt' else None),
+                   pressure_scale=(getattr(solver, 'pressure_scale_used', None)
+                                   if args.method == 'rt' else None),
+                   pressure_scale_mode=(getattr(solver, 'pressure_scale', None)
+                                        if args.method == 'rt' else None),
+                   iterations_total=int(getattr(solver, 'iterations_total', 0)),
+                   iterations_max=int(getattr(solver, 'iterations_max', 0)),
                    inlet_speed=args.inlet_speed, ramp_time=args.ramp_time, kappa_hat=args.kappa_hat,
                    solid_n=args.solid_n, fluid_velocity_dofs=solver.u_.x.array.size,
                    fluid_pressure_dofs=solver.p_.x.array.size,

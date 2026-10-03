@@ -82,3 +82,29 @@ def test_open_channel_flux_balance():
     assert solver.divergence_norm() < 1.e-9
     flux = fem.assemble_scalar(fem.form(ufl.dot(solver.u_,ufl.FacetNormal(msh))*ufl.ds))
     assert abs(flux) < 1.e-10
+
+
+@pytest.mark.parametrize('convection', [False, True])
+@pytest.mark.parametrize('pressure_scale', [None, 'auto', 'simple'])
+def test_block_solver_matches_direct(convection, pressure_scale):
+    """The nested fieldsplit solver reproduces the direct MUMPS solution."""
+    msh = mesh.create_unit_square(MPI.COMM_WORLD, 5, 4, cell_type=mesh.CellType.quadrilateral)
+    kw = dict(dt=.01, mu=.2, convection=convection)
+    direct = RTFluidSolver(msh, **kw)
+    blocked = RTFluidSolver(msh, **kw, linear_solver='block', velocity_pc='lu',
+                            pressure_scale=pressure_scale, ksp_rtol=1e-12)
+    points = np.array([[.31, .37], [.6, .7], [.7, .43]])
+    loads = np.array([1., .4, -.5, .7, -.3, -.8])
+    transfer = RTNodalCoupling(blocked.V)
+    for _ in range(3):
+        transfer.update(points)
+        load = transfer.spread(loads)
+        direct.solve_one_step(load)
+        blocked.solve_one_step(load)
+    np.testing.assert_allclose(blocked.u_.x.array, direct.u_.x.array, rtol=1e-7, atol=1e-9)
+    # The block solve is iterative, so the divergence floor scales with the
+    # nested tolerance (measured ~4e-10 at rtol=1e-12 here) instead of reaching
+    # machine precision as in the direct factorization.
+    assert blocked.divergence_norm() < 1.e-8
+    assert blocked.iterations_max > 0
+    assert blocked.iterations_total > 0
