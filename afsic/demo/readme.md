@@ -34,7 +34,7 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 
 | Demo | 名称 | 说明 |
 |---|---|---|
-| `ib2d/01_rubberband` | IB2d 弹性圆环 | 读取 IB2d 原始输入；周期 Taylor–Hood + Peskin 两阶段格式（`PeskinRK2Solver`），与 IB2d (Octave) 逐帧对照 |
+| `ib2d/demo_444` | IB2d 弹性圆环 | 读取 IB2d 原始输入；周期 Taylor–Hood + Peskin 两阶段（`PeskinRK2Solver`）与 fiber Chorin/IPCS 投影（grad-div γ=0/100）共 5 条 AFSI 曲线，与 IB2d (Octave) 逐帧对照 |
 
 ## 运行环境
 

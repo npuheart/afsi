@@ -21,19 +21,35 @@ spreading / interpolation  f = sum_k F_k ds delta_h,  U = sum u delta h^2  ``IBI
 Lagrangian update          X_h = X + dt/2 U(X);  X += dt U_h(X_h)          same
 =========================  =============================================  ==========================================
 
-``FLUID_MESH=half`` instead uses (Nx/2) x (Ny/2) Q2 cells, whose velocity nodes
-are the IB2d grid (``IBMesh(order=2)``); it is coarser and leaks more volume.
+``FLUID=chorin`` | ``FLUID=ipcs`` — the same fibre solved with the two
+projection schemes (pipeline moved over from ``afsic/demo/demo_444``): P2/P1 on
+(Nx/2) x (Ny/2) quads (velocity nodes = IB2d grid), Peskin 4-point kernel,
+closed box (no-slip walls + one pressure datum), direct load ``b = V_h f_spread``;
+each step: solve, interpolate u at the markers, move X by dt u, re-spread the
+springs.  ``GRAD_DIV`` is the **grad-div stabilisation γ** of the momentum
+predictor (the consistent term ``γ (div u, div v)``, same in Chorin, IPCS and
+``PeskinRK2Solver``): γ = 0 is the plain scheme — the fibre leaks its enclosed
+area and collapses — γ = 100 (default) is stabilised.
 
 Run::
 
     conda activate afsi-dolfinx              # dolfinx 0.10 + MUMPS (no dolfinx_mpc needed)
-    python main.py                           # full IB2d run (T = 1.5, dt = 1e-3)
+    python main.py                           # rk2, full IB2d run (T = 1.5, dt = 1e-3)
     TFINAL=0.1 python main.py                # short check
-    GRAD_DIV=0 python main.py                # plain Taylor–Hood (strong IB leakage)
+    GRAD_DIV=0 python main.py                # rk2 plain Taylor–Hood (strong IB leakage)
+    FLUID=chorin python main.py                         # fiber + Chorin, γ = 100
+    FLUID=chorin GRAD_DIV=0 python main.py              # fiber + Chorin, γ = 0
+    FLUID=ipcs   python main.py                         # fiber + IPCS,   γ = 100
+    FLUID=ipcs   GRAD_DIV=0 python main.py              # fiber + IPCS,   γ = 0
     IB2D_EXAMPLE=/path/to/case python main.py   # any IB2d spring case (see make_rubberband.py)
 
-Output (``OUTPUT_PATH``, default ``./plot``): XDMF fields + ``afsi_result.npz``
-(same layout as ``ib2d_reference.npz``, see ``ib2d_reference.py``).
+Output (``OUTPUT_PATH``, default ``./plot``):
+
+* ``FLUID=rk2``           : XDMF fields + ``afsi_result.npz``;
+* ``FLUID=chorin | ipcs`` : ``afsi_result_<fluid>_g<grad_div>.npz``, e.g.
+  ``afsi_result_chorin_g0.npz`` (same layout as ``ib2d_reference.npz``, see
+  ``ib2d_reference.py``).  ``python compare.py`` overlays every run present in
+  ``plot/`` into the 6-panel x 6-curve shape figure.
 """
 import os
 import time
@@ -46,10 +62,11 @@ import basix.ufl
 import dolfinx
 import ufl
 from dolfinx import fem
+from dolfinx.fem import dirichletbc, locate_dofs_topological
 from dolfinx.fem.petsc import assemble_vector, create_vector
-from dolfinx.mesh import CellType, GhostMode
+from dolfinx.mesh import CellType, GhostMode, locate_entities
 
-from afsic import IBMesh, IBInterpolation
+from afsic import ChorinSolver, IBMesh, IBInterpolation, IPCSSolver
 from afsic.euler.PeskinRK2Solver import PeskinRK2Solver
 
 import ib2d_io
@@ -80,6 +97,13 @@ num_steps = int(round(T / dt))
 out_dir = os.environ.get("OUTPUT_PATH", os.path.join(_here, "plot"))
 os.makedirs(out_dir, exist_ok=True)
 
+FLUID = os.environ.get("FLUID", "rk2").lower()
+assert FLUID in ("rk2", "chorin", "ipcs"), "FLUID must be rk2 | chorin | ipcs"
+# grad-div stabilisation coefficient γ (the "λ" of the projection study):
+#   0   -> plain scheme (fibre projections leak and collapse, as in demo_444)
+#   100 -> default / recommended
+GRAD_DIV = float(os.environ.get("GRAD_DIV", "100"))
+
 X_ib2d = ex["X"]                       # (Nb, 2) IB2d ordering
 conn, k_spring, L_rest, alpha = ex["springs"]
 assert np.all(alpha == 1.0), "only linear IB2d springs are ported"
@@ -92,7 +116,208 @@ if comm.rank == 0:
     print(f"IB2d example : {IB2D_EXAMPLE}")
     print(f"rho={rho} mu={mu} box={Lx}x{Ly} grid={Nx}x{Ny} "
           f"dt={dt} T={T} steps={num_steps} Nb={Nb} springs={len(conn)} ds={ds_ib2d}")
-    print(f"fluid: Q2/Q1 FLUID_MESH={os.environ.get('FLUID_MESH', 'full')} GRAD_DIV={os.environ.get('GRAD_DIV', '100')}")
+    if FLUID == "rk2":
+        print(f"fluid: Q2/Q1 FLUID_MESH={os.environ.get('FLUID_MESH', 'full')} GRAD_DIV={GRAD_DIV:g}")
+
+# ---------------------------------------------------------------------------
+# FLUID=chorin | ipcs — fibre on the P2/P1 projection background
+# ---------------------------------------------------------------------------
+# Pipeline moved over from afsic/demo/demo_444 (fiber case): P2/P1 on
+# (Nx/2) x (Ny/2) quads so that the (Nx+1) x (Ny+1) velocity-node lattice
+# coincides with IB2d's Eulerian grid (spacing 1/Nx), Peskin 4-point kernel
+# (IBInterpolation), closed box (no-slip walls + pressure datum at one point)
+# and the direct-load momentum coupling b = V_h * f_spread.  Unlike the rk2
+# path (periodic, two-stage Peskin), this is the first-order explicit
+# projection coupling: solve, interpolate u at the markers, move X by dt u,
+# re-spread the springs at the new positions.
+# GRAD_DIV is the grad-div stabilisation γ of the momentum predictor
+# (0 = plain scheme -> the fibre leaks area and collapses; 100 = stabilised).
+if FLUID in ("chorin", "ipcs"):
+    N = Nx // 2
+    assert Ny == Nx, "the projection runs assume an Nx x Nx grid"
+    assert N >= 4
+
+    mesh_p = dolfinx.mesh.create_rectangle(
+        comm, ((0.0, 0.0), (Lx, Ly)), (N, N),
+        cell_type=CellType.quadrilateral, ghost_mode=GhostMode.shared_facet)
+    mesh_p.topology.create_connectivity(1, 2)
+    fdim = mesh_p.topology.dim - 1
+    V = fem.functionspace(mesh_p, basix.ufl.element(
+        "Lagrange", mesh_p.topology.cell_name(), 2,
+        shape=(mesh_p.geometry.dim,)))
+    Q = fem.functionspace(mesh_p, basix.ufl.element(
+        "Lagrange", mesh_p.topology.cell_name(), 1))
+
+    walls = locate_entities(mesh_p, fdim,
+                            lambda x: np.logical_or(np.logical_or(
+                                np.isclose(x[0], 0.0), np.isclose(x[0], Lx)),
+                                np.logical_or(np.isclose(x[1], 0.0),
+                                              np.isclose(x[1], Ly))))
+    u_zero = np.array((0.0,) * mesh_p.geometry.dim, dtype=PETSc.ScalarType)
+    bcu = [dirichletbc(u_zero, locate_dofs_topological(V, fdim, walls), V)]
+    pin = dolfinx.mesh.locate_entities_boundary(
+        mesh_p, 0, lambda x: np.logical_and(np.isclose(x[0], 0.0),
+                                            np.isclose(x[1], 0.0)))
+    bcp = [dirichletbc(PETSc.ScalarType(0.0),
+                       locate_dofs_topological(Q, 0, pin), Q)]
+
+    _solver_cls = IPCSSolver if FLUID == "ipcs" else ChorinSolver
+    solver = _solver_cls(V, Q, bcu, bcp, dt, rho, mu,
+                         ib_body_force=False, grad_div=GRAD_DIV)
+    b_direct = create_vector(V)
+    solver.ib_load = b_direct
+    V_h = (Lx / (2 * N)) * (Ly / (2 * N))      # lattice cell area, direct load
+
+    ibmesh = IBMesh(0.0, Lx, 0.0, Ly, N, N, 2)  # order 2: velocity nodes = IB2d grid
+    ib = IBInterpolation(ibmesh)
+    coords_bg = fem.Function(V)
+    coords_bg.interpolate(lambda x: np.array([x[0], x[1]]))
+    ibmesh.build_map(coords_bg._cpp_object)
+    if comm.rank == 0:
+        print(f"fluid: {FLUID} P2/P1 + 4-point kernel, direct load, "
+              f"grad-div γ={GRAD_DIV:g}  (N={N} quads)")
+
+    # --- structure: closed 1-D ring whose cells are the IB2d springs -------
+    adj = [[] for _ in range(Nb)]
+    for a, b in conn:
+        adj[int(a)].append(int(b))
+        adj[int(b)].append(int(a))
+    assert all(len(v) == 2 for v in adj), "IB2d springs must form a closed ring"
+    ring = [0, adj[0][0]]
+    while True:
+        prev, cur = ring[-2], ring[-1]
+        nxt = adj[cur][0] if adj[cur][0] != prev else adj[cur][1]
+        if nxt == ring[0]:
+            break
+        ring.append(nxt)
+        assert len(ring) <= Nb, "ring walk failed"
+    assert len(ring) == Nb and len(set(ring)) == Nb, "ring walk failed"
+    ring = np.array(ring)
+    k_edge = {}
+    for a, b, kk in zip(conn[:, 0], conn[:, 1], k_spring):
+        k_edge[(int(min(a, b)), int(max(a, b)))] = float(kk)
+    k_arr = np.array([k_edge[(min(int(ring[i]), int(ring[(i + 1) % Nb])),
+                              max(int(ring[i]), int(ring[(i + 1) % Nb])))]
+                      for i in range(Nb)])
+
+    pts = X_ib2d[ring]                          # ring-ordered marker positions
+    cells_ring = np.column_stack([np.arange(Nb),
+                                  (np.arange(Nb) + 1) % Nb]).astype(np.int64)
+    coord_el = basix.ufl.element("Lagrange", "interval", 1, shape=(2,))
+    structure = dolfinx.mesh.create_mesh(comm, cells_ring, coord_el, pts)
+    Vs = fem.functionspace(structure, coord_el)
+    solid_coords = fem.Function(Vs, name="solid_coords")
+    solid_force = fem.Function(Vs, name="solid_force")
+    solid_velocity = fem.Function(Vs, name="solid_velocity")
+    solid_coords.interpolate(lambda x: np.array([x[0], x[1]]))
+    # P1 dof order is a permutation of the input list: recover the ring order
+    dof_rows = Vs.tabulate_dof_coordinates()[:, :2]
+    vert_dof = np.array([int(np.argmin(np.linalg.norm(dof_rows - p, axis=1)))
+                         for p in pts])
+    assert len(np.unique(vert_dof)) == Nb, "dof matching is not injective"
+    assert np.allclose(dof_rows[vert_dof], pts, atol=1e-12), \
+        "marker order does not recover the IB2d list"
+    ib.evaluate_current_points(solid_coords._cpp_object)
+
+    def marker_xy():
+        """Marker positions in the original IB2d order."""
+        xy_ring = solid_coords.x.array.reshape(-1, 2)[vert_dof]
+        out = np.empty((Nb, 2))
+        out[ring] = xy_ring
+        return out
+
+    def spring_force():
+        """IB2d spring force density x ds in ring order, written in dof order."""
+        full = solid_coords.x.array.reshape(-1, 2)          # dof order
+        xy = full[vert_dof]                                 # ring order
+        f = (k_arr[:, None] * (np.roll(xy, -1, axis=0) - xy)
+             + np.roll(k_arr, 1)[:, None] * (np.roll(xy, 1, axis=0) - xy)
+             ) * ds_ib2d                                    # IB2d Lagrangian weight
+        out = np.zeros_like(full)
+        out[vert_dof] = f
+        solid_force.x.array[:] = out.ravel()
+        solid_force.x.scatter_forward()
+
+    # sanity check of the spring force against the IB2d formula at t = 0
+    spring_force()
+    Fl = np.zeros_like(X_ib2d)
+    for (a, b), kk, LL in zip(conn, k_spring, L_rest):
+        d = X_ib2d[b] - X_ib2d[a]
+        nd = np.linalg.norm(d)
+        s = kk * (nd - LL) * d / nd
+        Fl[a] += s
+        Fl[b] -= s
+    f_ring = solid_force.x.array.reshape(-1, 2)[vert_dof]
+    err_F = np.abs(f_ring - Fl[ring] * ds_ib2d).max() / np.abs(Fl * ds_ib2d).max()
+    if comm.rank == 0:
+        print(f"spring force vs IB2d formula: rel. max err = {err_F:.2e}")
+    assert err_F < 1e-10
+
+    # --- output sampling on the IB2d grid (same as the rk2 path) -----------
+    Vdof = V.tabulate_dof_coordinates()[:, :2]
+    iu = np.rint(Vdof[:, 0] / (Lx / Nx)).astype(int)
+    ju = np.rint(Vdof[:, 1] / (Ly / Ny)).astype(int)
+    on_grid = lambda P, i, j: (np.isclose(P[:, 0], i * (Lx / Nx))
+                               & np.isclose(P[:, 1], j * (Ly / Ny)))
+    keep = (iu < Nx) & (ju < Ny) & on_grid(Vdof, iu, ju)
+    Q2s = fem.functionspace(mesh_p, ("Lagrange", 2))
+    p_grid_fn = fem.Function(Q2s)
+    Pdof = Q2s.tabulate_dof_coordinates()[:, :2]
+    ip = np.rint(Pdof[:, 0] / (Lx / Nx)).astype(int)
+    jp = np.rint(Pdof[:, 1] / (Ly / Ny)).astype(int)
+    keep_p = (ip < Nx) & (jp < Ny) & on_grid(Pdof, ip, jp)
+
+    def grid_fields():
+        u = np.zeros((Ny, Nx, 2))
+        u[ju[keep], iu[keep]] = solver.u_.x.array.reshape(-1, 2)[keep]
+        p_grid_fn.interpolate(solver.p_)
+        p = np.zeros((Ny, Nx))
+        p[jp[keep_p], ip[keep_p]] = p_grid_fn.x.array[keep_p]
+        return u, p
+
+    def band_area(xy):
+        return 0.5 * abs(np.sum(xy[:, 0] * np.roll(xy[:, 1], -1)
+                                - np.roll(xy[:, 0], -1) * xy[:, 1]))
+
+    # --- time loop (explicit projection coupling, as in demo_444) ----------
+    hist = {"t": [], "X": [], "u": [], "p": [], "area": []}
+    tic = time.perf_counter()
+    for step in range(num_steps + 1):
+        t = step * dt
+        if step > 0:
+            solver.solve_one_step()
+            ib.fluid_to_solid(solver.u_._cpp_object, solid_velocity._cpp_object)
+            solid_coords.x.array[:] += solid_velocity.x.array[:] * dt
+            solid_coords.x.scatter_forward()
+            ib.evaluate_current_points(solid_coords._cpp_object)
+            spring_force()
+            ib.solid_to_fluid(solver.f._cpp_object, solid_force._cpp_object)
+            solver.f.x.scatter_forward()
+            solver.f.x.petsc_vec.copy(result=b_direct)
+            b_direct.scale(V_h)
+        if step % print_dump == 0 or step == num_steps:
+            xy = marker_xy()
+            ug, pg = grid_fields()
+            hist["t"].append(t)
+            hist["X"].append(xy)
+            hist["u"].append(ug)
+            hist["p"].append(pg)
+            hist["area"].append(band_area(xy))
+            if comm.rank == 0:
+                print(f"step {step:6d}  t={t:.4f}  "
+                      f"max|u|={np.abs(solver.u_.x.array).max():.4e}  "
+                      f"area={hist['area'][-1]:.6f}  "
+                      f"wall={time.perf_counter() - tic:.1f}s", flush=True)
+
+    tag = f"{FLUID}_g{GRAD_DIV:g}"
+    np.savez_compressed(os.path.join(out_dir, f"afsi_result_{tag}.npz"),
+                        t=np.array(hist["t"]), X=np.array(hist["X"]),
+                        u=np.array(hist["u"]), p=np.array(hist["p"]),
+                        dx=Lx / Nx, dy=Ly / Ny)
+    if comm.rank == 0:
+        print(f"done in {time.perf_counter() - tic:.1f}s -> "
+              f"{out_dir}/afsi_result_{tag}.npz")
+    raise SystemExit(0)
 
 # ---------------------------------------------------------------------------
 # Fluid: periodic Taylor–Hood, Peskin two-stage scheme
@@ -106,7 +331,7 @@ ncx, ncy = (Nx // 2, Ny // 2) if FLUID_MESH == "half" else (Nx, Ny)
 mesh = dolfinx.mesh.create_rectangle(
     comm, ((0.0, 0.0), (Lx, Ly)), (ncx, ncy),
     cell_type=CellType.quadrilateral, ghost_mode=GhostMode.shared_facet)
-GRAD_DIV = float(os.environ.get("GRAD_DIV", "100"))
+# GRAD_DIV (grad-div γ) is parsed once with the shared env block above.
 solver = PeskinRK2Solver(mesh, (0.0, Lx, 0.0, Ly), dt, rho, mu, grad_div=GRAD_DIV)
 Vc = solver.V
 

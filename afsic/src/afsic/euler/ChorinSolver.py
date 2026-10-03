@@ -19,7 +19,7 @@ _VISC_CN = os.environ.get("CHORIN_VISC_CN", "0").lower() not in ("0", "", "false
 class ChorinSolver:
 
     def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw, drag=None,
-                 ib_body_force=True):
+                 ib_body_force=True, grad_div=0.0):
         """Chorin projection solver.
 
         ib_body_force : bool, default True
@@ -27,6 +27,10 @@ class ChorinSolver:
             False —— 省略该弱式项，改由调用方通过 ``self.ib_load`` 每步提供一个
                      "已装配、已含符号"的 IB 载荷 PETSc 向量（直接载荷模式，
                      对应 main.py 的 IB_DIRECT_LOAD；两种方式不得同时使用）。
+        grad_div : float, default 0.0
+            Grad-div 稳定化系数 γ ≥ 0：> 0 时动量（预测步）弱式增加一致的
+            γ (div u, div v) 项（与 ``PeskinRK2Solver`` 相同的约定；IB2d
+            rubberband demo 的 fiber 投影对比用 γ = 0 / 100）。默认 0 = 原格式。
         """
         self.bcu = bcu
         self.bcp = bcp
@@ -42,6 +46,7 @@ class ChorinSolver:
         mesh = V.mesh
         self.mesh = mesh
         self._dt = dt_raw  # store raw dt for direct forcing
+        self.grad_div = grad_div
 
         k = Constant(mesh, PETSc.ScalarType(dt_raw))
         mu = Constant(mesh, PETSc.ScalarType(mu_raw))
@@ -62,6 +67,9 @@ class ChorinSolver:
             F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx
         else:
             F1 += inner(mu * grad(u), grad(v)) * dx
+        if grad_div:
+            # grad-div 稳定化：γ (div u, div v)（只含试探函数 u，进 A1）
+            F1 += Constant(mesh, PETSc.ScalarType(grad_div)) * div(u) * div(v) * dx
         if ib_body_force:
             F1 -= inner(f, v) * dx
         if drag is not None:

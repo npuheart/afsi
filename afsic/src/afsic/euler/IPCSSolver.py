@@ -23,7 +23,8 @@ _NO_LAG = os.environ.get("IPCS_NO_LAG", "0").lower() not in ("0", "", "false", "
 
 class IPCSSolver:
     def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw,
-                 ds_p=None, p_traction=None, drag=None, ib_body_force=True):
+                 ds_p=None, p_traction=None, drag=None, ib_body_force=True,
+                 grad_div=0.0):
         """Incremental pressure-correction solver.
 
         Parameters
@@ -41,10 +42,16 @@ class IPCSSolver:
         p_traction : dolfinx.fem.Function or Constant, optional
             Known pressure datum ``p_bc(t)`` on the ``ds_p`` facets.  The
             caller must update its value every time step.
+        grad_div : float, default 0.0
+            Grad-div 稳定化系数 γ ≥ 0：> 0 时预测步弱式增加一致的
+            γ (div u, div v) 项（与 ChorinSolver / ``PeskinRK2Solver`` 相同约定；
+            IB2d rubberband demo 的 fiber 投影对比用 γ = 0 / 100）。
+            默认 0 = 原格式。
         """
         self.bcu = bcu
         self.bcp = bcp
         self.p_traction = p_traction
+        self.grad_div = grad_div
         
         self.V = V
         self.Q = Q
@@ -76,6 +83,9 @@ class IPCSSolver:
             F1 += mu * inner(grad(u), grad(v)) * dx
         else:
             F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx
+        if grad_div:
+            # grad-div 稳定化：γ (div u, div v)（只含试探函数 u，进 A1）
+            F1 += Constant(mesh, PETSc.ScalarType(grad_div)) * div(u) * div(v) * dx
         if not _NO_LAG:
             F1 -= dot(p_, div(v)) * dx
         if ib_body_force:
