@@ -43,3 +43,6 @@ __all__ = [
 from .euler.RTFluidSolver import RTFluidSolver
 from .coupling import RTNodalCoupling
 __all__ += ["RTFluidSolver", "RTNodalCoupling"]
+
+from .euler.PeskinRK2Solver import PeskinRK2Solver
+__all__ += ["PeskinRK2Solver"]

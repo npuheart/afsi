@@ -30,6 +30,12 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 
 > `demo_422` 目前为空目录（占位）。
 
+## IB2d 移植算例（`ib2d/`）
+
+| Demo | 名称 | 说明 |
+|---|---|---|
+| `ib2d/01_rubberband` | IB2d 弹性圆环 | 读取 IB2d 原始输入；周期 Taylor–Hood + Peskin 两阶段格式（`PeskinRK2Solver`），与 IB2d (Octave) 逐帧对照 |
+
 ## 运行环境
 
 - `afsi-dolfinx` conda 环境（dolfinx 0.10.0，Python 3.12），`afsic` 包可编辑安装
