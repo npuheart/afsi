@@ -36,6 +36,9 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 |---|---|---|
 | `ib2d/demo_444` | IB2d 弹性圆环 | 读取 IB2d 原始输入；周期 Taylor–Hood + Peskin 两阶段（`PeskinRK2Solver`）与 fiber Chorin/IPCS 投影（grad-div γ=0/100）共 5 条 AFSI 曲线，与 IB2d (Octave) 逐帧对照 |
 | `ib2d/demo_445` | IB2d 水母游动 | Hoover & Miller 水母模型（弹簧 + 非不变梁 + 目标点 + 肌肉驱动 `update_Springs`），周期 Taylor–Hood + Peskin 两阶段；减分辨率版（48×160, dt=4e-5, T=1 s），与 IB2d 参考（pyIB2d，纯 Python，无需 MATLAB）逐帧对照 |
+| `ib2d/demo_446` | IB2d 摆动梁 | `Wobbly_Beam`：两端钉住的弹性拱梁（不变梁 $\kappa=7.5\times10^9$ + 目标点）在 1×1 周期盒中摆动（32×32, dt=5e-5, T=0.05）；全程标记点偏差 ≤1.8h，与 pyIB2d 对照 |
+| `ib2d/demo_447` | IB2d 阻尼橡皮筋 | `Rubberband_with_Damped_Springs`：零静长强收缩闭环（64 点阻尼弹簧环，32×32, dt=1e-3, T=1.5s）；早段一致、长时为格式差异"应力算例"（两码 dt 均收敛，详见其 readme） |
+| `ib2d/demo_448` | IB2d 心管肌肉泵 | `HeartTube_Muscle`：两条平行弹性壁（弹簧 + 不变梁 + 4 角目标点）+ 153 条 Hill 肌肉带，行波激活（10 Hz）驱动的蠕动泵（128×128, dt=1e-4, T=0.25 s），与 pyIB2d 对照 |
 
 ## 运行环境
 
