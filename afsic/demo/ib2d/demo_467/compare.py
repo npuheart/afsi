@@ -124,6 +124,8 @@ def metrics(G, A, R):
         df = np.abs(A["f"][k] - R["f"][k])
         rel = (np.linalg.norm(du[G.away]) / np.linalg.norm(ur[G.away])
                if np.linalg.norm(ur[G.away]) else 0.0)
+        dtr = (np.linalg.norm(A["tracers"][k] - R["tracers"][k], axis=1).max()
+               if "tracers" in A.files and "tracers" in R.files else np.nan)
         rows.append((t_k,
                      np.linalg.norm(A["X"][k] - R["X"][k], axis=1).max(),
                      du[G.away].max(), du[G.band].max(), rel,
@@ -131,7 +133,7 @@ def metrics(G, A, R):
                      np.abs(ua[G.win]).max(), np.abs(ur[G.win]).max(),
                      ur[G.col, G.nx // 2, 0].sum() * G.hy,
                      ua[G.col, G.nx // 2, 0].sum() * G.hy,
-                     df[G.away].max(), res.max() if res.size else 0.0))
+                     df[G.away].max(), res.max() if res.size else 0.0, dtr))
     return keep, rows
 
 
@@ -140,12 +142,12 @@ def report(tag, G, A, R, keep, rows):
           f"frames, t = {rows[0][0]:.5f} .. {rows[-1][0]:.5f})")
     print(f"{'t':>8} {'dXmax/h':>9} {'max|du|away':>12} {'relL2_away':>11} "
           f"{'max|du|band':>12} {'max|u| a/r':>19} {'window a/r':>19} "
-          f"{'flux a/r':>19} {'df away':>9}")
+          f"{'flux a/r':>19} {'df away':>9} {'dtracer':>9}")
     for r in rows:
         print(f"{r[0]:8.5f} {r[1] / G.hx:9.2e} {r[2]:12.3e} {r[4]:11.3e} "
               f"{r[3]:12.3e} {r[5]:9.4f}/{r[6]:<9.4f} "
               f"{r[7]:9.4f}/{r[8]:<9.4f} {r[10]:9.5f}/{r[9]:<9.5f} "
-              f"{r[11]:9.3e}")
+              f"{r[11]:9.3e} {r[13]:9.3e}")
     r = rows[-1]
     print(f"markers          : max|dX| {r[1]:.3e} m = {r[1] / G.hx:.2e} h")
     print(f"velocity, away from the IB band: max|du| {r[2]:.3e} = "
@@ -165,6 +167,11 @@ def report(tag, G, A, R, keep, rows):
         print("window max|u| AFSI/IB2d at t = "
               + ", ".join(f"{rows[i][0]:.4f}: {rows[i][7]:.4f}/{rows[i][8]:.4f}"
                           for i in sel))
+    if not np.isnan(r[13]):
+        trr = np.array([x[13] for x in rows])
+        print(f"tracers          : max|dX_t| {np.nanmax(trr):.3e} m = "
+              f"{np.nanmax(trr) / G.hx:.2e} h "
+              f"({A['tracers'].shape[1]} passive points)")
     print(f"forcing check    : |f_x - F_x^module(u^AFSI)| <= {r[12]:.3e} on the "
           f"window nodes away from the band")
 
@@ -206,7 +213,7 @@ dX = np.array([r[1] for r in rows])
 with open(os.path.join(out, "compare_table.csv"), "w") as fh:
     fh.write("t,dXmax,du_max_away,du_max_band,relL2_away,umax_afsi,umax_ib2d,"
              "umax_window_afsi,umax_window_ib2d,flux_ib2d,flux_afsi,df_max,"
-             "force_residual\n")
+             "force_residual,dtracer_max\n")
     for r in rows:
         fh.write(",".join(f"{v:.10g}" for v in r) + "\n")
 
@@ -217,7 +224,7 @@ dX = np.array([r[1] for r in rows])
 with open(os.path.join(out, "compare_table.csv"), "w") as fh:
     fh.write("t,dXmax,du_max_away,du_max_band,relL2_away,umax_afsi,umax_ib2d,"
              "umax_window_afsi,umax_window_ib2d,flux_ib2d,flux_afsi,df_max,"
-             "force_residual\n")
+             "force_residual,dtracer_max\n")
     for r in rows:
         fh.write(",".join(f"{v:.10g}" for v in r) + "\n")
 

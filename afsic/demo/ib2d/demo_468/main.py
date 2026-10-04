@@ -83,6 +83,8 @@ Nb = X_ib2d.shape[0]
 sp = ex.get("springs")                     # optional linear springs
 bm = ex.get("beams")                       # optional invariant beams
 tg = ex["targets"]                         # pinned target points
+trs = ex.get("tracers")                    # optional passive tracers
+Nt = 0 if trs is None else trs.shape[0]
 ds_ib2d = Lx / (2 * Nx)   # IB2d sets ds = Lx/(2Nx)
 
 assert "mass" not in ex and "muscles" not in ex and "d_springs" not in ex \
@@ -96,6 +98,8 @@ if comm.rank == 0:
         desc.insert(0, f"{len(sp['conn'])} springs (k={sp['k'][0]:.2g})")
     if bm is not None:
         desc.append(f"{len(bm['p1'])} invariant beams (kb={bm['kb'][0]:.2g})")
+    if Nt:
+        desc.append(f"{Nt} passive tracers")
     print(f"IB2d example : {IB2D_EXAMPLE}")
     print(f"rho={rho} mu={mu} box={Lx}x{Ly} grid={Nx}x{Ny} dt={dt} T={T} "
           f"steps={num_steps} ds={ds_ib2d}")
@@ -159,6 +163,33 @@ assert np.allclose(dof_rows[dof_of_ib2d], X_ib2d, atol=1e-12)
 
 def marker_array(fn):
     return fn.x.array.reshape(-1, 2)[dof_of_ib2d]
+
+
+def wrap_periodic(fn, dofs):
+    """IB2d wraps marker/tracer coordinates into [0, L) after each update."""
+    a = fn.x.array.reshape(-1, 2)
+    a[dofs, 0] %= Lx
+    a[dofs, 1] %= Ly
+
+
+# passive tracers: the same interpolation machinery, no force feedback
+if Nt:
+    tcells = np.column_stack([np.arange(Nt - 1), np.arange(1, Nt)]).astype(np.int64)
+    tmesh = dolfinx.mesh.create_mesh(comm, tcells, coord_el, trs)
+    Vt = fem.functionspace(tmesh, coord_el)
+    Xt, Ut = fem.Function(Vt, name="tracer_position"), \
+        fem.Function(Vt, name="tracer_velocity")
+    _tdof = Vt.tabulate_dof_coordinates()[:, :2]
+    dof_of_tracer = np.array([int(np.argmin(np.linalg.norm(_tdof - p, axis=1)))
+                              for p in trs])
+    assert np.allclose(_tdof[dof_of_tracer], trs, atol=1e-12)
+    _t0 = np.empty_like(trs)
+    _t0[dof_of_tracer] = trs
+    Xt.x.array[:] = _t0.ravel()
+
+
+    def tracer_array():
+        return Xt.x.array.reshape(-1, 2)[dof_of_tracer]
 
 
 tgt_ids, tgt_k = tg["ids"], tg["k"]
@@ -348,6 +379,8 @@ def write_output(t):
 
 hist = {"t": [0.0], "X": [marker_array(X).copy()],
         "Xa": [tgt_anchor.copy()]}
+if Nt:
+    hist["Xt"] = [tracer_array().copy()]
 u0, p0, f0 = grid_fields()
 hist["u"], hist["p"], hist["f"] = [u0], [p0], [f0]
 write_output(0.0)
@@ -382,6 +415,15 @@ for step in range(num_steps):
     ib.fluid_to_solid(ib_velocity(solver.u_h)._cpp_object, U_s._cpp_object)
     X.x.array[:] += dt * U_s.x.array
     X.x.scatter_forward()
+    wrap_periodic(X, dof_of_ib2d)
+
+    # (5b) passive tracers ride the same interpolation (no force feedback)
+    if Nt:
+        ib.evaluate_current_points(Xt._cpp_object)
+        ib.fluid_to_solid(ib_velocity(solver.u_h)._cpp_object, Ut._cpp_object)
+        Xt.x.array[:] += dt * Ut.x.array
+        Xt.x.scatter_forward()
+        wrap_periodic(Xt, dof_of_tracer)
 
     ctime += dt
     # Dump schedule: exactly the steps on which the pyIB2d driver writes its
@@ -399,6 +441,8 @@ for step in range(num_steps):
         hist["t"].append(t)
         hist["X"].append(marker_array(X).copy())
         hist["Xa"].append(tgt_anchor.copy())
+        if Nt:
+            hist["Xt"].append(tracer_array().copy())
         ug, pg, fg = grid_fields()
         hist["u"].append(ug)
         hist["p"].append(pg)
@@ -421,6 +465,8 @@ np.savez_compressed(fname,
                     Xa=np.array(hist["Xa"]),
                     u=np.array(hist["u"]), p=np.array(hist["p"]),
                     f=np.array(hist["f"]),
-                    dx=Lx / Nx, dy=Ly / Ny, dt=dt, nx=Nx, ny=Ny)
+                    dx=Lx / Nx, dy=Ly / Ny, dt=dt, nx=Nx, ny=Ny,
+                    n_tracers=Nt,
+                    **({"tracers": np.array(hist["Xt"])} if Nt else {}))
 if comm.rank == 0:
     print(f"done in {elapsed:.1f}s -> {fname}")
