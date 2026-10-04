@@ -45,16 +45,15 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_453` | IB2d 多孔滑移橡皮筋 | `Single_Porous_Rubberband`：64 点收缩环（弹簧 $k=10^7$、$L_0=0$）全点 porous 滑移（$\kappa=10^{-4}$，4 阶差分法向；porous 公式与 pyIB2d 逐位一致）（32×32, dt=1e-4, T=0.1）；**塌缩对 grad-div γ 极敏感**——γ=0 时 t≈0.043 崩溃（伪散度漏流），γ=2.5 时全程 dX≤1h、面积轨迹重合 |
 | `ib2d/demo_454` | IB2d 孔弹性橡皮筋 | `Poroelastic_Rubberband`：同 453 的收缩环 + porous 滑移，再加 **poroelastic**（每步额外位移 $\Delta t\,F_{\rm spring}/(\mu c)$，$c=2.5\times10^5$，用 $X_h$ 处弹簧力；驱动用上一步 F 记账）（32×32, dt=1e-4, T=0.1, γ=2.5）；全程 dX≤0.75h、面积轨迹重合（交叉）|
 | `ib2d/demo_455` | IB2d 不变梁橡皮筋 | `Rubberband_with_Beams`：249 点椭圆环（半轴 0.2×0.4）用**不变梁**（$\kappa=10^7$，参考曲率 = 等面积圆 $R=0.2828$）连接，在 1×1 周期盒（$\mu=0.0025$）里做"椭圆↔圆"摆动（64×64, dt=1e-2, T=25）；全程 dX≤2.0h（均值 1.24h，t≤4 内 0.83h）；**核查发现 pyIB2d 副本的 `input2d` 把开关误写成 `nonInv_beams`（其解析器不认，原样跑该算例结构力为 0）**，本移植按 matIB2d 规范版用 `beams = 1`；γ=2.5 可把面积漂移从 4.9% 压到 0.05%（详见 readme） |
+| `ib2d/demo_456` | IB2d 被动标量扩散 | `Concentration_Diffusion`（`Diffusion_Chamber`）：496 点方形腔壁（全为钉死目标点）+ 中心 $3\times3$ 节点浓度团块，$k=0.025$（1×1 周期盒, $\mu=10$, 64×64, dt=1e-4, T=0.5）；腔壁被钉死 ⇒ IB 力/流速恒为 0，是**纯扩散基准**。AFSI 新增**周期 Q1 有限元被动标量输运**（复用 `PeskinRK2Solver` 的周期约化 `periodic_prolongation`，Q1 自由度 = IB2d 网格节点；集中质量显式推进）。质量两侧严格守恒（9.000000）；末态 $\max|C^{AFSI}-C^{IB2d}|=2.5\times10^{-5}$（峰值 0.18%）、相对 $L_2$ 1.3e-3；与**含像源的精确解**相比最大相对误差 AFSI 2.4e-4 / IB2d 4.3e-3（无界公式 $\sigma_0^2+2kt$ 因像源偏 +0.55%，两侧都跟着精确解走）|
 
-`pyIB2d/Examples` 中尚未移植的 5 个算例及其阻塞点（供后续接续）：
+`pyIB2d/Examples` 中尚未移植的 4 个算例及其阻塞点（供后续接续）：
 
 | 算例 | 阻塞点 |
 |---|---|
-| `Rubberband_with_Beams` | ✅ 本次完成（`ib2d/demo_455`） |
 | `User_Defined_Fiber_Model` | 需 `user_force_model` 通用力接口（物理上与 demo_444 的线弹簧环等价，仅换文件格式） |
 | `Thrips` | 质量点 + 重力（单粒子，demo_450 的模型已覆盖，价值较低） |
-| `Concentration_Diffusion` | 需新增**被动标量 advection–diffusion 求解器**（IB2d 为网格上的分裂上风显式格式；结构为全钉死的腔壁，流体静止，实质是纯扩散基准） |
-| `Rayleigh_Taylor_Instability` | 需 Boussinesq 近似 + 标量 + 外部驱动力（128×256） |
+| `Rayleigh_Taylor_Instability` | 需 Boussinesq 近似 + 标量（demo_456 已备）+ 外部驱动力（128×256） |
 | `Turek_Hron` | 需外部体积力驱动通道流（1024×128、dt=5e-5、T=8 ≈ 16 万步），且要动核心流体求解器，本仓库已有独立 Turek 算例 `demo_402` |
 
 ## 运行环境
