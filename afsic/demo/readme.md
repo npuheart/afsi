@@ -49,13 +49,13 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_457` | IB2d 通用用户力接口 | `User_Defined_Fiber_Model`：为 demo_444 的同一椭圆环（64 点、零静长线弹簧 $k=2.5\times10^4$、32×32、T=1.5）改走 **IB2d 通用用户力接口**（`.user_force` + 用户模块 `give_Me_General_User_Defined_Force_Densities.py`，pyIB2d 从运行目录 import）。力公式逐位复刻（校验差 1.5e-16）；结果与 demo_444 逐位一致：$\gamma=0$ 环塌缩（末态面积 2.4e-4）→ $\gamma=100$ 面积守恒（0.2423，参考自身泄漏到 0.1840），$t\le0.84$ 内 dX≤0.45h |
 | `ib2d/demo_458` | IB2d 单质点重力沉降 | `Thrips`：**单个**标记点（无自身结构）经 $k=10^3$ 质量弹簧连到 $M=10^{-3}$ kg 幽灵质点，重力仅作用于幽灵（$g=9.80665$），0.5×0.5 周期盒、32×32、dt=1e-4、T=0.1 ⇒ 弹簧-质量-阻尼振子（$\omega=1000$ rad/s）缓慢下沉。结构自由度用 **DG0 "point" 单元**承载（1 自由度 = 1 粒子）；复刻 `Supp.py` 的 mass 记账。标记点轨迹最大偏差 **6.6e-7 m = 4.2e-5 h**，位移比 0.942（小信号测试） |
 | `ib2d/demo_459` | IB2d 动态目标点驱动 | `Moving_Rubberband`（首个 `matIB2d` 算例）：64 点圆周橡皮筋（半轴 0.2、无弹簧/无梁，全部为 $k=10^7$ 目标点）在 1×1 周期盒（$\mu=10$、32×32、dt=1e-4、T=0.05）被 `.m` 驱动规律拖拽——每步 $y{+}{=}(s/2)dt$ 上浮、$x$ 按 0.05 s 周期左右往返（$s=20$ m/s），即一步拖 1e-3 m。AFSI 新增：**1-based→0-based 编号转换**（`load_example(index_base=1)`，pyIB2d 直接用文件编号索引会越界）、**动态目标点递推**（与 pyIB2d 同步位调用、同一递推）、以及**与参考逐帧同步的输出帧**（pyIB2d 第 $k$ 帧其实是第 $5k{+}1$ 步的状态而时间戳晚一步，属上游约定；差一步对 20 m/s 的运动就是 0.002 m 假误差）。标记点偏差典型 **2.1e-5 m（6.6e-4 h）**、最大 3.3e-4 m（$x$ 折返点）；形心最大差 8.8e-5 m；目标点递推一致到 **1.6e-16 m**；"标记点滞后锚点"曲线两侧一致到 1e-5 m（稳态 ~1.1e-3 m = $s\,dt/2$）|
+| `ib2d/demo_460` | IB2d 数据文件驱动的移动目标点 | `Pulsing_Heart/32x32`：384 点心脏轮廓（无弹簧/无梁，全部 $k=10^8$ 目标点）在 1×1 周期盒（$\mu=0.5$、32×32、dt=1e-5、T=0.1=1 万步）内按 `update_Target_Point_Positions.m` 的两相多项式规律在 `All_Positions.txt` 的舒张/收缩两条形线之间插值（周期 0.05 s，锚点行程最大 0.119 m = 3.81 h）。锚点与 `.m` 递推**逐位一致**；形状质心最大差 **5.1e-6 m**；包围面积与预设多边形相差 ≤7e-4（IB2d 2.9e-3）；收缩–舒张相位完全同步。标记点逐点互差中位 1.21e-2 m（0.39 h）——经 dt/2 参考（自身仅变 ≤3.2e-3 m）与 $k/10$ 缩放（互差同步放大到 2.9e-2 m）确认这是 **$k=10^8$ 罚力柔度之差**而非时间/相位失配；本算例 `max|u|` 达 341 m/s，速度场只能在滤波意义下比较（readme 有完整证据）|
 
 `pyIB2d/Examples` 已全部移植完毕；下列 `matIB2d/Examples` 算例正在按批次移植
 （本仓库 demo 编号续排）：
 
 | 算例 | 说明 | 新增机制 |
 |---|---|---|
-| `Example_Pulsing_Heart/32x32` | 两相目标点插值的心脏泵（`All_Positions.txt` + 多项式相位插值） | 数据文件驱动的移动目标点 |
 | `Example_Corals/Single_Coral` | 多项式拟合驱动的珊瑚触手（64²，原算例 25 万步 ⇒ 缩减 T 并记录） | 多目标点 + 大位移移动 |
 | `Example_Porous_Rubberbands/Compare_Porous_NonPorous_Rubberbands` | 多孔 vs 非多孔双环 A/B | 多结构体 + 多孔介质（A/B 对照） |
 | `Example_HeartTube/Update_Springs_Peristaltic_Pumping` | 变静长（`update_springs`）蠕动泵 | 时变静长驱动 |
