@@ -46,15 +46,28 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_454` | IB2d 孔弹性橡皮筋 | `Poroelastic_Rubberband`：同 453 的收缩环 + porous 滑移，再加 **poroelastic**（每步额外位移 $\Delta t\,F_{\rm spring}/(\mu c)$，$c=2.5\times10^5$，用 $X_h$ 处弹簧力；驱动用上一步 F 记账）（32×32, dt=1e-4, T=0.1, γ=2.5）；全程 dX≤0.75h、面积轨迹重合（交叉）|
 | `ib2d/demo_455` | IB2d 不变梁橡皮筋 | `Rubberband_with_Beams`：249 点椭圆环（半轴 0.2×0.4）用**不变梁**（$\kappa=10^7$，参考曲率 = 等面积圆 $R=0.2828$）连接，在 1×1 周期盒（$\mu=0.0025$）里做"椭圆↔圆"摆动（64×64, dt=1e-2, T=25）；全程 dX≤2.0h（均值 1.24h，t≤4 内 0.83h）；**核查发现 pyIB2d 副本的 `input2d` 把开关误写成 `nonInv_beams`（其解析器不认，原样跑该算例结构力为 0）**，本移植按 matIB2d 规范版用 `beams = 1`；γ=2.5 可把面积漂移从 4.9% 压到 0.05%（详见 readme） |
 | `ib2d/demo_456` | IB2d 被动标量扩散 | `Concentration_Diffusion`（`Diffusion_Chamber`）：496 点方形腔壁（全为钉死目标点）+ 中心 $3\times3$ 节点浓度团块，$k=0.025$（1×1 周期盒, $\mu=10$, 64×64, dt=1e-4, T=0.5）；腔壁被钉死 ⇒ IB 力/流速恒为 0，是**纯扩散基准**。AFSI 新增**周期 Q1 有限元被动标量输运**（复用 `PeskinRK2Solver` 的周期约化 `periodic_prolongation`，Q1 自由度 = IB2d 网格节点；集中质量显式推进）。质量两侧严格守恒（9.000000）；末态 $\max|C^{AFSI}-C^{IB2d}|=2.5\times10^{-5}$（峰值 0.18%）、相对 $L_2$ 1.3e-3；与**含像源的精确解**相比最大相对误差 AFSI 2.4e-4 / IB2d 4.3e-3（无界公式 $\sigma_0^2+2kt$ 因像源偏 +0.55%，两侧都跟着精确解走）|
+| `ib2d/demo_457` | IB2d 通用用户力接口 | `User_Defined_Fiber_Model`：为 demo_444 的同一椭圆环（64 点、零静长线弹簧 $k=2.5\times10^4$、32×32、T=1.5）改走 **IB2d 通用用户力接口**（`.user_force` + 用户模块 `give_Me_General_User_Defined_Force_Densities.py`，pyIB2d 从运行目录 import）。力公式逐位复刻（校验差 1.5e-16）；结果与 demo_444 逐位一致：$\gamma=0$ 环塌缩（末态面积 2.4e-4）→ $\gamma=100$ 面积守恒（0.2423，参考自身泄漏到 0.1840），$t\le0.84$ 内 dX≤0.45h |
+| `ib2d/demo_458` | IB2d 单质点重力沉降 | `Thrips`：**单个**标记点（无自身结构）经 $k=10^3$ 质量弹簧连到 $M=10^{-3}$ kg 幽灵质点，重力仅作用于幽灵（$g=9.80665$），0.5×0.5 周期盒、32×32、dt=1e-4、T=0.1 ⇒ 弹簧-质量-阻尼振子（$\omega=1000$ rad/s）缓慢下沉。结构自由度用 **DG0 "point" 单元**承载（1 自由度 = 1 粒子）；复刻 `Supp.py` 的 mass 记账。标记点轨迹最大偏差 **6.6e-7 m = 4.2e-5 h**，位移比 0.942（小信号测试） |
 
-`pyIB2d/Examples` 中尚未移植的 4 个算例及其阻塞点（供后续接续）：
+`pyIB2d/Examples` 已全部移植完毕；下列 `matIB2d/Examples` 算例正在按批次移植
+（本仓库 demo 编号续排）：
 
-| 算例 | 阻塞点 |
+| 算例 | 说明 |
 |---|---|
-| `User_Defined_Fiber_Model` | 需 `user_force_model` 通用力接口（物理上与 demo_444 的线弹簧环等价，仅换文件格式） |
-| `Thrips` | 质量点 + 重力（单粒子，demo_450 的模型已覆盖，价值较低） |
-| `Rayleigh_Taylor_Instability` | 需 Boussinesq 近似 + 标量（demo_456 已备）+ 外部驱动力（128×256） |
-| `Turek_Hron` | 需外部体积力驱动通道流（1024×128、dt=5e-5、T=8 ≈ 16 万步），且要动核心流体求解器，本仓库已有独立 Turek 算例 `demo_402` |
+| `Example_Moving_Rubberband` | 移动目标点（`update_target`）驱动橡皮筋 |
+| `Example_Pulsing_Heart/32x32` | 两相目标点插值的心脏泵（`update_target`） |
+| `Example_Corals/Single_Coral` | 移动目标点驱动的珊瑚生长 |
+| `Example_Porous_Rubberbands/Compare_Porous_NonPorous_Rubberbands` | 多孔 vs 非多孔 A/B |
+| `Example_Tracers/Tracers_In_Peristaltic_Pump` | 变静长（`update_springs`）蠕动泵 + 示踪粒子 |
+| `Example_HeartTube/Update_Springs_Impedance_Pumping` | 变静长阻抗泵 |
+| `Example_HeartTube/Muscle_Model` | FV_LT 肌肉模型（另一种激活） |
+| `Example_Skeleton` | 纯弹簧（最简验证） |
+
+其余 `matIB2d` 算例需要新机制，暂缓：`Example_Boussinesq/*`、`Example_Channel_Flow/*`、
+`Example_Meshmerize_Me/*`、`Example_VIV_Cylinder/*`（均需外部体积力 `arb_ext_force`）、
+`Example_HeartTube/Electromechanical_*`（`electro_phys`）、`Example_Coagulation/*`（`coagulation`）、
+`Example_Scallop/*`（`3_element_muscle`）、`Example_Concentration_Dynamics/*`（浓度源项 + 移动目标点，
+规模 6.4e4 步以上）、`Example_Jellyfish_Swimming/Tentacle_Jelly`（poroelastic + 大网格）等。
 
 ## 运行环境
 
