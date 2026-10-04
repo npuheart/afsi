@@ -76,17 +76,36 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 `Example_HeartTube/Insect_Heart`、
 `Example_Pulsing_Heart/512x512`、`Example_Corals/Two_Corals` 等放大/变体算例。
 
-`ib2d/demo_467` 起开始移植**需要任意外力 `arb_ext_force` 的整族算例**（该机制已在
-demo_467 落地：节点力密度 → Q1 求值 → Q2 叠加，参考与 AFSI 共用同一份模块移植）。
+`ib2d/demo_467`–`472` 已把**任意外力 `arb_ext_force`** 这一族的主要机制落地：
+AFSI 侧每步把节点力密度在 Q1 节点（= IB2d 共置流体网格）上求值、再经 Q2 插值叠加到
+`solver.f`，并且**参考与 AFSI 跑同一份 `.m` 的逐行 Python 移植**，因此对比只反映求解器与
+IB 机制之差。已覆盖：空槽道射流（467）、单壁 + 圆柱（468）、槽道中部射流（469）、
+带孔槽道 20 Hz 射流（470）、弹簧/不变梁弹性瘤壁（471）、长条域高 Re 射流 + 圆柱（472）。
+模板（`main.py`/`compare.py`/`run_reference.py`）已通用化：按需装配弹簧/梁/目标点，
+力窗口、目标速度剖面、IB 窄带、罚力核对全部由被移植模块与目标点文件导出，
+`compare.py` 还会自动配对 `ib2d_reference<TAG>.npz`/`plot<TAG>/` 做任意
+"加密/dt 减半"交叉核对；三处上游/数值细节已在 readme 记录
+（demo_467 的边际罚力增益窄带尖峰、demo_468 的不可分辨圆柱、demo_471 的时间步敏感自由补片、
+demo_472 的不可分辨高 Re 剪切层）。
 
-继续需要新机制的 `matIB2d` 算例：`Example_Channel_Flow/*`（12 个变体，含
-`Example_Parabolic_Flow_In_Empty_Channel` 之外的点力喷嘴/多孔/ Brinkman/Turek–Hron 等）、
-`Example_Meshmerize_Me/*`、`Example_VIV_Cylinder/*`、`Example_Mass_Points/*` 的剩余变体、
-`Example_Tracers/*`、`Example_Boussinesq/*`（`boussinesq` + 浓度耦合）、
-`Example_HeartTube/Electromechanical_*`（`electro_phys`）、`Example_Coagulation/*`（`coagulation`）、
+`Example_Channel_Flow/*` 剩余：`Example_Brinkman_Channel`（需在动量方程加 Brinkman 阻力项
+$-\mu\,Brink\,u$，`.brinkman` 文件直接给出该场，注册为"伪体力"即可）、
+`Example_Poroelastic_Channel_Flow`（poroelastic 多孔弹性壁）、
+`Example_Concentration_Gradients/{Bifurcating_Artery,Impedance_Pumping_Tube,Pure_Diffusion}`
+（浓度 + 移动目标点）、`Example_Turek_Hron`（1024×128 × 16 万步 + **质量点**自由刚体，
+需新增 `mass_pts` 机制）。
+
+其余仍需新机制的 `matIB2d` 算例：`Example_Boussinesq/*`（`boussinesq` + 浓度耦合）、
+`Example_HeartTube/Electromechanical_*`、`Example_HeartTube/*` 的 3 元件肌肉
+（`3_element_muscle`）、`Example_Coagulation/*`（`coagulation`）、
 `Example_Scallop/*`（`3_element_muscle`）、`Example_Test_Restart_Protocol/*`（restart）、
+`Example_Mass_Points/*`（`mass_pts`）、`Example_VIV_Cylinder/*`、`Example_Meshmerize_Me/*`、
+`Example_Tracers/*`、`Example_Baby_Spider_Shower`、`Example_Insect_Flight`、
+`Example_Sawtooth`、`Example_KC/*`、`Examples_First_Year_Seminar/*`、
 `Example_Concentration_Dynamics/*`（浓度源项 + 移动目标点，规模 6.4e4 步以上）、
-`Example_Jellyfish_Swimming/Tentacle_Jelly`（poroelastic + 大网格）等。
+`Example_Jellyfish_Swimming/Tentacle_Jelly`（poroelastic + 大网格）等；
+`Examples_Education/*` 的 51 个目录绝大多数是同一算例的收敛/网格变体，作为一组参数扫描
+统一处理更合适。
 
 ## 运行环境
 
