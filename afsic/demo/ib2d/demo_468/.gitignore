@@ -1,8 +1,5 @@
-plot/
-plot_smoke/
-plot_n64/
-ib2d_run/
-ib2d_run_n64/
+plot*/
+ib2d_run*/
 figures/
 __pycache__/
 *.log

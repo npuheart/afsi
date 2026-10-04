@@ -172,9 +172,28 @@ if bm is not None:
     bm_k, bm_C = bm["kb"], bm["C"]
 
 
+def _min_image(d, L):
+    """IB2d's minimum-image branch for a leader-follower difference."""
+    over = np.abs(d) > L / 2
+    d[over] = np.sign(d[over]) * (L - np.sign(d[over]) * d[over])
+    return d
+
+
+def _beam_boundary(Xp, Xq, Xr, L):
+    """IB2d ``check_If_Beam_Points_Pass_Through_Boundary`` along one axis."""
+    dX_pq, dX_qr = Xp - Xq, Xq - Xr
+    over = np.abs(dX_pq) > 5 * ds_ib2d
+    Xp = np.where(over, Xp + np.where(dX_pq < 0, L, -L), Xp)
+    over = np.abs(dX_qr) > 5 * ds_ib2d
+    Xr = np.where(over, Xr + np.where(dX_qr < 0, -L, L), Xr)
+    return Xp, Xq, Xr
+
+
 def spring_forces(Xm, Fm):
     """Linear springs, F = k (L - L0) dhat (IB2d give_Me_Spring_...)."""
     d = Xm[sp_b] - Xm[sp_a]
+    d[:, 0] = _min_image(d[:, 0], Lx)
+    d[:, 1] = _min_image(d[:, 1], Ly)
     L = np.hypot(d[:, 0], d[:, 1])
     sF = sp_k * (L - sp_L) / L
     np.add.at(Fm[:, 0], sp_a, sF * d[:, 0])
@@ -185,7 +204,13 @@ def spring_forces(Xm, Fm):
 
 def beam_forces(Xm, Fm):
     """Invariant (cross-product) beams, as in demo_446/455."""
-    Xp, Xq, Xr = Xm[bm_p1], Xm[bm_p2], Xm[bm_p3]
+    Xp = Xm[bm_p1].copy()
+    Xq = Xm[bm_p2].copy()
+    Xr = Xm[bm_p3].copy()
+    Xp, Xq, Xr = _beam_boundary(Xp, Xq, Xr, Lx)
+    for c in (0, 1):
+        Xp[:, c], Xq[:, c], Xr[:, c] = _beam_boundary(Xp[:, c], Xq[:, c],
+                                                      Xr[:, c], Ly)
     S = ((Xr[:, 0] - Xq[:, 0]) * (Xq[:, 1] - Xp[:, 1])
          - (Xr[:, 1] - Xq[:, 1]) * (Xq[:, 0] - Xp[:, 0]))
     K = bm_k * (S - bm_C)
@@ -328,8 +353,8 @@ u0, p0, f0 = grid_fields()
 hist["u"], hist["p"], hist["f"] = [u0], [p0], [f0]
 write_output(0.0)
 if comm.rank == 0:
-    print(f"initial      : max|X-X_anchor|="
-          f"{np.abs(marker_array(X) - tgt_anchor).max():.2e}")
+    print(f"initial      : max|X_target - anchor|="
+          f"{np.abs(marker_array(X)[tgt_ids] - tgt_anchor).max():.2e}")
 
 # ---------------------------------------------------------------------------
 # Time loop -- Peskin (2002) / IB2d IBM_Driver ordering
@@ -383,7 +408,8 @@ for step in range(num_steps):
         if comm.rank == 0:
             Xm = hist["X"][-1]
             print(f"step {step+1:5d}  t={t:.5f}  "
-                  f"|X-Xa|max={np.abs(Xm - tgt_anchor).max():.2e}  "
+                  f"|X_tgt-Xa|max="
+                  f"{np.abs(Xm[tgt_ids] - tgt_anchor).max():.2e}  "
                   f"umax={np.abs(ug).max():.3f}  "
                   f"wall={time.perf_counter()-tic:.1f}s", flush=True)
 
