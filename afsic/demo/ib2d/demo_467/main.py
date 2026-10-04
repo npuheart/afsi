@@ -47,11 +47,11 @@ import ib2d_io
 _here = os.path.dirname(os.path.abspath(__file__))
 IB2D_EXAMPLE = os.environ.get("IB2D_EXAMPLE", os.path.join(_here, "ib2d_input"))
 
-# the external forcing module is the one shipped with the example: it is
-# compiled/imported by IB2d itself, so the port runs the very same code
+# the external forcing module is the one shipped with the example: pyIB2d
+# imports it from the run directory, so the reference and this port run the
+# very same forcing code
 sys.path.insert(0, IB2D_EXAMPLE)
-from please_Compute_External_Forcing import (      # noqa: E402
-    please_Compute_External_Forcing)
+import please_Compute_External_Forcing as ext_mod      # noqa: E402
 
 comm = MPI.COMM_WORLD
 assert comm.size == 1, "this demo is serial (IB coupling of afsic gathers on rank 0)"
@@ -81,23 +81,33 @@ GRAD_DIV = float(os.environ.get("GRAD_DIV", "0"))
 
 X_ib2d = ex["X"]
 Nb = X_ib2d.shape[0]
-tg = ex["targets"]
+sp = ex.get("springs")                     # optional linear springs
+bm = ex.get("beams")                       # optional invariant beams
+tg = ex["targets"]                         # pinned target points
 ds_ib2d = Lx / (2 * Nx)   # IB2d sets ds = Lx/(2Nx)
 
-assert "springs" not in ex and "beams" not in ex and "noninv_beams" not in ex \
-    and "mass" not in ex and "muscles" not in ex and "d_springs" not in ex, \
-    "this demo implements the moving-target example only"
-assert tg["ids"].size == Nb and np.array_equal(tg["ids"], np.arange(Nb)), \
-    "the moving-target law of this example advances every marker in place"
+assert "mass" not in ex and "muscles" not in ex and "d_springs" not in ex \
+    and "noninv_beams" not in ex, \
+    "this template implements springs, invariant beams, target points and the "\
+    "arbitrary external force only"
 
 if comm.rank == 0:
+    desc = [f"{len(tg['ids'])} target points (k={tg['k'][0]:.2g})"]
+    if sp is not None:
+        desc.insert(0, f"{len(sp['conn'])} springs (k={sp['k'][0]:.2g})")
+    if bm is not None:
+        desc.append(f"{len(bm['p1'])} invariant beams (kb={bm['kb'][0]:.2g})")
     print(f"IB2d example : {IB2D_EXAMPLE}")
     print(f"rho={rho} mu={mu} box={Lx}x{Ly} grid={Nx}x{Ny} dt={dt} T={T} "
           f"steps={num_steps} ds={ds_ib2d}")
-    print(f"structure    : {Nb} markers forming the two channel walls, held in "
-          f"place by {len(tg['ids'])} target points (k={tg['k'][0]:.2g})")
-    print(f"forcing      : velocity target in x in [0.1, 0.16], "
-          f"y in [0.41, 0.59], uMax=250 m/s, 10 Hz")
+    print(f"structure    : {Nb} markers: " + ", ".join(desc))
+    print(f"forcing      : {os.path.basename(ext_mod.__file__)}: "
+          f"x in [{getattr(ext_mod, 'X_MIN', '?')}, "
+          f"{getattr(ext_mod, 'X_MAX', '?')}], "
+          f"y in [{getattr(ext_mod, 'Y_MIN', '?')}, "
+          f"{getattr(ext_mod, 'Y_MAX', '?')}], "
+          f"k={getattr(ext_mod, 'K_STIFF', '?')}, "
+          f"uMax={getattr(ext_mod, 'U_MAX', '?')}")
     print(f"grad-div     : gamma={GRAD_DIV:g}")
 
 # ---------------------------------------------------------------------------
@@ -154,6 +164,37 @@ def marker_array(fn):
 
 tgt_ids, tgt_k = tg["ids"], tg["k"]
 tgt_anchor = X_ib2d[tgt_ids].copy()      # pinned: update_target = 0
+if sp is not None:
+    sp_a, sp_b = sp["conn"][:, 0], sp["conn"][:, 1]
+    sp_k, sp_L = sp["k"], sp["L"]
+if bm is not None:
+    bm_p1, bm_p2, bm_p3 = bm["p1"], bm["p2"], bm["p3"]
+    bm_k, bm_C = bm["kb"], bm["C"]
+
+
+def spring_forces(Xm, Fm):
+    """Linear springs, F = k (L - L0) dhat (IB2d give_Me_Spring_...)."""
+    d = Xm[sp_b] - Xm[sp_a]
+    L = np.hypot(d[:, 0], d[:, 1])
+    sF = sp_k * (L - sp_L) / L
+    np.add.at(Fm[:, 0], sp_a, sF * d[:, 0])
+    np.add.at(Fm[:, 1], sp_a, sF * d[:, 1])
+    np.add.at(Fm[:, 0], sp_b, -sF * d[:, 0])
+    np.add.at(Fm[:, 1], sp_b, -sF * d[:, 1])
+
+
+def beam_forces(Xm, Fm):
+    """Invariant (cross-product) beams, as in demo_446/455."""
+    Xp, Xq, Xr = Xm[bm_p1], Xm[bm_p2], Xm[bm_p3]
+    S = ((Xr[:, 0] - Xq[:, 0]) * (Xq[:, 1] - Xp[:, 1])
+         - (Xr[:, 1] - Xq[:, 1]) * (Xq[:, 0] - Xp[:, 0]))
+    K = bm_k * (S - bm_C)
+    np.add.at(Fm[:, 0], bm_p1, K * (Xr[:, 1] - Xq[:, 1]))
+    np.add.at(Fm[:, 1], bm_p1, -K * (Xr[:, 0] - Xq[:, 0]))
+    np.add.at(Fm[:, 0], bm_p2, K * ((Xq[:, 1] - Xp[:, 1]) + (Xr[:, 1] - Xq[:, 1])))
+    np.add.at(Fm[:, 1], bm_p2, -K * ((Xr[:, 0] - Xq[:, 0]) + (Xq[:, 0] - Xp[:, 0])))
+    np.add.at(Fm[:, 0], bm_p3, K * (Xq[:, 1] - Xp[:, 1]))
+    np.add.at(Fm[:, 1], bm_p3, -K * (Xq[:, 0] - Xp[:, 0]))
 
 
 def target_forces(Xm, Fm):
@@ -202,7 +243,7 @@ def add_external_force(t):
     uY = np.zeros((Ny, Nx))
     uX[gj, gi] = u_dof[:, 0]
     uY[gj, gi] = u_dof[:, 1]
-    Fx, Fy, first, inds = please_Compute_External_Forcing(
+    Fx, Fy, first, inds = ext_mod.please_Compute_External_Forcing(
         dt, t, XNODES, YNODES, GRID_INFO, uX, uY, ext_state["first"],
         ext_state["inds"])
     ext_state["first"], ext_state["inds"] = first, inds
@@ -213,7 +254,12 @@ def add_external_force(t):
 
 def spread_forces_at_half():
     Fm = np.zeros((Nb, 2))
-    target_forces(marker_array(X_h), Fm)
+    Xm = marker_array(X_h)
+    if sp is not None:
+        spring_forces(Xm, Fm)
+    if bm is not None:
+        beam_forces(Xm, Fm)
+    target_forces(Xm, Fm)
     Fdof = np.empty_like(Fm)
     Fdof[dof_of_ib2d] = Fm
     F_s.x.array[:] = Fdof.ravel()

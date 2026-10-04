@@ -45,24 +45,57 @@ f_afsi = os.path.join(here, "plot", "afsi_result.npz")
 sys.path.insert(0, here)
 import ib2d_io  # noqa: E402
 
+sys.path.insert(0, os.path.join(here, "ib2d_input"))
+import please_Compute_External_Forcing as mod  # noqa: E402
+
 P = ib2d_io.read_input2d(os.path.join(here, "ib2d_input", "input2d"))
 dt = float(P["dt"])
 Nx = int(P["Nx"])
-h = float(P["Lx"]) / Nx
-W = 0.2                      # channel width of the forcing profile
-K_STIFF, U_MAX = 1e4, 250.0
-X_WIN, Y_WIN = (0.1, 0.16), (0.41, 0.59)
+Lx = float(P["Lx"])
+h = Lx / Nx
 
 R = np.load(f_ref)
 A = np.load(f_afsi)
 
-# rows of the four-point delta-function band around the two channel walls
-yy = np.arange(Nx) * h
-band = np.zeros(Nx, bool)
-for y0 in (0.4, 0.6):
-    band |= np.abs(yy - y0) <= 2.5 * h
+Ny = int(A["u"].shape[1])
+XNODES = np.arange(Nx) * h
+YNODES = np.arange(Ny) * h
+GRID_INFO = [Nx, Ny, Lx, float(P["Ly"]), h, h, int(P["supp"]),
+             A["X"].shape[1], h / 2]
+nb = A["X"].shape[1]
+
+
+def module_force(t, ux, uy):
+    """(Fx, Fy) of the ported arbitrary-external-force module."""
+    return mod.please_Compute_External_Forcing(dt, t, XNODES, YNODES, GRID_INFO,
+                                              ux.copy(), uy.copy(), 1, None)[:2]
+
+
+def target_velocity(t):
+    """u^tar of the module, read back through Fx = -k (u - u^tar) at u = 0."""
+    fx, fy = module_force(t, np.zeros((Ny, Nx)), np.zeros((Ny, Nx)))
+    k = getattr(mod, "K_STIFF", 1.0)
+    return -fx / k, -fy / k
+
+
+# nodes where the module puts its force
+_i, _j = mod._indices_to_apply_force(XNODES, YNODES).T
+win = np.zeros((Ny, Nx), bool)
+win[_j, _i] = True
+N_WIN = int(win.sum())
+
+# nodes inside the four-point delta support of a Lagrangian marker (the IB
+# band); the collocated reference and the Q1 solution differ at grid scale here
+band = np.zeros((Ny, Nx), bool)
+for x0, y0 in A["Xa"][0]:
+    i0, j0 = int(round(x0 / h)), int(round(y0 / h))
+    band[max(0, j0 - 2):j0 + 3, max(0, i0 - 2):i0 + 3] = True
 away = ~band
-assert band.sum() < 12, "unexpected wall band"
+core = win & away                      # window nodes away from the IB band
+# rows of the forcing window, minus the IB band: the channel cross-section the
+# example drives (the rows outside the walls only carry a weak return flow)
+col = win.any(axis=1) & ~band[:, Nx // 2]
+
 
 
 def metrics(A, R, dt):
@@ -75,56 +108,56 @@ def metrics(A, R, dt):
             if steps_a[k] == steps_r[k] + (0 if k == 0 else 1)]
     assert keep, f"no aligned frames: AFSI {steps_a} vs reference {steps_r}"
 
-    i_w = slice(int(round(X_WIN[0] / h)), int(round(X_WIN[1] / h)) + 1)
-    j_w = slice(int(round(Y_WIN[0] / h)), int(round(Y_WIN[1] / h)) + 1)
-    j_c = slice(int(round(0.42 / h)), int(round(0.58 / h)) + 1)   # free of the
-    rows = []                                     # wall force's delta support
+    rows = []
     for k in keep:
         ua, ur = A["u"][k], R["u"][k]
         du = np.linalg.norm(ua - ur, axis=-1)
         t_k = A["t"][k]
-        tar = -U_MAX * (5 * abs(np.sin(10 * np.pi * t_k))) \
-            * ((0.5 + W / 2) - yy[j_c]) * ((0.5 - W / 2) - yy[j_c])
-        # the ported module must add exactly -k (u - u_tar) in its window
-        res = np.abs(A["f"][k][j_c, i_w, 0]
-                     - (-K_STIFF * (ua[j_c, i_w, 0] - tar[:, None])))
+        # the ported module must add exactly its force to the AFSI field;
+        # nodes carrying a target force as well are excluded via ``core``
+        f_mod = module_force(t_k, ua[..., 0], ua[..., 1])[0]
+        res = np.abs(A["f"][k][..., 0] - f_mod)[core]
+        df = np.abs(A["f"][k] - R["f"][k])
+        rel = (np.linalg.norm(du[away]) / np.linalg.norm(ur[away])
+               if np.linalg.norm(ur[away]) else 0.0)
         rows.append((t_k,
                      np.linalg.norm(A["X"][k] - R["X"][k], axis=1).max(),
-                     du[away].max(), du[band].max(),
-                     (np.linalg.norm(du[away]) / np.linalg.norm(ur[away])
-                      if np.linalg.norm(ur[away]) else 0.0),
+                     du[away].max(), du[band].max(), rel,
                      np.abs(ua).max(), np.abs(ur).max(),
-                     ua[j_c, Nx // 2, 0].sum() * h,
-                     ur[j_c, Nx // 2, 0].sum() * h,
-                     np.abs(A["f"][k] - R["f"][k]).max(), res.max()))
+                     np.abs(ua[win]).max(), np.abs(ur[win]).max(),
+                     ur[col, Nx // 2, 0].sum() * h,
+                     ua[col, Nx // 2, 0].sum() * h,
+                     df[away].max(), res.max() if res.size else 0.0))
     return keep, rows
 
 
 def report(tag, A, R, dt, keep, rows):
-    hh = h
-    print(f"\n=== {tag} (dt = {dt:g}, h = {hh:g}, {len(keep)} aligned frames, "
+    print(f"\n=== {tag} (dt = {dt:g}, h = {h:g}, {len(keep)} aligned frames, "
           f"t = {rows[0][0]:.5f} .. {rows[-1][0]:.5f})")
     print(f"{'t':>8} {'dXmax/h':>9} {'max|du|away':>12} {'relL2_away':>11} "
-          f"{'max|du|band':>12} {'max|u| a/r':>19} {'Qcore a/r':>19} "
-          f"{'max|df|':>9}")
+          f"{'max|du|band':>12} {'max|u| a/r':>19} {'window a/r':>19} "
+          f"{'flux a/r':>19} {'df away':>9}")
     for r in rows:
-        print(f"{r[0]:8.5f} {r[1] / hh:9.2e} {r[2]:12.3e} {r[4]:11.3e} "
+        print(f"{r[0]:8.5f} {r[1] / h:9.2e} {r[2]:12.3e} {r[4]:11.3e} "
               f"{r[3]:12.3e} {r[5]:9.4f}/{r[6]:<9.4f} "
-              f"{r[7]:9.5f}/{r[8]:<9.5f} {r[9]:9.3e}")
+              f"{r[7]:9.4f}/{r[8]:<9.4f} {r[10]:9.5f}/{r[9]:<9.5f} "
+              f"{r[11]:9.3e}")
     r = rows[-1]
-    print(f"markers          : max|dX| {r[1]:.3e} m = {r[1] / hh:.2e} h "
-          f"(walls are pinned target points, so this is the IB pinning)")
-    print(f"velocity (away from the wall band): max|du| {r[2]:.3e} = "
+    print(f"markers          : max|dX| {r[1]:.3e} m = {r[1] / h:.2e} h")
+    print(f"velocity, away from the IB band: max|du| {r[2]:.3e} = "
           f"{r[2] / r[6]:.2e} max|u|, relative L2 error {r[4]:.3e} "
-          f"(last frame)")
-    print(f"velocity (wall band, {int(band.sum())} of {Nx} rows): max|du| "
-          f"{r[3]:.3e} = {r[3] / r[6]:.2f} max|u|")
-    print(f"channel flux (0.42 <= y <= 0.58) at x = 0.5: AFSI {r[7]:.5f}, "
-          f"IB2d {r[8]:.5f} ({abs(r[7] - r[8]) / abs(r[8]):.2e} relative)")
-    print(f"force field      : max|df| {r[9]:.3e} of |f|max "
-          f"{np.abs(R['f'][keep[-1]]).max():.3e}")
-    print(f"forcing check    : |f_x + k(u_x - u_x^target)| <= "
-          f"{rows[-1][10]:.3e} in the forcing window")
+          f"({int(away.sum())} of {away.size} nodes)")
+    print(f"velocity, inside the IB band  : max|du| {r[3]:.3e} = "
+          f"{r[3] / r[6]:.2f} max|u|")
+    print(f"forcing window ({N_WIN} nodes): max|u| AFSI {r[7]:.4f} / IB2d "
+          f"{r[8]:.4f} ({abs(r[7] - r[8]) / r[8]:.2e} relative)")
+    print(f"channel flux, middle column over the window rows "
+          f"({int(col.sum())} rows): AFSI {r[10]:.5f}, IB2d {r[9]:.5f} "
+          f"({abs(r[10] - r[9]) / abs(r[9]):.2e} relative)")
+    print(f"force field      : max|df| {r[11]:.3e} away from the band, "
+          f"|f|max {np.abs(R['f'][keep[-1]]).max():.3e}")
+    print(f"forcing check    : |f_x - F_x^module(u^AFSI)| <= {r[12]:.3e} on the "
+          f"window nodes away from the band")
 
 
 keep, rows = metrics({k: A[k] for k in A.files}, R, dt)
@@ -135,7 +168,8 @@ f_r5 = os.path.join(here, "ib2d_reference_dt5e-5.npz")
 if os.path.exists(f_a5) and os.path.exists(f_r5):
     A5, R5 = np.load(f_a5), np.load(f_r5)
     k5, rows5 = metrics({k: A5[k] for k in A5.files}, R5, dt / 2)
-    report("dt/2 cross-check", {k: A5[k] for k in A5.files}, R5, dt / 2, k5, rows5)
+    report("dt/2 cross-check", {k: A5[k] for k in A5.files}, R5, dt / 2, k5,
+           rows5)
     print("\nthe penalty gain k dt rho^-1 (1 at the shipped dt, 0.5 here) sets "
           "the grid-scale band spike of the collocated reference; at dt/2 both "
           "codes agree to a couple of percent everywhere")
@@ -146,32 +180,30 @@ dX = np.array([r[1] for r in rows])
 
 with open(os.path.join(out, "compare_table.csv"), "w") as fh:
     fh.write("t,dXmax,du_max_away,du_max_band,relL2_away,umax_afsi,umax_ib2d,"
-             "flux_core_afsi,flux_core_ib2d,df_max,force_residual\n")
+             "umax_window_afsi,umax_window_ib2d,flux_ib2d,flux_afsi,df_max,"
+             "force_residual\n")
     for r in rows:
         fh.write(",".join(f"{v:.10g}" for v in r) + "\n")
 
 # --- 1. velocity profiles ---------------------------------------------------
-xl = h * np.arange(Nx)
-ksel = keep[:3] if len(keep) < 4 else [keep[0], keep[len(keep) // 2], keep[-1]]
+ksel = [keep[0], keep[len(keep) // 2], keep[-1]] if len(keep) >= 3 else keep
+i_w = int(np.argmax(win.sum(axis=0)))          # busiest forcing column
 fig, axes = plt.subplots(2, len(ksel), figsize=(4.0 * len(ksel), 6.4),
                          sharey=True)
 for c, k in enumerate(ksel):
-    tt = A["t"][k]
-    tar = -U_MAX * (5 * abs(np.sin(10 * np.pi * tt))) \
-        * ((0.5 + W / 2) - yy) * ((0.5 - W / 2) - yy)
-    for row, i in enumerate((int(round(0.125 / h)), Nx // 2)):
+    tar = target_velocity(A["t"][k])[0]
+    for row, i in enumerate((i_w, Nx // 2)):
         ax = axes[row, c]
-        ax.plot(R["u"][k][:, i, 0], yy, "k-", lw=2.0, alpha=0.6, label="IB2d")
-        ax.plot(A["u"][k][:, i, 0], yy, "r--", lw=1.2, label="AFSI")
-        if row == 0:
-            m = (yy >= Y_WIN[0]) & (yy <= Y_WIN[1])
-            ax.plot(tar[m], yy[m], "b:", lw=1.0, label="target")
-        for y0 in (0.4, 0.6):
-            ax.axhline(y0, color="gray", lw=0.6, ls="-")
-        ax.axhspan(0.4 - 2.5 * h, 0.4 + 2.5 * h, color="gray", alpha=0.15)
-        ax.axhspan(0.6 - 2.5 * h, 0.6 + 2.5 * h, color="gray", alpha=0.15)
+        ax.plot(R["u"][k][:, i, 0], YNODES, "k-", lw=2.0, alpha=0.6,
+                label="IB2d")
+        ax.plot(A["u"][k][:, i, 0], YNODES, "r--", lw=1.2, label="AFSI")
+        if row == 0 and win[:, i].any():
+            m = win[:, i]
+            ax.plot(tar[m, i], YNODES[m], "b:", lw=1.0, label="target")
+        if band[:, i].any():
+            ax.plot(R["u"][k][band[:, i], i, 0], YNODES[band[:, i]], "k.", ms=2)
         ax.set_xlabel("$u_x$")
-        ax.set_title(f"x = {xl[i]:.3f}, t = {tt:.5f}")
+        ax.set_title(f"x = {XNODES[i]:.4f}, t = {A['t'][k]:.5f}")
         if row == 0 and c == 0:
             ax.legend(fontsize=8)
 axes[0, 0].set_ylabel("y")
@@ -188,16 +220,17 @@ ax[0].set_xlabel("t")
 ax[0].legend(fontsize=8)
 ax[1].plot(t, [r_[6] for r_ in rows], "k-", lw=2, label="IB2d")
 ax[1].plot(t, [r_[5] for r_ in rows], "r--", label="AFSI")
-ax[1].set_title(r"$\max|u|$ (10 Hz modulated jet)")
+ax[1].set_title(r"$\max|u|$")
 ax[1].set_xlabel("t")
 ax[1].legend(fontsize=8)
-ax[2].plot(t, [r_[8] for r_ in rows], "k-", lw=2, label="IB2d")
-ax[2].plot(t, [r_[7] for r_ in rows], "r--", label="AFSI")
-ax[2].set_title(r"channel flux $\int u_x\,dy$ at $x=0.5$")
+ax[2].plot(t, [r_[9] for r_ in rows], "k-", lw=2, label="IB2d")
+ax[2].plot(t, [r_[10] for r_ in rows], "r--", label="AFSI")
+ax[2].set_title(r"flux $\int u_x\,dy$ through the middle column")
 ax[2].set_xlabel("t")
 ax[2].legend(fontsize=8)
-ax[3].semilogy(t, [r_[2] for r_ in rows], "b-s", ms=3, label="away from walls")
-ax[3].semilogy(t, [r_[3] for r_ in rows], "k-o", ms=3, label="wall band")
+ax[3].semilogy(t, [max(r_[2], 1e-16) for r_ in rows], "b-s", ms=3,
+               label="away from the IB band")
+ax[3].semilogy(t, [r_[3] for r_ in rows], "k-o", ms=3, label="IB band")
 ax[3].set_title(r"$|u^{AFSI}-u^{IB2d}|$")
 ax[3].set_xlabel("t")
 ax[3].legend(fontsize=8)
@@ -207,7 +240,7 @@ fig.savefig(os.path.join(out, "compare_history.png"), dpi=150)
 # --- 3. fields at the last aligned frame ------------------------------------
 k = keep[-1]
 ua, ur = A["u"][k], R["u"][k]
-xg, yg = h * np.arange(Nx), h * np.arange(Nx)
+xg, yg = XNODES, YNODES
 fig, ax = plt.subplots(1, 4, figsize=(19, 4.4))
 vmax = max(np.abs(ur[..., 0]).max(), np.abs(ua[..., 0]).max())
 for a_, u, title in ((ax[0], ur, "IB2d"), (ax[1], ua, "AFSI")):
@@ -216,17 +249,20 @@ for a_, u, title in ((ax[0], ur, "IB2d"), (ax[1], ua, "AFSI")):
     a_.plot(R["X"][k][:, 0], R["X"][k][:, 1], "k.", ms=0.6)
     a_.set_title(f"{title}: $u_x$, t = {t[-1]:.5f}")
     fig.colorbar(c, ax=a_, shrink=0.85)
-c = ax[2].pcolormesh(xg, yg, ua[..., 0] - ur[..., 0], shading="auto",
-                     cmap="RdBu_r", vmin=-0.05, vmax=0.05)
+dv = ua[..., 0] - ur[..., 0]
+c = ax[2].pcolormesh(xg, yg, dv, shading="auto", cmap="RdBu_r",
+                     vmin=-np.percentile(np.abs(dv), 99.5),
+                     vmax=np.percentile(np.abs(dv), 99.5))
 ax[2].set_title("$u_x^{AFSI}-u_x^{IB2d}$")
 fig.colorbar(c, ax=ax[2], shrink=0.85)
 du = np.linalg.norm(ua - ur, axis=-1)
 c = ax[3].pcolormesh(xg, yg, du, shading="auto", cmap="viridis",
                      vmin=0, vmax=du[away].max())
-ax[3].set_title(f"$|\\Delta u|$, max {du[away].max():.2e} away from walls")
+ax[3].contour(xg, yg, band.astype(float), levels=[0.5], colors="w", lw=0.6)
+ax[3].set_title(f"$|\\Delta u|$, max {du[away].max():.2e} away from the band")
 fig.colorbar(c, ax=ax[3], shrink=0.85)
 for a_ in ax:
-    a_.set_aspect("equal")
+    a_.set_aspect("auto")
 fig.tight_layout()
 fig.savefig(os.path.join(out, "compare_fields.png"), dpi=150)
 
