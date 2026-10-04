@@ -48,20 +48,21 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_456` | IB2d 被动标量扩散 | `Concentration_Diffusion`（`Diffusion_Chamber`）：496 点方形腔壁（全为钉死目标点）+ 中心 $3\times3$ 节点浓度团块，$k=0.025$（1×1 周期盒, $\mu=10$, 64×64, dt=1e-4, T=0.5）；腔壁被钉死 ⇒ IB 力/流速恒为 0，是**纯扩散基准**。AFSI 新增**周期 Q1 有限元被动标量输运**（复用 `PeskinRK2Solver` 的周期约化 `periodic_prolongation`，Q1 自由度 = IB2d 网格节点；集中质量显式推进）。质量两侧严格守恒（9.000000）；末态 $\max|C^{AFSI}-C^{IB2d}|=2.5\times10^{-5}$（峰值 0.18%）、相对 $L_2$ 1.3e-3；与**含像源的精确解**相比最大相对误差 AFSI 2.4e-4 / IB2d 4.3e-3（无界公式 $\sigma_0^2+2kt$ 因像源偏 +0.55%，两侧都跟着精确解走）|
 | `ib2d/demo_457` | IB2d 通用用户力接口 | `User_Defined_Fiber_Model`：为 demo_444 的同一椭圆环（64 点、零静长线弹簧 $k=2.5\times10^4$、32×32、T=1.5）改走 **IB2d 通用用户力接口**（`.user_force` + 用户模块 `give_Me_General_User_Defined_Force_Densities.py`，pyIB2d 从运行目录 import）。力公式逐位复刻（校验差 1.5e-16）；结果与 demo_444 逐位一致：$\gamma=0$ 环塌缩（末态面积 2.4e-4）→ $\gamma=100$ 面积守恒（0.2423，参考自身泄漏到 0.1840），$t\le0.84$ 内 dX≤0.45h |
 | `ib2d/demo_458` | IB2d 单质点重力沉降 | `Thrips`：**单个**标记点（无自身结构）经 $k=10^3$ 质量弹簧连到 $M=10^{-3}$ kg 幽灵质点，重力仅作用于幽灵（$g=9.80665$），0.5×0.5 周期盒、32×32、dt=1e-4、T=0.1 ⇒ 弹簧-质量-阻尼振子（$\omega=1000$ rad/s）缓慢下沉。结构自由度用 **DG0 "point" 单元**承载（1 自由度 = 1 粒子）；复刻 `Supp.py` 的 mass 记账。标记点轨迹最大偏差 **6.6e-7 m = 4.2e-5 h**，位移比 0.942（小信号测试） |
+| `ib2d/demo_459` | IB2d 动态目标点驱动 | `Moving_Rubberband`（首个 `matIB2d` 算例）：64 点圆周橡皮筋（半轴 0.2、无弹簧/无梁，全部为 $k=10^7$ 目标点）在 1×1 周期盒（$\mu=10$、32×32、dt=1e-4、T=0.05）被 `.m` 驱动规律拖拽——每步 $y{+}{=}(s/2)dt$ 上浮、$x$ 按 0.05 s 周期左右往返（$s=20$ m/s），即一步拖 1e-3 m。AFSI 新增：**1-based→0-based 编号转换**（`load_example(index_base=1)`，pyIB2d 直接用文件编号索引会越界）、**动态目标点递推**（与 pyIB2d 同步位调用、同一递推）、以及**与参考逐帧同步的输出帧**（pyIB2d 第 $k$ 帧其实是第 $5k{+}1$ 步的状态而时间戳晚一步，属上游约定；差一步对 20 m/s 的运动就是 0.002 m 假误差）。标记点偏差典型 **2.1e-5 m（6.6e-4 h）**、最大 3.3e-4 m（$x$ 折返点）；形心最大差 8.8e-5 m；目标点递推一致到 **1.6e-16 m**；"标记点滞后锚点"曲线两侧一致到 1e-5 m（稳态 ~1.1e-3 m = $s\,dt/2$）|
 
 `pyIB2d/Examples` 已全部移植完毕；下列 `matIB2d/Examples` 算例正在按批次移植
 （本仓库 demo 编号续排）：
 
-| 算例 | 说明 |
-|---|---|
-| `Example_Moving_Rubberband` | 移动目标点（`update_target`）驱动橡皮筋 |
-| `Example_Pulsing_Heart/32x32` | 两相目标点插值的心脏泵（`update_target`） |
-| `Example_Corals/Single_Coral` | 移动目标点驱动的珊瑚生长 |
-| `Example_Porous_Rubberbands/Compare_Porous_NonPorous_Rubberbands` | 多孔 vs 非多孔 A/B |
-| `Example_Tracers/Tracers_In_Peristaltic_Pump` | 变静长（`update_springs`）蠕动泵 + 示踪粒子 |
-| `Example_HeartTube/Update_Springs_Impedance_Pumping` | 变静长阻抗泵 |
-| `Example_HeartTube/Muscle_Model` | FV_LT 肌肉模型（另一种激活） |
-| `Example_Skeleton` | 纯弹簧（最简验证） |
+| 算例 | 说明 | 新增机制 |
+|---|---|---|
+| `Example_Pulsing_Heart/32x32` | 两相目标点插值的心脏泵（`All_Positions.txt` + 多项式相位插值） | 数据文件驱动的移动目标点 |
+| `Example_Corals/Single_Coral` | 多项式拟合驱动的珊瑚触手（64²，原算例 25 万步 ⇒ 缩减 T 并记录） | 多目标点 + 大位移移动 |
+| `Example_Porous_Rubberbands/Compare_Porous_NonPorous_Rubberbands` | 多孔 vs 非多孔双环 A/B | 多结构体 + 多孔介质（A/B 对照） |
+| `Example_HeartTube/Update_Springs_Peristaltic_Pumping` | 变静长（`update_springs`）蠕动泵 | 时变静长驱动 |
+| `Example_Skeleton` | 纯弹簧骨架（`geo_connect` + 复杂连通） | 复杂几何弹簧网络 |
+| `Examples_Education/Interpolation/Moving_Circle/Linear_Interp` | 移动圆的位置由数据表插值给出 | 目标点位置插值 |
+| `Example_Mass_Points/Gravity_vs_Flow` | 质量点 + 重力 vs 顶盖驱动流 | 外部体积力 `arb_ext_force` |
+| `Example_Standard_Rubberband/NL_Rubberband_With_Springs` | 椭圆环 + **非线性弹簧**（`.spring` 第 5 列 $\alpha=2$） | 非线性弹簧力律 $F=\tfrac12(\alpha{+}1)k(L{-}L_0)^\alpha$ |
 
 其余 `matIB2d` 算例需要新机制，暂缓：`Example_Boussinesq/*`、`Example_Channel_Flow/*`、
 `Example_Meshmerize_Me/*`、`Example_VIV_Cylinder/*`（均需外部体积力 `arb_ext_force`）、
