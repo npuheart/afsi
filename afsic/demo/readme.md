@@ -55,15 +55,20 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_463` | IB2d 多孔/不透水 A/B | `Compare_Porous_NonPorous_Rubberbands`：同一 2×2 周期盒（$\mu=0.1$、64×64、dt=5e-5、T=0.1）内**两条各 128 点**零静长环（$k=10^7$），左侧环整条标记为多孔（$\kappa=10^{-4}$，逐点差分模板）——**首个同流场双结构算例**。两侧都显示多孔环塌缩 ~55%（面积 0.2512→0.116/0.101）而不透水环仅收缩 ~20%（→0.197/0.201）；标记点偏差最大 0.57 h（多孔）/0.77 h（不透水）；默认 $\gamma=2.5$（demo_453 的 $\gamma$ 扫描结论）|
 | `ib2d/demo_464` | IB2d 行波（位置相关）静长驱动 | `Update_Springs_Peristaltic_Pumping`：与 demo_451 同一根 HeartTube（156 点、$5\times5$ 盒、64×64、dt=1e-3、T=2），但 76 根跨径泵弹簧的静长由**蠕动行波** $RL=d-0.95\sin(\tfrac{2\pi}{L}(x_i-x_M-vt))$ 驱动，且 $x_i$ 取**当前**标记点坐标（本批首个位置相关驱动）；$t\ge0.3$ s 标记点偏差 ≤**0.32 h**（中位 0.06 h），管宽（射流特征）逐帧一致到 $10^{-3}$；初始 2.24 h 峰值源于上游规律在 $t=0$ 的不连续初值（一半泵弹簧直接处于最小静长 0.05），默认 $\gamma=2.5$
 | `ib2d/demo_465` | IB2d 多状态插值（线性 vs 三次） | `Examples_Education/Interpolation/Moving_Circle` 的两个变体：64 点圆（$k=10^7$ 目标点）在 1×1 盒（$\mu=10$、32×32、dt=1e-4、T=0.1）内于三个预设位置 A/B/C 之间往返（周期 0.06 s，行程 0.45 m = 14.4 h），两变体只差插值参数 $g(s)$（线性 $g=s$ vs 分段三次）。一个移植 + `INTERP` 开关同时覆盖两变体，各自与自己的参考对比：linear 最大偏差 **0.027 h**、cubic **0.019 h**；圆心轨迹差 ≤3.7e-4 m |
+| `ib2d/demo_466` | IB2d 行波激活 FV_LT 肌肉管 | `Example_Lymphangion`：310 点淋巴管（弹簧 $k=10^7$ + 306 不变梁 + 4 目标点 + **153 条 FV_LT 肌肉带**）在 5×5 盒（$\mu=1$、128×128、dt=5e-4、T=0.25）被 10 Hz **行波方波**激活驱动蠕动。管径（平均跨径）1.0132 → AFSI **0.5977** / IB2d 0.5957（收缩 41%），逐帧差 ≤**2.8e-3**（0.5%），激活相位同在 $t=0.245$；标记点偏差中位 0.18 h。**发现上游开关疑点**：算例自带 `.muscle` 与激活函数却把 `FV_LT_muscle` 置 0（按原样跑是无肌肉的被动管），本移植默认打开并提供 `MUSCLE=0` 对照 |
 
-`pyIB2d/Examples` 已全部移植完毕；下列 `matIB2d/Examples` 算例正在按批次移植
-（本仓库 demo 编号续排）：
+`pyIB2d/Examples` 已全部移植完毕；`matIB2d/Examples` 的差异部分已在本批移植
+（demo_457–466，见上表）：移动/指定运动的目标点（`Moving_Rubberband`、`Pulsing_Heart`、
+`Single_Coral`、`Moving_Circle` 的线性/三次插值对）、1-based 编号转换、行波静长驱动
+（`Update_Springs_Peristaltic_Pumping`）、多孔 A/B（`Compare_Porous_NonPorous_Rubberbands`）、
+非线性弹簧（`NL_Rubberband_With_Springs`）与行波肌肉激活（`Lymphangion`）。
 
-| 算例 | 说明 | 新增机制 |
-|---|---|---|
-| `Example_HeartTube/Update_Springs_Peristaltic_Pumping` | 变静长（`update_springs`）蠕动泵 | 时变静长驱动 |
-| `Example_Skeleton` | 纯弹簧骨架（`geo_connect` + 复杂连通） | 复杂几何弹簧网络 |
-| `Example_Mass_Points/Gravity_vs_Flow` | 质量点 + 重力 vs 顶盖驱动流 | 外部体积力 `arb_ext_force` |
+以下 `matIB2d` 算例与已移植算例**机制重复**，暂不单独立项：
+`Example_Standard_Rubberband/*` 与 `Example_Skeleton`（同为 pyIB2d 的
+`Rubberband_with_Springs/Beams/Damped_Springs` 的 MATLAB 版）、
+`Example_Porous_Rubberbands/Single_Porous_Rubberband`（= demo_453）、
+`Example_HeartTube/Insect_Heart`、`Example_Mass_Points/*`（= demo_450）、
+`Example_Pulsing_Heart/512x512`、`Example_Corals/Two_Corals` 等放大/变体算例。
 
 其余 `matIB2d` 算例需要新机制，暂缓：`Example_Boussinesq/*`、`Example_Channel_Flow/*`、
 `Example_Meshmerize_Me/*`、`Example_VIV_Cylinder/*`（均需外部体积力 `arb_ext_force`）、
