@@ -112,7 +112,7 @@ def anchors_from_law(times):
 # jump of H at s = 0.1 and 0.9 (H (P2 - P1) is a 3e-5 m anchor jump at the knot).
 nsteps = np.rint(t / dt).astype(int)
 ctimes = np.concatenate([[0.0], np.cumsum(np.full(int(nsteps[-1]), dt))])
-Xan_law = anchors_from_law(ctimes[nsteps - 1])
+Xan_law = anchors_from_law(ctimes[np.maximum(nsteps - 1, 0)])
 err_law = np.linalg.norm(Xan - Xan_law, axis=2).max()
 lag_r = np.linalg.norm(Xr - Xan_law, axis=2).max(axis=1)
 
