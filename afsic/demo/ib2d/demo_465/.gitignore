@@ -1,0 +1,6 @@
+plot/
+plot_cubic/
+ib2d_run*/
+figures/
+__pycache__/
+ib2d_reference_*.npz

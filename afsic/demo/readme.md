@@ -54,6 +54,7 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_462` | IB2d 非线性弹簧力律 | `NL_Rubberband_With_Springs`：与 demo_444 同几何（64 点椭圆、零静长弹簧、32×32、dt=1e-3、T=1.5），但 `.spring` 第 5 列 $\alpha=2$ ⇒ **硬化二次力律** $F=\tfrac12(\alpha{+}1)k(L-L_0)^\alpha$。逐弹簧对照误差 0.0；标记点偏差典型 4.3e-3 m（0.14 h）、最大 0.23 h；周长 1.937→1.770（IB2d 1.751）；$\gamma=0$ 时漏面积（漂移 8.0e-2，偏差 1.7 h）⇒ 默认 $\gamma=100$ |
 | `ib2d/demo_463` | IB2d 多孔/不透水 A/B | `Compare_Porous_NonPorous_Rubberbands`：同一 2×2 周期盒（$\mu=0.1$、64×64、dt=5e-5、T=0.1）内**两条各 128 点**零静长环（$k=10^7$），左侧环整条标记为多孔（$\kappa=10^{-4}$，逐点差分模板）——**首个同流场双结构算例**。两侧都显示多孔环塌缩 ~55%（面积 0.2512→0.116/0.101）而不透水环仅收缩 ~20%（→0.197/0.201）；标记点偏差最大 0.57 h（多孔）/0.77 h（不透水）；默认 $\gamma=2.5$（demo_453 的 $\gamma$ 扫描结论）|
 | `ib2d/demo_464` | IB2d 行波（位置相关）静长驱动 | `Update_Springs_Peristaltic_Pumping`：与 demo_451 同一根 HeartTube（156 点、$5\times5$ 盒、64×64、dt=1e-3、T=2），但 76 根跨径泵弹簧的静长由**蠕动行波** $RL=d-0.95\sin(\tfrac{2\pi}{L}(x_i-x_M-vt))$ 驱动，且 $x_i$ 取**当前**标记点坐标（本批首个位置相关驱动）；$t\ge0.3$ s 标记点偏差 ≤**0.32 h**（中位 0.06 h），管宽（射流特征）逐帧一致到 $10^{-3}$；初始 2.24 h 峰值源于上游规律在 $t=0$ 的不连续初值（一半泵弹簧直接处于最小静长 0.05），默认 $\gamma=2.5$
+| `ib2d/demo_465` | IB2d 多状态插值（线性 vs 三次） | `Examples_Education/Interpolation/Moving_Circle` 的两个变体：64 点圆（$k=10^7$ 目标点）在 1×1 盒（$\mu=10$、32×32、dt=1e-4、T=0.1）内于三个预设位置 A/B/C 之间往返（周期 0.06 s，行程 0.45 m = 14.4 h），两变体只差插值参数 $g(s)$（线性 $g=s$ vs 分段三次）。一个移植 + `INTERP` 开关同时覆盖两变体，各自与自己的参考对比：linear 最大偏差 **0.027 h**、cubic **0.019 h**；圆心轨迹差 ≤3.7e-4 m |
 
 `pyIB2d/Examples` 已全部移植完毕；下列 `matIB2d/Examples` 算例正在按批次移植
 （本仓库 demo 编号续排）：
@@ -62,7 +63,6 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 |---|---|---|
 | `Example_HeartTube/Update_Springs_Peristaltic_Pumping` | 变静长（`update_springs`）蠕动泵 | 时变静长驱动 |
 | `Example_Skeleton` | 纯弹簧骨架（`geo_connect` + 复杂连通） | 复杂几何弹簧网络 |
-| `Examples_Education/Interpolation/Moving_Circle/Linear_Interp` | 移动圆的位置由数据表插值给出 | 目标点位置插值 |
 | `Example_Mass_Points/Gravity_vs_Flow` | 质量点 + 重力 vs 顶盖驱动流 | 外部体积力 `arb_ext_force` |
 
 其余 `matIB2d` 算例需要新机制，暂缓：`Example_Boussinesq/*`、`Example_Channel_Flow/*`、
