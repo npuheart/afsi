@@ -396,6 +396,6 @@ np.savez_compressed(fname,
                     Xa=np.array(hist["Xa"]),
                     u=np.array(hist["u"]), p=np.array(hist["p"]),
                     f=np.array(hist["f"]),
-                    dx=Lx / Nx, dy=Ly / Ny)
+                    dx=Lx / Nx, dy=Ly / Ny, dt=dt, nx=Nx, ny=Ny)
 if comm.rank == 0:
     print(f"done in {elapsed:.1f}s -> {fname}")

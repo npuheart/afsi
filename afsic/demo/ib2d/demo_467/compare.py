@@ -15,13 +15,18 @@ steps and stamps the true time, so AFSI frame ``k`` and reference frame ``k``
 are the same step whenever ``round(t_afsi/dt) == round(t_ref/dt) + 1``; that is
 checked here and only the matching frames are used.
 
-The reported error is split at the immersed boundary: the shipped ``dt`` puts
-the velocity-target penalty at the marginal gain ``k dt / rho = 1``, and IB2d's
-collocated FFT scheme then develops a grid-scale spike inside the four-node
-delta-function band of each channel wall.  Away from that band the two
-solutions agree to a few percent of ``|u|``; with ``dt`` halved (gain 0.5) the
-spike disappears and the agreement improves, which is checked automatically
-when a ``--dt 5e-5`` reference and ``plot_dt5e-5/`` AFSI run are present.
+Errors are reported inside and outside the four-node delta-function band of the
+Lagrangian markers (derived from the target points); the target profile and the
+force window are read back from the ported module itself, and the module's force
+is checked against AFSI's force field evaluated at AFSI's own velocity.
+
+The shipped ``dt`` puts the velocity-target penalty at the marginal gain
+``k dt / rho = 1``, and IB2d's collocated FFT scheme then grows a grid-scale
+spike inside the wall band; with ``dt`` halved (gain 0.5) the spike disappears
+and the two solutions agree to a couple of percent.  Every
+``ib2d_reference<TAG>.npz`` -- ``plot<TAG>/afsi_result.npz`` pair found next to
+this file is compared automatically, so the ``--dt 5e-5`` cross-check is picked
+up without arguments.
 
 Writes ``figures/compare_profiles.png``, ``figures/compare_history.png``,
 ``figures/compare_fields.png`` and ``figures/compare_table.csv``.
@@ -49,57 +54,56 @@ sys.path.insert(0, os.path.join(here, "ib2d_input"))
 import please_Compute_External_Forcing as mod  # noqa: E402
 
 P = ib2d_io.read_input2d(os.path.join(here, "ib2d_input", "input2d"))
-dt = float(P["dt"])
-Nx = int(P["Nx"])
 Lx = float(P["Lx"])
-h = Lx / Nx
+Ly = float(P["Ly"])
 
-R = np.load(f_ref)
-A = np.load(f_afsi)
+class Grid:
+    """Node grid of one (AFSI, reference) pair, plus the module-derived masks."""
 
-Ny = int(A["u"].shape[1])
-XNODES = np.arange(Nx) * h
-YNODES = np.arange(Ny) * h
-GRID_INFO = [Nx, Ny, Lx, float(P["Ly"]), h, h, int(P["supp"]),
-             A["X"].shape[1], h / 2]
-nb = A["X"].shape[1]
+    def __init__(self, nx, ny, dt, anchors, nb):
+        self.nx, self.ny = nx, ny
+        self.hx, self.hy = Lx / nx, Ly / ny
+        self.dt = dt
+        self.XNODES = np.arange(nx) * self.hx
+        self.YNODES = np.arange(ny) * self.hy
+        # IB2d's ds and grid_Info, as the driver builds them
+        self.GRID_INFO = [nx, ny, Lx, Ly, self.hx, self.hy, int(P["supp"]), nb,
+                          Lx / (2 * nx)]
+        # the module's own force window, evaluated on this grid
+        self.win = np.zeros((ny, nx), bool)
+        i, j = mod._indices_to_apply_force(self.XNODES, self.YNODES).T
+        self.win[j, i] = True
+        # four-point delta support of the markers: the IB band
+        self.band = np.zeros((ny, nx), bool)
+        for x0, y0 in anchors:
+            i0 = int(round(x0 / self.hx))
+            j0 = int(round(y0 / self.hy))
+            self.band[max(0, j0 - 2):j0 + 3, max(0, i0 - 2):i0 + 3] = True
+        self.away = ~self.band
+        self.core = self.win & self.away
+        # rows of the forcing window away from the band: the channel section
+        # the example drives (outside of it only weak return flow)
+        self.col = self.win.any(axis=1) & ~self.band[:, nx // 2]
 
+    def module_force(self, t, ux, uy):
+        """(Fx, Fy) of the ported arbitrary-external-force module."""
+        return mod.please_Compute_External_Forcing(
+            self.dt, t, self.XNODES, self.YNODES, self.GRID_INFO, ux.copy(),
+            uy.copy(), 1, None)[:2]
 
-def module_force(t, ux, uy):
-    """(Fx, Fy) of the ported arbitrary-external-force module."""
-    return mod.please_Compute_External_Forcing(dt, t, XNODES, YNODES, GRID_INFO,
-                                              ux.copy(), uy.copy(), 1, None)[:2]
-
-
-def target_velocity(t):
-    """u^tar of the module, read back through Fx = -k (u - u^tar) at u = 0."""
-    fx, fy = module_force(t, np.zeros((Ny, Nx)), np.zeros((Ny, Nx)))
-    k = getattr(mod, "K_STIFF", 1.0)
-    return -fx / k, -fy / k
-
-
-# nodes where the module puts its force
-_i, _j = mod._indices_to_apply_force(XNODES, YNODES).T
-win = np.zeros((Ny, Nx), bool)
-win[_j, _i] = True
-N_WIN = int(win.sum())
-
-# nodes inside the four-point delta support of a Lagrangian marker (the IB
-# band); the collocated reference and the Q1 solution differ at grid scale here
-band = np.zeros((Ny, Nx), bool)
-for x0, y0 in A["Xa"][0]:
-    i0, j0 = int(round(x0 / h)), int(round(y0 / h))
-    band[max(0, j0 - 2):j0 + 3, max(0, i0 - 2):i0 + 3] = True
-away = ~band
-core = win & away                      # window nodes away from the IB band
-# rows of the forcing window, minus the IB band: the channel cross-section the
-# example drives (the rows outside the walls only carry a weak return flow)
-col = win.any(axis=1) & ~band[:, Nx // 2]
-
+    def target_velocity(self, t):
+        """u^tar of the module, read back through Fx = -k (u - u^tar) at u=0."""
+        fx, fy = self.module_force(t, np.zeros((self.ny, self.nx)),
+                                   np.zeros((self.ny, self.nx)))
+        k = getattr(mod, "K_STIFF", 1.0)
+        return -fx / k, -fy / k
 
 
-def metrics(A, R, dt):
-    """Per-frame comparison of one (AFSI, reference) pair."""
+
+
+def metrics(G, A, R):
+    """Per-frame comparison of one (AFSI, reference) pair on grid ``G``."""
+    dt = G.dt
     steps_a = np.rint(A["t"] / dt).astype(int)
     steps_r = np.rint(R["t"] / dt).astype(int)
     # the driver's pre-loop dump is the initial state (step 0); every later
@@ -115,64 +119,85 @@ def metrics(A, R, dt):
         t_k = A["t"][k]
         # the ported module must add exactly its force to the AFSI field;
         # nodes carrying a target force as well are excluded via ``core``
-        f_mod = module_force(t_k, ua[..., 0], ua[..., 1])[0]
-        res = np.abs(A["f"][k][..., 0] - f_mod)[core]
+        f_mod = G.module_force(t_k, ua[..., 0], ua[..., 1])[0]
+        res = np.abs(A["f"][k][..., 0] - f_mod)[G.core]
         df = np.abs(A["f"][k] - R["f"][k])
-        rel = (np.linalg.norm(du[away]) / np.linalg.norm(ur[away])
-               if np.linalg.norm(ur[away]) else 0.0)
+        rel = (np.linalg.norm(du[G.away]) / np.linalg.norm(ur[G.away])
+               if np.linalg.norm(ur[G.away]) else 0.0)
         rows.append((t_k,
                      np.linalg.norm(A["X"][k] - R["X"][k], axis=1).max(),
-                     du[away].max(), du[band].max(), rel,
+                     du[G.away].max(), du[G.band].max(), rel,
                      np.abs(ua).max(), np.abs(ur).max(),
-                     np.abs(ua[win]).max(), np.abs(ur[win]).max(),
-                     ur[col, Nx // 2, 0].sum() * h,
-                     ua[col, Nx // 2, 0].sum() * h,
-                     df[away].max(), res.max() if res.size else 0.0))
+                     np.abs(ua[G.win]).max(), np.abs(ur[G.win]).max(),
+                     ur[G.col, G.nx // 2, 0].sum() * G.hy,
+                     ua[G.col, G.nx // 2, 0].sum() * G.hy,
+                     df[G.away].max(), res.max() if res.size else 0.0))
     return keep, rows
 
 
-def report(tag, A, R, dt, keep, rows):
-    print(f"\n=== {tag} (dt = {dt:g}, h = {h:g}, {len(keep)} aligned frames, "
-          f"t = {rows[0][0]:.5f} .. {rows[-1][0]:.5f})")
+def report(tag, G, A, R, keep, rows):
+    print(f"\n=== {tag} (dt = {G.dt:g}, h = {G.hx:g}, {len(keep)} aligned "
+          f"frames, t = {rows[0][0]:.5f} .. {rows[-1][0]:.5f})")
     print(f"{'t':>8} {'dXmax/h':>9} {'max|du|away':>12} {'relL2_away':>11} "
           f"{'max|du|band':>12} {'max|u| a/r':>19} {'window a/r':>19} "
           f"{'flux a/r':>19} {'df away':>9}")
     for r in rows:
-        print(f"{r[0]:8.5f} {r[1] / h:9.2e} {r[2]:12.3e} {r[4]:11.3e} "
+        print(f"{r[0]:8.5f} {r[1] / G.hx:9.2e} {r[2]:12.3e} {r[4]:11.3e} "
               f"{r[3]:12.3e} {r[5]:9.4f}/{r[6]:<9.4f} "
               f"{r[7]:9.4f}/{r[8]:<9.4f} {r[10]:9.5f}/{r[9]:<9.5f} "
               f"{r[11]:9.3e}")
     r = rows[-1]
-    print(f"markers          : max|dX| {r[1]:.3e} m = {r[1] / h:.2e} h")
+    print(f"markers          : max|dX| {r[1]:.3e} m = {r[1] / G.hx:.2e} h")
     print(f"velocity, away from the IB band: max|du| {r[2]:.3e} = "
           f"{r[2] / r[6]:.2e} max|u|, relative L2 error {r[4]:.3e} "
-          f"({int(away.sum())} of {away.size} nodes)")
+          f"({int(G.away.sum())} of {G.away.size} nodes)")
     print(f"velocity, inside the IB band  : max|du| {r[3]:.3e} = "
           f"{r[3] / r[6]:.2f} max|u|")
-    print(f"forcing window ({N_WIN} nodes): max|u| AFSI {r[7]:.4f} / IB2d "
+    print(f"forcing window ({int(G.win.sum())} nodes): max|u| AFSI {r[7]:.4f} / IB2d "
           f"{r[8]:.4f} ({abs(r[7] - r[8]) / r[8]:.2e} relative)")
     print(f"channel flux, middle column over the window rows "
-          f"({int(col.sum())} rows): AFSI {r[10]:.5f}, IB2d {r[9]:.5f} "
+          f"({int(G.col.sum())} rows): AFSI {r[10]:.5f}, IB2d {r[9]:.5f} "
           f"({abs(r[10] - r[9]) / abs(r[9]):.2e} relative)")
     print(f"force field      : max|df| {r[11]:.3e} away from the band, "
           f"|f|max {np.abs(R['f'][keep[-1]]).max():.3e}")
+    if len(rows) > 3:
+        sel = np.unique(np.linspace(1, len(rows) - 1, 4).astype(int))
+        print("window max|u| AFSI/IB2d at t = "
+              + ", ".join(f"{rows[i][0]:.4f}: {rows[i][7]:.4f}/{rows[i][8]:.4f}"
+                          for i in sel))
     print(f"forcing check    : |f_x - F_x^module(u^AFSI)| <= {r[12]:.3e} on the "
           f"window nodes away from the band")
 
 
-keep, rows = metrics({k: A[k] for k in A.files}, R, dt)
-report("shipped dt", A, R, dt, keep, rows)
+def load_pair(ref_path, afsi_path):
+    """Grid + data of one pair (the AFSI file carries dt, nx, ny)."""
+    A = np.load(afsi_path)
+    R = np.load(ref_path)
+    dt = float(A["dt"]) if "dt" in A.files else float(
+        R["dt"] if "dt" in R.files else P["dt"])
+    ny, nx = A["u"].shape[1:3]
+    G = Grid(nx, ny, dt, A["Xa"][0], A["X"].shape[1])
+    return G, A, R
 
-f_a5 = os.path.join(here, "plot_dt5e-5", "afsi_result.npz")
-f_r5 = os.path.join(here, "ib2d_reference_dt5e-5.npz")
-if os.path.exists(f_a5) and os.path.exists(f_r5):
-    A5, R5 = np.load(f_a5), np.load(f_r5)
-    k5, rows5 = metrics({k: A5[k] for k in A5.files}, R5, dt / 2)
-    report("dt/2 cross-check", {k: A5[k] for k in A5.files}, R5, dt / 2, k5,
-           rows5)
-    print("\nthe penalty gain k dt rho^-1 (1 at the shipped dt, 0.5 here) sets "
-          "the grid-scale band spike of the collocated reference; at dt/2 both "
-          "codes agree to a couple of percent everywhere")
+
+G, A, R = load_pair(f_ref, f_afsi)
+keep, rows = metrics(G, A, R)
+report("shipped setup", G, A, R, keep, rows)
+main_pair = (G, A, R, keep, rows)
+
+# cross-checks: ``ib2d_reference<TAG>.npz`` pairs with ``plot<TAG>/``
+import glob  # noqa: E402
+
+for ref_path in sorted(glob.glob(os.path.join(here, "ib2d_reference*.npz"))):
+    tag = os.path.basename(ref_path)[len("ib2d_reference"):-len(".npz")]
+    if not tag:
+        continue
+    afsi_path = os.path.join(here, f"plot{tag}", "afsi_result.npz")
+    if not os.path.exists(afsi_path):
+        continue
+    Gx, Ax, Rx = load_pair(ref_path, afsi_path)
+    kx, rowsx = metrics(Gx, Ax, Rx)
+    report(f"cross-check {tag}", Gx, Ax, Rx, kx, rowsx)
 
 t = A["t"][keep]
 Xa, Xr, Xan = A["X"][keep], R["X"][keep], A["Xa"][keep]
@@ -185,25 +210,37 @@ with open(os.path.join(out, "compare_table.csv"), "w") as fh:
     for r in rows:
         fh.write(",".join(f"{v:.10g}" for v in r) + "\n")
 
+t = A["t"][keep]
+Xa, Xr = A["X"][keep], R["X"][keep]
+dX = np.array([r[1] for r in rows])
+
+with open(os.path.join(out, "compare_table.csv"), "w") as fh:
+    fh.write("t,dXmax,du_max_away,du_max_band,relL2_away,umax_afsi,umax_ib2d,"
+             "umax_window_afsi,umax_window_ib2d,flux_ib2d,flux_afsi,df_max,"
+             "force_residual\n")
+    for r in rows:
+        fh.write(",".join(f"{v:.10g}" for v in r) + "\n")
+
 # --- 1. velocity profiles ---------------------------------------------------
 ksel = [keep[0], keep[len(keep) // 2], keep[-1]] if len(keep) >= 3 else keep
-i_w = int(np.argmax(win.sum(axis=0)))          # busiest forcing column
+i_w = int(np.argmax(G.win.sum(axis=0)))        # busiest forcing column
 fig, axes = plt.subplots(2, len(ksel), figsize=(4.0 * len(ksel), 6.4),
                          sharey=True)
 for c, k in enumerate(ksel):
-    tar = target_velocity(A["t"][k])[0]
-    for row, i in enumerate((i_w, Nx // 2)):
+    tar = G.target_velocity(A["t"][k])[0]
+    for row, i in enumerate((i_w, G.nx // 2)):
         ax = axes[row, c]
-        ax.plot(R["u"][k][:, i, 0], YNODES, "k-", lw=2.0, alpha=0.6,
+        ax.plot(R["u"][k][:, i, 0], G.YNODES, "k-", lw=2.0, alpha=0.6,
                 label="IB2d")
-        ax.plot(A["u"][k][:, i, 0], YNODES, "r--", lw=1.2, label="AFSI")
-        if row == 0 and win[:, i].any():
-            m = win[:, i]
-            ax.plot(tar[m, i], YNODES[m], "b:", lw=1.0, label="target")
-        if band[:, i].any():
-            ax.plot(R["u"][k][band[:, i], i, 0], YNODES[band[:, i]], "k.", ms=2)
+        ax.plot(A["u"][k][:, i, 0], G.YNODES, "r--", lw=1.2, label="AFSI")
+        if row == 0 and G.win[:, i].any():
+            m = G.win[:, i]
+            ax.plot(tar[m, i], G.YNODES[m], "b:", lw=1.0, label="target")
+        if G.band[:, i].any():
+            ax.plot(R["u"][k][G.band[:, i], i, 0], G.YNODES[G.band[:, i]],
+                    "k.", ms=2)
         ax.set_xlabel("$u_x$")
-        ax.set_title(f"x = {XNODES[i]:.4f}, t = {A['t'][k]:.5f}")
+        ax.set_title(f"x = {G.XNODES[i]:.4f}, t = {A['t'][k]:.5f}")
         if row == 0 and c == 0:
             ax.legend(fontsize=8)
 axes[0, 0].set_ylabel("y")
@@ -214,7 +251,7 @@ fig.savefig(os.path.join(out, "compare_profiles.png"), dpi=150)
 # --- 2. histories -----------------------------------------------------------
 fig, ax = plt.subplots(1, 4, figsize=(17, 3.6))
 ax[0].semilogy(t, dX, "k-o", ms=3)
-ax[0].axhline(h, color="gray", ls=":", label="h")
+ax[0].axhline(G.hx, color="gray", ls=":", label="h")
 ax[0].set_title("marker deviation from IB2d")
 ax[0].set_xlabel("t")
 ax[0].legend(fontsize=8)
@@ -240,29 +277,27 @@ fig.savefig(os.path.join(out, "compare_history.png"), dpi=150)
 # --- 3. fields at the last aligned frame ------------------------------------
 k = keep[-1]
 ua, ur = A["u"][k], R["u"][k]
-xg, yg = XNODES, YNODES
 fig, ax = plt.subplots(1, 4, figsize=(19, 4.4))
 vmax = max(np.abs(ur[..., 0]).max(), np.abs(ua[..., 0]).max())
 for a_, u, title in ((ax[0], ur, "IB2d"), (ax[1], ua, "AFSI")):
-    c = a_.pcolormesh(xg, yg, u[..., 0], shading="auto", cmap="RdBu_r",
-                      vmin=-vmax, vmax=vmax)
+    c = a_.pcolormesh(G.XNODES, G.YNODES, u[..., 0], shading="auto",
+                      cmap="RdBu_r", vmin=-vmax, vmax=vmax)
     a_.plot(R["X"][k][:, 0], R["X"][k][:, 1], "k.", ms=0.6)
     a_.set_title(f"{title}: $u_x$, t = {t[-1]:.5f}")
     fig.colorbar(c, ax=a_, shrink=0.85)
 dv = ua[..., 0] - ur[..., 0]
-c = ax[2].pcolormesh(xg, yg, dv, shading="auto", cmap="RdBu_r",
-                     vmin=-np.percentile(np.abs(dv), 99.5),
-                     vmax=np.percentile(np.abs(dv), 99.5))
+lim = np.percentile(np.abs(dv), 99.5)
+c = ax[2].pcolormesh(G.XNODES, G.YNODES, dv, shading="auto", cmap="RdBu_r",
+                     vmin=-lim, vmax=lim)
 ax[2].set_title("$u_x^{AFSI}-u_x^{IB2d}$")
 fig.colorbar(c, ax=ax[2], shrink=0.85)
 du = np.linalg.norm(ua - ur, axis=-1)
-c = ax[3].pcolormesh(xg, yg, du, shading="auto", cmap="viridis",
-                     vmin=0, vmax=du[away].max())
-ax[3].contour(xg, yg, band.astype(float), levels=[0.5], colors="w", lw=0.6)
-ax[3].set_title(f"$|\\Delta u|$, max {du[away].max():.2e} away from the band")
+c = ax[3].pcolormesh(G.XNODES, G.YNODES, du, shading="auto", cmap="viridis",
+                     vmin=0, vmax=du[G.away].max())
+ax[3].contour(G.XNODES, G.YNODES, G.band.astype(float), levels=[0.5],
+              colors="w", lw=0.6)
+ax[3].set_title(f"$|\\Delta u|$, max {du[G.away].max():.2e} away from the band")
 fig.colorbar(c, ax=ax[3], shrink=0.85)
-for a_ in ax:
-    a_.set_aspect("auto")
 fig.tight_layout()
 fig.savefig(os.path.join(out, "compare_fields.png"), dpi=150)
 

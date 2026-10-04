@@ -159,6 +159,9 @@ def main(viz_dir, out, dt=None, print_dump=None, nx=None, ny=None):
         data["f"] = np.array(F)
     if TR:
         data["tracers"] = np.array(TR)
+    if dt is not None:
+        data["dt"] = float(dt)
+        data["nx"], data["ny"] = int(nx), int(ny)
     if have_u:
         data["u"] = np.array(U)
         if P and P[0] is not None:
