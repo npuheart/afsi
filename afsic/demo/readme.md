@@ -52,13 +52,13 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_460` | IB2d 数据文件驱动的移动目标点 | `Pulsing_Heart/32x32`：384 点心脏轮廓（无弹簧/无梁，全部 $k=10^8$ 目标点）在 1×1 周期盒（$\mu=0.5$、32×32、dt=1e-5、T=0.1=1 万步）内按 `update_Target_Point_Positions.m` 的两相多项式规律在 `All_Positions.txt` 的舒张/收缩两条形线之间插值（周期 0.05 s，锚点行程最大 0.119 m = 3.81 h）。锚点与 `.m` 递推**逐位一致**；形状质心最大差 **5.1e-6 m**；包围面积与预设多边形相差 ≤7e-4（IB2d 2.9e-3）；收缩–舒张相位完全同步。标记点逐点互差中位 1.21e-2 m（0.39 h）——经 dt/2 参考（自身仅变 ≤3.2e-3 m）与 $k/10$ 缩放（互差同步放大到 2.9e-2 m）确认这是 **$k=10^8$ 罚力柔度之差**而非时间/相位失配；本算例 `max|u|` 达 341 m/s，速度场只能在滤波意义下比较（readme 有完整证据）|
 | `ib2d/demo_461` | IB2d 视频拟合的弯曲移动目标点 | `Corals/Single_Coral`：90 点珊瑚（两条 45 点触手，全部 $k=10^8$ 目标点）在 0.6×0.6 周期盒（$\mu=0.01$、64×64、dt=1e-5）被 `.m` 的**五次多项式拟合**规律弯曲（只动 $x$，$X(y,t)$ 为三次弯曲模型，自变量为视频帧号 $30(\text{mod}\,2.30)$）。锚点规律 $t=0$ 与 `coral.vertex` 逐位一致（1.7e-16），周期性 0.0；原算例 25 万步 ⇒ 默认只跑 $T=0.115$ s（1.15 万步，锚点行程 4.41 h，全程 6.00 h，规律由 compare.py 解析验证）。标记点偏差典型 **4.3e-6 m（4.5e-4 h）**、最大 5.4e-6 m —— 本批移动目标点算例里最好；与 demo_460 对照可见罚力柔度误差正比于锚点速度（20/7/0.7 m/s → 1e-2/0.4/5e-4 h）|
 | `ib2d/demo_462` | IB2d 非线性弹簧力律 | `NL_Rubberband_With_Springs`：与 demo_444 同几何（64 点椭圆、零静长弹簧、32×32、dt=1e-3、T=1.5），但 `.spring` 第 5 列 $\alpha=2$ ⇒ **硬化二次力律** $F=\tfrac12(\alpha{+}1)k(L-L_0)^\alpha$。逐弹簧对照误差 0.0；标记点偏差典型 4.3e-3 m（0.14 h）、最大 0.23 h；周长 1.937→1.770（IB2d 1.751）；$\gamma=0$ 时漏面积（漂移 8.0e-2，偏差 1.7 h）⇒ 默认 $\gamma=100$ |
+| `ib2d/demo_463` | IB2d 多孔/不透水 A/B | `Compare_Porous_NonPorous_Rubberbands`：同一 2×2 周期盒（$\mu=0.1$、64×64、dt=5e-5、T=0.1）内**两条各 128 点**零静长环（$k=10^7$），左侧环整条标记为多孔（$\kappa=10^{-4}$，逐点差分模板）——**首个同流场双结构算例**。两侧都显示多孔环塌缩 ~55%（面积 0.2512→0.116/0.101）而不透水环仅收缩 ~20%（→0.197/0.201）；标记点偏差最大 0.57 h（多孔）/0.77 h（不透水）；默认 $\gamma=2.5$（demo_453 的 $\gamma$ 扫描结论）|
 
 `pyIB2d/Examples` 已全部移植完毕；下列 `matIB2d/Examples` 算例正在按批次移植
 （本仓库 demo 编号续排）：
 
 | 算例 | 说明 | 新增机制 |
 |---|---|---|
-| `Example_Porous_Rubberbands/Compare_Porous_NonPorous_Rubberbands` | 多孔 vs 非多孔双环 A/B | 多结构体 + 多孔介质（A/B 对照） |
 | `Example_HeartTube/Update_Springs_Peristaltic_Pumping` | 变静长（`update_springs`）蠕动泵 | 时变静长驱动 |
 | `Example_Skeleton` | 纯弹簧骨架（`geo_connect` + 复杂连通） | 复杂几何弹簧网络 |
 | `Examples_Education/Interpolation/Moving_Circle/Linear_Interp` | 移动圆的位置由数据表插值给出 | 目标点位置插值 |
