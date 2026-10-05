@@ -1,0 +1,87 @@
+/Users/pengfei.ma/afsi/third_party/ib2d/pyIB2d/IBM_Blackbox/please_Find_Lagrangian_Forces_On_Eulerian_grid.py:539: RuntimeWarning: invalid value encountered in scalar divide
+  sF_x = 0.5 * (alpha[ii]+1.0) * K_Vec[ii] * np.power( (np.sqrt(dx**2 + dy**2)-RL_Vec[ii]), alpha[ii] ) * (dx/np.sqrt(dx**2+dy**2))
+/Users/pengfei.ma/afsi/third_party/ib2d/pyIB2d/IBM_Blackbox/please_Find_Lagrangian_Forces_On_Eulerian_grid.py:540: RuntimeWarning: invalid value encountered in scalar divide
+  sF_y = 0.5 * (alpha[ii]+1.0) * K_Vec[ii] * np.power( (np.sqrt(dx**2 + dy**2)-RL_Vec[ii]), alpha[ii] ) * (dy/np.sqrt(dx**2+dy**2))
+/Users/pengfei.ma/afsi/third_party/ib2d/pyIB2d/IBM_Blackbox/Supp.py:206: RuntimeWarning: invalid value encountered in cast
+  return (xInds.astype('int'),yInds.astype('int'))
+/Users/pengfei.ma/afsi/third_party/ib2d/pyIB2d/IBM_Blackbox/please_Find_Lagrangian_Forces_On_Eulerian_grid.py:957: RuntimeWarning: invalid value encountered in cast
+  distX = give_Eulerian_Lagrangian_Distance(x[indX.astype('int')],\
+/Users/pengfei.ma/afsi/third_party/ib2d/pyIB2d/IBM_Blackbox/please_Find_Lagrangian_Forces_On_Eulerian_grid.py:959: RuntimeWarning: invalid value encountered in cast
+  distY = give_Eulerian_Lagrangian_Distance(y[indY.astype('int')],\
+/Users/pengfei.ma/afsi/third_party/ib2d/pyIB2d/IBM_Blackbox/please_Find_Lagrangian_Forces_On_Eulerian_grid.py:979: RuntimeWarning: invalid value encountered in cast
+  delta_X[ind_Lag,indX.astype('int')] = delta_1D_x
+/Users/pengfei.ma/afsi/third_party/ib2d/pyIB2d/IBM_Blackbox/please_Find_Lagrangian_Forces_On_Eulerian_grid.py:980: RuntimeWarning: invalid value encountered in cast
+  delta_Y[indY.astype('int'),ind_Lag] = delta_1D_y
+Running without pyFFTW library.
+[pyIB2d] jelly96: Nx=48 Ny=160 dt=2e-05 Tfinal=0.1 steps=5000 print_dump=1000 index_base=1
+
+________________________________________________________________________________
+
+
+
+---------------->>                 IB2d                      <<----------------
+
+
+________________________________________________________________________________
+
+
+If using the code for research purposes please cite the following two papers: 
+
+     [1] N.A. Battista, A.J. Baird, L.A. Miller, A mathematical model and MATLAB code for muscle-fluid-structure simulations, Integ. Comp. Biol. 55(5):901-11 (2015)
+
+     [2] N.A. Battista, W.C. Strickland, L.A. Miller, IB2d a Python and MATLAB implementation of the immersed boundary method, Bioinspir. Biomim. 12(3):036003 (2017)
+
+     [3] N.A. Battista, W.C. Strickland, A. Barrett, L.A. Miller, IB2d Reloaded: A more powerful Python and MATLAB implementation of the immersed boundary method. Math Meth Appl Sci. 1?26 (2017).
+
+________________________________________________________________________________
+
+
+NOTE: If running pyIB2d with Anaconda, please note that it will run faster with vtk installed.
+
+          To install, type the following line into your terminal: <conda install -c menpo vtk> in your terminal
+
+________________________________________________________________________________
+
+
+
+ |****** Prepping Immersed Boundary Simulation ******|
+
+
+
+--> Reading input data for simulation...
+
+
+
+--> FIBER MODEL INCLUDES: 
+
+  - Springs and ...
+                   dynamically updating spring properties
+
+  - Beams ("Non-Invariant Beams") and ... 
+                    NOT dynamically updating beam properties
+
+  - Target Pts. and ...
+                 NOT dynamically updating target point properties
+
+
+
+--> Background Flow Items
+
+      (No tracers nor other passive scalars immersed in fluid)
+
+
+
+ |****** Begin IMMERSED BOUNDARY SIMULATION! ******| 
+
+
+Current Time(s): 0.0
+
+Current Time(s): 0.020000
+
+Current Time(s): 0.040000
+
+Current Time(s): 0.060000
+
+Current Time(s): 0.080000
+
+wrote _probe/ref_2e-5.npz: 5 frames, t in [0.00000, 0.08000], Nb=91, grid 160x48

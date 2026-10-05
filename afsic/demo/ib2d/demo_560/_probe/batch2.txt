@@ -1,0 +1,26 @@
+[13:02:02] demo_642 ref NX=64 DT=2.5e-4 T=0.05 PD=20 START
+[13:06:37] demo_642 ref rc=0 ref frames=10 finite=True umax=1.391e+01
+[13:09:02] demo_642 afsi rc=0 afsi frames=11 finite=True umax=6.924e+00
+[13:09:32] demo_642 compare rc=0
+[13:09:32] demo_643 ref NX=64 DT=2.5e-4 T=0.05 PD=20 START
+[13:11:29] demo_643 ref rc=0 ref frames=10 finite=True umax=5.560e-01
+[13:16:39] demo_643 afsi rc=0 afsi frames=11 finite=True umax=5.494e-01
+[13:16:49] demo_643 compare rc=0
+[13:16:49] demo_644 ref NX=64 DT=5e-4 T=0.05 PD=10 START
+[13:18:12] demo_644 ref rc=0 ref frames=10 finite=True umax=3.005e+00
+[13:19:20] demo_644 afsi rc=1 afsi LOAD FAIL [Errno 2] No such file or directory: 'plot/afsi_result.npz'
+[13:19:25] demo_644 compare rc=0
+[13:19:25] demo_645 ref NX=64 DT=1e-3 T=0.05 PD=5 START
+[13:20:02] demo_645 ref rc=0 ref frames=10 finite=True umax=1.958e+00
+[13:20:22] demo_645 afsi rc=1 afsi LOAD FAIL [Errno 2] No such file or directory: 'plot/afsi_result.npz'
+[13:20:26] demo_645 compare rc=0
+[13:20:26] demo_563 ref NX=18 DT=1e-5 T=2e-3 PD=20 START
+[13:20:48] demo_563 ref rc=0 ref frames=10 finite=True umax=2.673e-03
+[13:21:12] demo_563 afsi rc=0 afsi frames=11 finite=True umax=4.259e-03
+[13:21:18] demo_563 compare rc=0
+[13:21:19] demo_637 ref NX=18 DT=1e-5 T=2e-3 PD=20 START
+[13:23:17] demo_637 ref rc=0 ref frames=10 finite=True umax=2.676e-03
+[13:24:03] demo_637 afsi rc=0 afsi frames=11 finite=True umax=4.308e-03
+[13:24:10] demo_637 compare rc=0
+[13:24:11] demo_567 ref NX=24 DT=1e-5 T=2e-3 PD=20 START
+[13:27:38] demo_567 ref rc=0 ref frames=10 finite=True umax=4.340e-03

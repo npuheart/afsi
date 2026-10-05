@@ -1,0 +1,1 @@
+dt=2e-5 frames=5  u finite=False  max|u|=0.0  X finite=False

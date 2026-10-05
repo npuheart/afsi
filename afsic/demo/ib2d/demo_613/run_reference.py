@@ -80,7 +80,11 @@ def main():
     # structure/field data files: 1-based identifiers are rebased, everything
     # else (vertex, tracers, concentration, porous, mass, brinkman, ...) is
     # copied verbatim
-    id_cols = {"spring": 2, "beam": 3, "target": 1, "muscle": 2, "mass": 2}
+    # number of leading columns holding Lagrangian identifiers, per extension
+    # (``.mass`` has ONE id column -- demo_478's copy said 2 and rebased the
+    # stiffness column; ``.d_spring``/``.nonInv_beam``/``.porous`` were missing)
+    id_cols = {"spring": 2, "d_spring": 2, "beam": 3, "nonInv_beam": 3,
+               "target": 1, "muscle": 2, "mass": 1, "porous": 1}
     for fn in sorted(os.listdir(src)):
         if not fn.startswith(name + "."):
             continue
