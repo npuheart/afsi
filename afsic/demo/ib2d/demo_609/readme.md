@@ -87,8 +87,9 @@ cd afsic/demo/ib2d/demo_609
 
 | 命令 | 实测 `real` |
 |---|---|
-| - | - |
+| `python run_reference.py --nx 128 --tend 0.005 --print-dump 100` | 22 s |
+| `TFINAL=0.005 PRINT_DUMP=100 NX=128 python main.py` | 123 s |
+| `python compare.py` | 约 30 s |
 
-（`real` 取自 `ref.log` / `afsi.log`；本机同一时刻还有大量其他算例在跑，
-绝对耗时波动很大。参考解写入 `ib2d_reference.npz`，AFSI 写入
+（本表由收尾时重跑实测填写；本机同一时刻可能还有其它算例在跑，绝对耗时会有波动。参考解写入 `ib2d_reference.npz`，AFSI 写入
 `plot/afsi_result.npz`，`compare.py` 生成 `figures/` 与 `compare_table.csv`。）
