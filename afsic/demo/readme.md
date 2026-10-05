@@ -289,7 +289,7 @@ Brinkman 阻力项、per-example 用户模块（`update_Springs` / `update_Beams
 | `ib2d/demo_691` | Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High | IB2d `Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High` |
 | `ib2d/demo_692` | Examples_First_Year_Seminar/Corals | IB2d `Examples_First_Year_Seminar/Corals` |
 | `ib2d/demo_693` | Examples_First_Year_Seminar/Plates | IB2d `Examples_First_Year_Seminar/Plates`（有限验证窗口，见 readme） |
-| `ib2d/demo_701` | Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative | IB2d `Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative` |
+| `ib2d/demo_701` | Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative_2 | IB2d `Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative_2` |
 | `ib2d/demo_702` | Example_Boussinesq/Falling_Sphere | IB2d `Example_Boussinesq/Falling_Sphere` |
 | `ib2d/demo_703` | Example_Channel_Flow/Example_Turek_Hron | IB2d `Example_Channel_Flow/Example_Turek_Hron` |
 ### 说明
