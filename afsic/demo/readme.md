@@ -49,6 +49,9 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 弹簧（含非线性 α 律）、阻尼弹簧、不变梁、**非不变梁**、目标点（含 `update_target`）、
 **质量点/幽灵粒子 + 重力**（`mass_pts`，`dt/2` 半步 leapfrog 序列）、porous 滑移、
 poroelastic、被动标量 `concentration`（IB2d 自己的分裂 upwind 对流-扩散，验证到 1e-11）、
+**被动标量源项**（`source` / `k_source` / `c_inf` 三种模型：
+`please_Find_Source_For_Concentration` + 未分裂 upwind 更新，pyIB2d 完全没有这一支，
+在参考侧按 matIB2d 逐行补齐）、
 **Boussinesq 浮力**、凝血 `coagulation`、**FV_LT 肌肉**、**3 元件肌肉**、
 **电生理 `electro_phys`**、任意外力 `arb_ext_force`、示踪粒子 `tracers`、
 Brinkman 阻力项、per-example 用户模块（`update_Springs` / `update_Beams` /
@@ -87,7 +90,23 @@ Brinkman 阻力项、per-example 用户模块（`update_Springs` / `update_Beams
   ⑩ `Rubberband_with_Beams` 的 `nonInv_beams` 拼写错误、Lymphangion 的 `.muscle` 里
      `FV_LT_muscle = 0`、`help_Me_Restart.m` 写死作者桌面绝对路径、pyIB2d 完全没有
      restart 实现、质量点速度不参与 restart；
-  ⑪ `Example_Test_Restart_Protocol` 之外，IB2d 在 demo_620 里到 t=1.5 泄漏 26% 面积（晚期轨迹不可比）。
+  ⑪ `Example_Test_Restart_Protocol` 之外，IB2d 在 demo_620 里到 t=1.5 泄漏 26% 面积（晚期轨迹不可比）；
+  ⑫ 被动标量的源项（`source = 1/2/3`）**在 pyIB2d 里完全没实现**（`IBM_Driver.py` 从不读
+     `source/k_source/c_inf`，总是调用分裂 upwind 更新）——demo_680–684 在参考侧用
+     `ib2d_input/please_Find_Source_For_Concentration.py` 逐行补齐 matIB2d 的
+     `please_Find_Source_For_Concentration.m` 与未分裂更新；
+  ⑬ `Example_Concentration_Dynamics/*` 的 `.concentration` 文件**没有表头**（pyIB2d 会读错），
+     且 `Moving_Cylinders_64/input2d` 里 `source` 键**重复出现**（后一个覆盖前一个）；
+  ⑭ `Example_Meshmerize_Me/*` 的 `please_Compute_External_Forcing.m` 里"首次调用"守卫恒真
+     （每步都重新搜索窗口）、`give_me_source_model.m` / `test_Parabola.m` 等是死文件；
+  ⑮ `Examples_First_Year_Seminar/Plates`：`plates.spring` 声明 307 根却写了 308 行，
+     其中最后一根引用不存在的点 207（生成器循环 `s=1:N` 多写一根）——pyIB2d 自带的读取器
+     直接崩；`update_Springs.m` 又把横向弹簧静止长度写死 `d = 1.0`，而几何间距只有 0.2
+     （两个代码都 NaN）；
+  ⑯ `Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High` 的 2 根阻尼弹簧
+     `L0 = 0.0667` 与初始几何距离 0.1576 相差 2.4 倍（`t = 0` 就有 ~1.4e3 的预张紧力，
+     算例一开始就极猛）；`update_Target_Point_Positions.m` 里 `angVec(0)` 存在
+     MATLAB 1 基索引越界隐患。
 
 ### 全部 demo 一览
 
@@ -254,6 +273,19 @@ Brinkman 阻力项、per-example 用户模块（`update_Springs` / `update_Beams
 | `ib2d/demo_674` | Example_Wobbly_Beam/nonInv_Beam_32 | IB2d `Example_Wobbly_Beam/nonInv_Beam_32` |
 | `ib2d/demo_675` | Example_Celestial_Mechanics/Planets | IB2d `Example_Celestial_Mechanics/Planets` |
 | `ib2d/demo_680` | Example_Concentration_Dynamics/Rubberband_Constant_64 | IB2d `Example_Concentration_Dynamics/Rubberband_Constant_64` |
+| `ib2d/demo_681` | Example_Concentration_Dynamics/Rubberband_Limited_64 | IB2d `Example_Concentration_Dynamics/Rubberband_Limited_64` |
+| `ib2d/demo_682` | Example_Concentration_Dynamics/Rubberband_Sink_64 | IB2d `Example_Concentration_Dynamics/Rubberband_Sink_64` |
+| `ib2d/demo_683` | Example_Concentration_Dynamics/Corals_64 | IB2d `Example_Concentration_Dynamics/Corals_64` |
+| `ib2d/demo_684` | Example_Concentration_Dynamics/Moving_Cylinders_64 | IB2d `Example_Concentration_Dynamics/Moving_Cylinders_64` |
+| `ib2d/demo_685` | Example_Meshmerize_Me | IB2d `Example_Meshmerize_Me`（根目录，叶片） |
+| `ib2d/demo_686` | Example_Meshmerize_Me/Starfish | IB2d `Example_Meshmerize_Me/Starfish` |
+| `ib2d/demo_687` | Example_Meshmerize_Me/Flow_Around_Starfish | IB2d `Example_Meshmerize_Me/Flow_Around_Starfish` |
+| `ib2d/demo_688` | Example_Meshmerize_Me/Dragonfly_Wing | IB2d `Example_Meshmerize_Me/Dragonfly_Wing` |
+| `ib2d/demo_689` | Example_Meshmerize_Me/Insect_Wing_Veins | IB2d `Example_Meshmerize_Me/Insect_Wing_Veins` |
+| `ib2d/demo_690` | Example_Meshmerize_Me/old | IB2d `Example_Meshmerize_Me/old` |
+| `ib2d/demo_691` | Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High | IB2d `Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High`（**草稿**，AFSI 发散） |
+| `ib2d/demo_692` | Examples_First_Year_Seminar/Corals | IB2d `Examples_First_Year_Seminar/Corals`（旋转四臂） |
+| `ib2d/demo_693` | Examples_First_Year_Seminar/Plates | IB2d `Examples_First_Year_Seminar/Plates`（**草稿**，上游参数两处 bug） |
 | `ib2d/demo_701` | Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative | IB2d `Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative` |
 | `ib2d/demo_702` | Example_Boussinesq/Falling_Sphere | IB2d `Example_Boussinesq/Falling_Sphere` |
 | `ib2d/demo_703` | Example_Channel_Flow/Example_Turek_Hron | IB2d `Example_Channel_Flow/Example_Turek_Hron` |
