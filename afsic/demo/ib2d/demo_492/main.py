@@ -160,6 +160,14 @@ pe = ex.get("poroelastic")                   # optional poroelastic points
 uf = ex.get("user_force")                    # optional generic user force
 brink = ex.get("brinkman")                   # optional Brinkman resistance
 conc = ex.get("concentration")               # optional passive scalar
+# the concentration field is grid-sized; the upstream file is the shipped
+# 1024x128 one, so a reduced run needs the matching file built by
+# ``make_reduced_input.py`` (and ``IB2D_EXAMPLE=reduced_input``)
+if conc is not None:
+    assert conc["C0"].shape == (Ny, Nx), (
+        f"the concentration field is {conc['C0'].shape} but this run uses "
+        f"{Ny}x{Nx}: run `python make_reduced_input.py --nx {Nx}` and set "
+        f"IB2D_EXAMPLE=reduced_input (see readme.md)")
 trs = ex.get("tracers")                      # optional passive tracers
 Nt = 0 if trs is None else trs.shape[0]
 

@@ -110,6 +110,15 @@ bm = ex.get("beams")                       # optional invariant beams
 tg = ex.get("targets")                     # pinned target points (optional)
 trs = ex.get("tracers")                    # optional passive tracers
 conc = ex.get("concentration")             # optional passive scalar
+# this example ships no data files: ``ib2d_input/<name>.concentration`` and
+# ``.vertex`` are produced by ``make_input.py``, which writes them for the grid
+# given on the command line (the committed copies are for ``NX = 256``); the
+# concentration field is grid-sized, so a different grid needs a matching file
+if conc is not None:
+    assert conc["C0"].shape == (Ny, Nx), (
+        f"the concentration field in ib2d_input is {conc['C0'].shape} but this "
+        f"run uses {Ny}x{Nx}: rerun `python make_input.py --nx {Nx}` first "
+        f"(see readme.md; the shipped example has no data files at all)")
 Nt = 0 if trs is None else trs.shape[0]
 ds_ib2d = Lx / (2 * Nx)   # IB2d sets ds = Lx/(2Nx)
 
