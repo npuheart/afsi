@@ -1,6 +1,20 @@
 # demo_599 — IB2d example "Tethered Jellyfish" (matIB2d
-
 ``Examples/Example_Jellyfish_Swimming/Tethered_Jellyfish/600x400``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Tethered_Jellyfish/600x400` —— 349 个靶点（`k = 5e6`），第一个点是
+  系绳，左右两臂各 174 个点，按 `Moving_Circle` 的分段三次在两组记录状态间摆动
+  （每臂 0.5 s 周期）。
+* **缩减**：`NX = 150`（`150 x 100`，上游 600x400）、`T = 0.05 s`（500 步 = 半冲程的
+  1/5）。
+* **结果**：标记点 `0.048 h`；速度相对 $L_2$ `0.29`。
+* **坑（上游 bug）**：`.m` 左臂中段三次判据写成 `tRTilde`（右臂的归一化时间）——
+  复制粘贴错误，移植**保留**（两边一致），但它本身不是"正确"的律。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 349 Lagrangian markers, all target points (k = 5e6), in a 3 x 2 periodic box
 with mu = 1.25, rho = 1000; the shipped grid is 600 x 400 and dt = 1e-4.  The

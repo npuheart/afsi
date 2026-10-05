@@ -1,6 +1,19 @@
 # demo_603 — IB2d example "Beehive" (matIB2d
-
 ``Examples/Examples_First_Year_Seminar/Beehive``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Examples_First_Year_Seminar/Beehive` —— 104 个靶点（`k = 1e7`）的
+  "蜂巢花瓣" 旋转，外加盒内被动标量。
+* **新的东西**：与 demo_596 同一份旋转律（改的是 `hive.vertex`），再叠加大
+  demo_456/476 已验证的被动标量算子。
+* **缩减**：`T = 0.005 s`（500 步 = 0.5%），网格/`dt` 与上游一致。
+* **结果**：标记点 `6.1e-3 h`；浓度相对 $L_2$ `2.2%`、峰值相对差 `6.2e-5`、
+  总量差 `0.2%` —— 标量部分很好；速度相对 $L_2$ `0.40` 要打折。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 104 Lagrangian markers -- two hive pairs, four petals of 26 markers -- all
 target points (k = 1e7) in a 1 x 1 periodic box (mu = 0.01, rho = 1, 64 x 64,

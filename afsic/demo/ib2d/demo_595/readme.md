@@ -1,9 +1,23 @@
 # demo_595 — IB2d example "Sawtooth" (matIB2d ``Examples/Example_Sawtooth``) in AFSI.
-
 A blood-pump experiment: 6552 Lagrangian markers, all *target points*
 (k = 1e11), in a 12 x 3 periodic box with mu = 2.234, rho = 1000,
 dt = 2.5e-5.  The upper jaw (the first 3276 markers of ``sawtooth.vertex``)
 oscillates in y about its initial position,
+
+## 中文小结
+
+* **算例**：`Example_Sawtooth` —— 6552 个靶点（`k = 1e11`）组成锯齿泵，上颚按
+  `y = y0 - (a/2) sin(2 pi f t)`（`a = 0.337 m`，`f = 2 Hz`）上下泵动；
+  上游 `1024 x 256`、`Tfinal = 10 s`。
+* **缩减**：`NX = 128`（`128 x 32`）、`T = 0.0125 s`（500 步 = 2.5% 周期）。
+* **结果**：标记点 `0.08 h`；但 **pyIB2d 的"参考解"在 60–120 m/s 之间振荡**，
+  说明上游 `k = 1e11` 的参数让参考解自己振铃，速度不可比。
+* **坑**：`.m` 用 `textscan('%f %f')` 读 `sawtooth.vertex`，首行点数是单个数字，
+  MATLAB 的流式解析会把列错位（把 x 当 y）；移植按意图逐行读并写明。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
     y_i(t) = y_i(0) - (a/2) sin(2 pi freq t),   a = 0.337 m, freq = 2 Hz,
 

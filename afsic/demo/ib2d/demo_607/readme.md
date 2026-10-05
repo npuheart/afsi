@@ -1,6 +1,19 @@
 # demo_607 — IB2d example "Swimmer" (matIB2d
-
 ``Examples/Examples_Education/Interpolation/Swimmer``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Examples_Education/Interpolation/Swimmer` —— 440 个点：183 根弹簧 +
+  182 根非不变梁 + 256 个钉住的"头"靶点（`k = 1e6`）。
+* **新的东西**：与 demo_606 同族但**不同的实现** —— 用分段三次（knots 0.10/0.90）
+  只插值 **y**，并且 `.m` 把 x 曲率那一行注释掉了（`Cx` 保持初值）。
+* **缩减**：`NX = 64`（`64 x 32`；上游 512x256）、`T = 0.01 s`（400 步）。
+* **结果**：标记点 `5.6e-5 h`、弹簧平均长度相对差 `5.1e-6`；速度/推力同 demo_606
+  一样不可信（结构厚度小于一个网格）。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 440 markers in an 8 x 4 periodic box (mu = 10, rho = 1000, 512 x 256 as shipped,
 dt = 2.5e-5): 183 springs (k = 9.6e9), 182 **non-invariant beams**

@@ -1,6 +1,21 @@
 # demo_606 — IB2d example "Swimmer" (matIB2d
-
 ``Examples/Examples_First_Year_Seminar/Swimmer``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Examples_First_Year_Seminar/Swimmer` —— 184 个点：183 根弹簧
+  （`k = 9.6e9`）+ 182 根非不变梁（`kb = 2e12`），身体在
+  `swimmer.phases` 的两相之间按 a/b/c 分段多项式摆动。
+* **新的东西**：`.m` 把插值中心线的**二阶差分**直接写进梁的曲率列（不用梁的连接
+  关系，依赖文件里的连续编号；`xP2 = xP1` 使 `Cx` 恒定不变）。
+* **缩减**：`NX = 64`（上游 512²）、`T = 0.01 s`（400 步 = 冲程的 4%）。
+* **结果**：标记点 `1.2e-4 h`、弹簧平均长度相对差 `1.2e-5` —— 结构状态对得上；
+  但 64² 上 8 m 长的游泳者只有 0.35 个点/网格，**速度/推力完全不可信**。
+* **坑**：pyIB2d 驱动 bug 同 demo_604；`run_reference.py` 已打补丁。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 184 markers in an 8 x 8 periodic box (mu = 10, rho = 1000, 512 x 512 as shipped,
 dt = 2.5e-5): 183 springs (k = 9.6e9) and 182 **non-invariant beams**

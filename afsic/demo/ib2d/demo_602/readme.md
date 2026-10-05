@@ -1,6 +1,19 @@
 # demo_602 — IB2d example "Nematocyst" (matIB2d
-
 ``Examples/Examples_First_Year_Seminar/Nematocyst``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Examples_First_Year_Seminar/Nematocyst` —— 212 个点：160 根弹簧
+  （`k = 5e5`）+ 160 根**静态**非不变梁（`kb = 1e7`）+ 52 个靶点（`k = 1.75e7`）。
+* **新的东西**：`.m` 在 `t <= 0.05 s` 内用 `y += tanh(2000 t) * 8 * dt` 把刺丝
+  发射出去（不回撤）。
+* **缩减**：`T = 0.005 s`（500 步 = 发射的前 10%），网格/`dt` 与上游一致。
+* **结果**：标记点 `0.011 h`；弹簧平均长度相对差 `1.2e-5`；速度相对 $L_2$ `0.044`
+  —— 这一批里对得最好的之一。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 212 markers in a 0.25 x 1.0 periodic box (mu = 0.01, rho = 1, 64 x 256,
 dt = 1e-5): 160 springs (k = 5e5), 160 static non-invariant beams (kb = 1e7)

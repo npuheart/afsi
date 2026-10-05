@@ -1,7 +1,21 @@
 # demo_608 — IB2d example "Jellyfish Update Beam Curvature" (matIB2d
-
 ``Examples/Example_Jellyfish_Swimming/Failed_Attempts/Jellyfish_Update_Beam_Curavture``)
 in AFSI.
+
+## 中文小结
+
+* **算例**：`Jellyfish_Swimming/Failed_Attempts/Jellyfish_Update_Beam_Curavture`
+  —— 83 个点：82 根弹簧（`k = 1e3`）+ 81 根**不变梁**（`kb = 1e10`），
+  **没有靶点**，直接给每根梁指定参考曲率。
+* **新的东西**：`.m` 里硬编码 81×2 的曲率表（收缩/扩张两态），按 0.1 s 周期线性
+  插值；本移植用脚本把这 81 行数字逐字搬进 `update_Beams.py`。
+* **缩减**：`T = 0.25 s`（500 步 = 2.5 个周期），网格/`dt` 与上游一致。
+* **结果**：标记点 `0.054 h`、弹簧平均长度相对差 `2.3e-4`、两边 `max|u|` 相差
+  `0.3%` —— 这一族里对得相当好的一例。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 83 markers in a 1 x 1 periodic box (mu = 0.1, rho = 1, 128 x 128, dt = 5e-4):
 82 springs (k = 1e3) and 81 **invariant beams** (kb = 1e10).  The upstream

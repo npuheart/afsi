@@ -1,6 +1,18 @@
 # demo_598 — IB2d example "Insect Flight" (matIB2d
-
 ``Examples/Example_Insect_Flight/Insect_1024x1024``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Example_Insect_Flight/Insect_1024x1024` —— 205 个靶点（`k = 5e7`）的
+  翅膀截面，`.m` 用**增量**律 `x += tanh(200 t) * 24 * dt` 把翅膀在 0.025 s 内
+  向右平移 0.6 m，然后停住（上游没有回程）。
+* **缩减**：`NX = 64`（上游 1024²）、`T = 0.025 s`（1000 步 = 一整个冲程）。
+* **结果**：标记点 `0.126 h`；两边 `max|u|` 41 / 45 m/s 只差 9%（但 64² 的近场
+  不可信）。可比的是"锚点律 + 结构跟随"。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 205 Lagrangian markers (a single wing cross-section) in a 1 x 1 periodic box
 (``mu = 0.187``, ``rho = 10``, 1024 x 1024 as shipped, dt = 2.5e-5); all markers

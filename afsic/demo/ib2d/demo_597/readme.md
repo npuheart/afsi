@@ -1,6 +1,17 @@
 # demo_597 — IB2d example "Pulsing Heart" (matIB2d ``Examples/Example_Pulsing_Heart/512x512``)
-
 in AFSI.
+
+## 中文小结
+
+* **算例**：`Example_Pulsing_Heart/512x512` —— 6829 个靶点（`k = 1.5e6`）组成心形，
+  在 `All_Positions.txt` 的两套形状间按 `g(s)` 分段多项式收缩/扩张（周期 0.1 s）。
+* **缩减**：`NX = 64`（上游 512）、`T = 0.005 s`（500 步 = 半个收缩期）。
+* **结果**：标记点 `0.064 h`；速度相对 $L_2$ `0.80` —— 64² 上 6829 个点是**过采样**
+  （点距 < h），近场速度不可比（见"不可比"）。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 6829 Lagrangian markers (a 2-d heart outline plus interior) in a 1 x 1 periodic
 box (mu = 0.0125, rho = 1, 512 x 512 as shipped, dt = 1e-5); every marker is a

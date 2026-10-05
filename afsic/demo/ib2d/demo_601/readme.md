@@ -1,6 +1,20 @@
 # demo_601 — IB2d example "Beating Heart" (matIB2d
-
 ``Examples/Examples_Education/Interpolation/Beating_Heart``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Examples_Education/Interpolation/Beating_Heart` —— 771 个靶点
+  （`k = 2e10`）+ 770 根弹簧（`k = 1e3`），在两套心形（`State_A/B.pts`）之间按
+  分段三次跳动（周期 0.22 s）。
+* **缩减**：`T = 0.01 s`（500 步 = 半个收缩期），`64 x 64`/`dt = 2e-5` 与上游一致。
+* **结果**：标记点 `3.2e-3 h`；弹簧平均长度相对差 `1.2e-5`（`0.001697` vs
+  `0.001697`）—— 结构状态几乎逐位一致；速度相对 $L_2$ `0.60`（极硬靶点的近场）。
+* **坑**：`port_example.py` 不会拷 `State_*.pts`（不匹配 `<name>.*`），本 demo 手工
+  拷入并把 `run_reference.py` 的辅助后缀扩到 `.pts`。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 771 markers in a 1 x 1 periodic box (mu = 30, rho = 1000, 64 x 64, dt = 2e-5):
 770 linear springs (k = 1e3) that give the heart its elasticity plus **771

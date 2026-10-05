@@ -1,6 +1,17 @@
 # demo_600 — IB2d example "Tethered Jellyfish" (matIB2d
-
 ``Examples/Example_Jellyfish_Swimming/Tethered_Jellyfish/1200x800``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Tethered_Jellyfish/1200x800` —— demo_599 的高分辨率孪生兄弟：693 个点、
+  `mu = 0.625`（vs 1.25）、上游网格 1200x800，**更新律文件完全相同**。
+* **缩减**：`NX = 150`（`150 x 100`）、`T = 0.05 s`（500 步）。
+* **结果**：标记点 `0.042 h`；速度相对 $L_2$ `0.25`；同样继承 demo_599 的
+  `tRTilde` 上游 bug。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 The high-resolution member of the pair (demo_599 is 600 x 400): 693 Lagrangian
 markers, all target points (k = 5e6) in a 3 x 2 periodic box, mu = 0.625,

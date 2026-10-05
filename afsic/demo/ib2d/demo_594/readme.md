@@ -1,6 +1,19 @@
 # demo_594 — IB2d example "Two Corals" (matIB2d ``Examples/Example_Corals/Two_Corals``)
-
 in AFSI.
+
+## 中文小结
+
+* **算例**：`Example_Corals/Two_Corals` —— 两对珊瑚、4 条触手共 360 个靶点
+  （`k = 1e8`），`0.6 x 0.6` 盒、上游 `Tfinal = 6 s`。
+* **新的东西**：与 demo_461（`Single_Coral`）**同一个** `update_*` 律（视频拟合的
+  弯曲模型），只是两对触手各自绕自己的中心镜像（`0.2` 与 `0.4`）。
+* **缩减**：`NX = 64`（上游 128）、`T = 0.01 s`（1000 步 = 脉冲 0.43%）。
+* **结果**：标记点 `1.8e-3 h`（很好）；速度相对 $L_2$ `0.30` —— 带内离散差异，
+  见"不可比"一节。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 360 Lagrangian markers in a 0.6 x 0.6 periodic box (mu = 0.0025, rho = 1,
 128 x 128, dt = 1e-5): two coral pairs, four tentacles of 90 markers each, all

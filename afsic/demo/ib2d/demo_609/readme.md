@@ -1,5 +1,4 @@
 # demo_609 — IB2d example "Dear KC" (matIB2d ``Examples/Example_KC/Kathleen_256``) in AFSI.
-
 The 256 x 256 member of the ``Example_KC`` teaching family: 2128 Lagrangian
 markers (all target points, k = 1e6) animated through the three letter
 geometries of ``All_Positions.txt`` by the family's
@@ -8,6 +7,18 @@ geometries of ``All_Positions.txt`` by the family's
 move).  Physics, box, mu, dt and the letter animation are identical to
 demo_590 (``Kathleen``, 128 x 128, k = 5e6); this variant ships a finer grid and
 softer targets.
+
+## 中文小结
+
+* **算例**：`Example_KC/Kathleen_256` —— demo_590 的 256² 版本（2128 个靶点、
+  `k = 1e6`），同一份 `update_Target_Point_Positions.m`。
+* **缩减**：`NX = 128`（上游 256²）与 `T = 0.005 s`（2000 步 = 周期 4%）——
+  理由同 demo_590（锚点速度峰值 ~73 m/s，pyIB2d 在更大的窗口会 NaN）。
+* **结果**：标记点 `0.34 h`、速度相对 $L_2$ `0.34`。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 Cost and **upstream instability**: as in demo_590, pyIB2d's explicit solver
 diverges on this example (the anchors swing at up to ~73 m/s), so the demo runs

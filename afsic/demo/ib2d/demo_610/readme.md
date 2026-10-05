@@ -1,5 +1,4 @@
 # demo_610 — IB2d example "Dear KC" (matIB2d ``Examples/Example_KC/For_Brian``) in AFSI.
-
 The "For Brian" member of the ``Example_KC`` teaching family: 748 Lagrangian
 markers in a 1 x 1 periodic box (mu = 0.01, rho = 1, 128 x 128, dt = 2.5e-6),
 all target points with k = 5e6.  Only the first 284 markers move; the example's
@@ -8,6 +7,18 @@ own ``update_Target_Point_Positions.m`` (ported line-by-line to
 animates them through the three letter geometries of ``All_Positions.txt``
 (phase times tP1 = tP3 = 0.05 s, tP2 = tP4 = 0.01 s, period 0.12 s) with the
 family's piecewise-polynomial blend ``g(s)``.
+
+## 中文小结
+
+* **算例**：`Example_KC/For_Brian` —— 与 `Kathleen` **同一份** `update_*.m`
+  （md5 相同）、同样的 748 点 / `k = 5e6`，只有字母几何与 `All_Positions.txt` 不同。
+* **缩减**：`NX = 64`（上游 128）与 `T = 0.005 s`（2000 步 = 周期 4%）；
+  理由同 demo_590。
+* **结果**：标记点 `0.16 h`、速度相对 $L_2$ `0.26`。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 Cost and **upstream instability**: as in demo_590, the anchors swing hard (peak
 anchor speed ~73 m/s) and pyIB2d's explicit solver diverges between t = 0.005 s

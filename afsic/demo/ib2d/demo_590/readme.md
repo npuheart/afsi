@@ -1,10 +1,24 @@
 # demo_590 — IB2d example "Dear KC" (matIB2d ``Examples/Example_KC/Kathleen``) in AFSI.
-
 748 Lagrangian markers in a 1 x 1 periodic box of viscous fluid (mu = 0.01,
 rho = 1, 128 x 128, dt = 2.5e-6): the shipped ``dear_KC.vertex`` geometry (an
 "KC" wordmark plus decoration).  Every marker is a *target point* (k = 5e6), so
 the structure is essentially rigid; the example is a teaching demo of IB2d's
 moving-target machinery.
+
+## 中文小结
+
+* **算例**：`Example_KC/Kathleen` —— 748 个靶点（`k = 5e6`）拼出 "KC" 字样，
+  上游 `Tfinal = 0.12 s`（48000 步），`128 x 128`。
+* **新的东西**：`update_Target_Point_Positions.m` 让前 284 个点在三套字母几何之间
+  做分段多项式插值（周期 0.12 s）。
+* **缩减**：本 demo 只跑 `T = 0.005 s`（2000 步 = 周期 4%），因为锚点峰值速度 ~73 m/s，
+  **pyIB2d 在 `T = 0.02 s` 会 overflow/NaN 跑不完**。
+* **结果**：标记点 `0.29 h`、速度相对 $L_2$ `0.22` —— 对这么"猛"的运动算是对上了。
+* **坑**：`dear_KC.vertex` 有 3 对坐标完全重合的点，模板按惯例错开 `1e-6 dx`。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 Only the first 284 markers move.  The example's own
 ``update_Target_Point_Positions.m`` -- ported line-by-line to

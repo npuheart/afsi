@@ -1,6 +1,18 @@
 # demo_605 — IB2d example "Jellyfish Material (512x512)" (matIB2d
-
 ``Examples/Examples_First_Year_Seminar/Jellyfish_Material_512x512``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Jellyfish_Material_512x512` —— 与 demo_604 同一族的 512² 版本
+  （255 个点、`kb` 最大 `1.04e15`）。上游 `Tfinal = 1 s`、`128 x 512`。
+* **缩减**：`NX = 64`（`64 x 256`）、`T = 0.005 s`（500 步）。
+* **结果（重要）**：**两个代码都在第一个时间步就 NaN**（`kb dt / mu ≈ 1e9`），
+  除了 `t = 0` 之外没有任何可比帧 —— 上游这一版的参数本身不可跑。
+  demo_604 才是这一族的有效成员。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 The high-resolution member of the pair (demo_604 is the 64 x 256 run): 255
 markers in a 2 x 8 periodic box, mu = 10, rho = 1000, dt = 1e-5, shipped grid
@@ -48,17 +60,24 @@ wrote /Users/pengfei.ma/afsi/afsic/demo/ib2d/demo_605/figures/compare_table.csv 
 
 ## 不可比 / 需要打折看的地方
 
-* **规模缩减**：上游 `128 x 512`、`Tfinal = 1 s`（100000 步）；本 demo 用
-  `NX = 64`（`64 x 256`）和 `T = 0.005 s`（500 步 = 周期的 0.5%），`dt = 1e-5`、
-  `print_dump = 50` 与上游节奏一致。
-* **与 demo_604 是同一族**：`update_nonInv_Beams.m` 只有硬编码的网格常数不同
-  （`N1 = 512`、`xRef = L1/8`）和材料参数（`mu = 10`、弹簧/梁刚度大 3 个量级）。
-  移植是同一套解析 bell 模型，同样把 0 基 id `+1` 还原成 1 基再索引。
-* **pyIB2d 驱动 bug**：与 demo_604 相同（`IBM_Driver.py:711` 传 `beams_info`，
-  本算例 `beams = 0` ⇒ 标量 0），参考解必须先打补丁才能跑；本 demo 的
-  `run_reference.py` 已包含该最小补丁。
-* **要打折的地方**：`kb` 最大到 `1e15`、`k ≈ 1.3e7`，速度场（相对 $L_2$）与
-  力场都不可比；`max|dX|/h` 与弹簧平均长度是判据。
+* **这个上游算例在一步之内就爆炸（两个代码都一样）**：`.nonInv_beam` 文件里梁刚度
+  `kb` 最大到 `1.04e15`，而 `dt = 1e-5`、`mu = 10`，罚力/刚度的显式稳定量
+  `kb dt / mu ≈ 1e9`。实测：AFSI 与 pyIB2d **在第一个输出帧（`t = 5e-4`）就已经是
+  NaN**（`compare.py` 的表里全是 `nan`；`plot/afsi_result.npz` 与
+  `ib2d_reference.npz` 的 `X/u` 除 `t=0` 外全部非有限）。这不是移植 bug，而是
+  **上游参数本身不可跑**：`.m` 给出的参考曲率与 512² 版几何不匹配，一步就产生巨大
+  的非不变梁力。
+* **能说的结论只有**：两个代码在 `t = 0` 完全一致（`max|dX|/h = 0`）—— 因为
+  `t = 0` 的初始离散是同一份数据；此后两边同时发散，**本 demo 无法给出任何流固
+  耦合的定量对比**。
+* **规模缩减**：上游 `Tfinal = 1 s`（100000 步）在 `128 x 512`，本 demo 用
+  `NX = 64`（`64 x 256`）和 `T = 0.005 s`（500 步）—— 但如上所述，实际只有第 0 帧
+  是有限的。
+* **pyIB2d 驱动 bug**：与 demo_604 相同（`IBM_Driver.py:711` 把 `beams_info`——
+  本算例 `beams = 0` 时是标量 `0`——传给 `update_nonInv_Beams`）；本 demo 的
+  `run_reference.py` 已包含最小补丁，否则参考解连第一步都进不去。
+* **建议**：把 demo_604（`Jellyfish_Material`，`64 x 256`，`kb = 1e13`）当作这一族
+  的有效成员；605 保留下来作为"上游 512² 版本不可用"的记录。
 
 ## 运行方法（实测耗时，本机）
 

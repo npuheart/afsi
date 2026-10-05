@@ -1,6 +1,21 @@
 # demo_604 — IB2d example "Jellyfish Material" (matIB2d
-
 ``Examples/Examples_First_Year_Seminar/Jellyfish_Material``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Examples_First_Year_Seminar/Jellyfish_Material` —— 127 个点：
+  126 根弹簧（`k = 6.4e9`）+ 125 根**非不变梁**（`kb = 1e13`）。
+* **新的东西**：`.m` 每步从解析 `beta(t)` 重新生成水母钟形中心线，并把它的二阶
+  差分写成梁的参考曲率（Alben–Peng–Miller 模型）。
+* **缩减**：`T = 0.005 s`（500 步 = 1 s 周期的 0.5%），网格/`dt` 与上游一致。
+* **结果**：标记点 `0.22 h`、弹簧平均长度相对差 `1.2e-3`；速度/力不可比（极硬材料）。
+* **坑（重要）**：**pyIB2d 驱动 bug** —— `IBM_Driver.py:711` 把 `beams_info`
+  （本算例 `beams = 0` 时是标量 0）传给 `update_nonInv_Beams`，上游 pyIB2d
+  **根本跑不了这个算例**；本 demo 的 `run_reference.py` 打了最小补丁。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 127 Lagrangian markers in a 2 x 8 periodic box (mu = 2.5, rho = 1000,
 64 x 256, dt = 1e-5): 126 springs (k = 6.4e9) and 125 **non-invariant beams**

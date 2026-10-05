@@ -1,6 +1,22 @@
 # demo_596 — IB2d example "Corals" (matIB2d
-
 ``Examples/Examples_First_Year_Seminar/Corals``) in AFSI.
+
+## 中文小结
+
+* **算例**：`Examples_First_Year_Seminar/Corals` —— 180 个靶点（`k = 1e7`）组成
+  两对珊瑚，`1 x 1` 盒、上游 `Tfinal = 1 s`。
+* **新的东西**：`.m` 用两组三角波角度（每步 `pi dt` 与 `pi dt/2` 累加、折叠到
+  `[0, 2 pi/3]`）把结构的四分之一各自绕基点旋转 —— 与 demo_463/464 的弹簧泵
+  完全不同。
+* **缩减**：`T = 0.005 s`（500 步 = 0.5%），网格/`dt` 与上游一致。
+* **结果**：标记点 `3.0e-3 h`（运动很小，这个偏差已经很严）；速度相对 $L_2$ `0.72`
+  （IB 带内近场差异，见"不可比"）。
+* **坑**：`angVec1(mod(n, L1))` 是 1 基索引，`mod == 0` 时 MATLAB 会报错；
+  `corals.vertex` 的 `textscan` 错位问题同 demo_595。
+
+
+> 下面 "Physics / porting notes" 部分是英文叙述（与 `main.py` 的 docstring 同源）：
+> 上游算例的标识符、方程都来自英文源码，保持原样以免转述出错。
 
 180 Lagrangian markers -- two coral pairs, four tentacles of 45 markers -- all
 target points (k = 1e7) in a 1 x 1 periodic box (mu = 0.01, rho = 1, 64 x 64,
