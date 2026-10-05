@@ -1,4 +1,0 @@
-[12:50:14] demo_560 ref NX=48 DT=1e-5 T=1.2e-3 PD=12 start
-[12:50:48] demo_560 afsi start
-[12:51:33] demo_560 compare start
-[12:51:43] demo_560 done rc=0

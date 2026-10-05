@@ -35,8 +35,8 @@ IB2d 官方算例（`matIB2d/Examples/Example_Porous_Rubberbands/Compare_Porous_
 
 ## 结果
 
-参考运行约 180 s、AFSI 运行约 480 s（256² 网格，100 步，墙钟时间含导入；
-`main.py` 自报的模拟耗时约 400 s）。5 帧对齐（`t = 0 .. 0.00505`）。
+参考运行约 46 s（256²，100 步）；AFSI 模拟耗时 249.8 s（墙钟另含
+1-3 min 解释器/库导入；机器并行运行其它 demo）。5 帧对齐（`t = 0 .. 0.00505`）。
 `compare.py` 原文：
 
 | 指标（末帧） | compare.py 原文 |

@@ -23,7 +23,8 @@ IB2d 官方算例（`matIB2d/Examples/Examples_First_Year_Seminar/Beam_and_Cells
 
 ## 结果
 
-参考运行约 56 s、AFSI 运行约 316 s（含导入，机器并行运行其它 demo）。
+参考运行约 57 s、AFSI 模拟耗时 278.2 s（墙钟另含 1-3 min 解释器/库导入；
+机器并行运行其它 demo）。
 20 帧对齐（`t = 0 .. 0.04755`）。`compare.py` 原文：
 
 | 指标（末帧） | compare.py 原文 |

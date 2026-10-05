@@ -32,8 +32,8 @@ IB2d 官方算例（`matIB2d/Examples/Example_Meshmerize_Me/old`，`string_name 
 
 ## 结果
 
-参考运行约 207 s、AFSI 运行约 336 s（墙钟时间含导入，机器并行运行其它 demo；
-`main.py` 自报的模拟耗时是 263 s）。5 帧对齐（`t = 0 .. 0.02010`）。
+参考运行约 207 s；AFSI 模拟耗时 262.6 s（墙钟另含 1-3 min 解释器/库导入；
+机器并行运行其它 demo）。5 帧对齐（`t = 0 .. 0.02010`）。
 `compare.py` 原文：
 
 | 指标（末帧） | compare.py 原文 |

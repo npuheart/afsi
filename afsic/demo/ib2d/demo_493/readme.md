@@ -25,8 +25,8 @@ IB2d 官方算例（`matIB2d/Examples/Example_Wobbly_Beam/Beam_256`）在 AFSI �
 
 ## 结果
 
-参考运行约 48 s、AFSI 运行约 314 s（含解释器/库导入，机器同时并行运行其它
-demo，见"运行"）。20 帧对齐（`t = 0 .. 0.04755`）。以下为 `compare.py`
+参考运行约 48 s、AFSI 模拟耗时 283.7 s（墙钟另含 1-3 min 解释器/库导入；
+机器同时并行运行其它 demo）。20 帧对齐（`t = 0 .. 0.04755`）。以下为 `compare.py`
 自己输出的原文：
 
 | 指标（末帧） | compare.py 原文 |

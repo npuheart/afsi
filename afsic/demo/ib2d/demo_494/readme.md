@@ -36,8 +36,8 @@ IB2d 官方算例（`matIB2d/Examples/Examples_First_Year_Seminar/Leaf`）
 
 ## 结果
 
-参考运行约 71 s、AFSI 运行约 426 s（墙钟时间含导入，机器并行运行其它 demo；
-`main.py` 自报的模拟耗时是 403 s）。
+参考运行约 71 s；AFSI 模拟耗时 403.0 s（墙钟另含 1-3 min 解释器/库导入；
+机器并行运行其它 demo）。
 11 帧对齐（`t = 0 .. 0.01001`）。`compare.py` 原文：
 
 | 指标（末帧） | compare.py 原文 |

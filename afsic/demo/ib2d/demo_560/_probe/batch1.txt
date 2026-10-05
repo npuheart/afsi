@@ -1,9 +1,0 @@
-[12:54:21] demo_560 ref NX=36 DT=1e-5 T=2e-3 PD=20 START
-[12:57:09] demo_560 ref rc=0 ref frames=10 finite=True umax=9.003e-03
-[12:57:47] demo_560 afsi rc=0 afsi frames=11 finite=True umax=1.302e-02
-[12:58:00] demo_560 compare rc=0
-[12:58:00] demo_568 ref NX=12 DT=1e-5 T=2e-3 PD=20 START
-[12:59:14] demo_568 ref rc=0 ref frames=10 finite=True umax=8.232e-04
-[13:00:38] demo_568 afsi rc=0 afsi frames=11 finite=True umax=1.371e-03
-[13:00:50] demo_568 compare rc=0
-[13:00:50] BATCH DONE

@@ -28,8 +28,8 @@ IB2d 官方算例（`matIB2d/Examples/Example_Meshmerize_Me/Starfish`）
 
 ## 结果
 
-参考运行约 84 s、AFSI 运行约 168 s（墙钟时间含导入；`main.py` 自报的模拟
-耗时只有 24.7 s，网格很小）。5 帧对齐（`t = 0 .. 0.01005`）。`compare.py` 原文：
+参考运行约 84 s（参考代码的纯 Python 循环占大头）；AFSI 模拟耗时仅 24.7 s
+（墙钟另含 1-3 min 解释器/库导入；机器并行运行其它 demo）。5 帧对齐（`t = 0 .. 0.01005`）。`compare.py` 原文：
 
 | 指标（末帧） | compare.py 原文 |
 |---|---|

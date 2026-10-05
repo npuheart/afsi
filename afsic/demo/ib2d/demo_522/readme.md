@@ -17,7 +17,7 @@ IB2d 官方算例（`matIB2d/Examples/Examples_Education/Convergence/Jellyfish/S
 * 周期盒 `[0,3] × [0,10]`、`ρ = 1000`、`μ = 13.333`、`supp = 4`；
 * **钟形**：`Make_Jelly_Geometry.m` 生成的水母截面（半椭圆 `a = 0.5`、`b = 0.75`，
   下端截到 `d = -0.25`），平移到中心 `(1.5, 2.0)`；
-* **本格结构**（`main.py` 打印的实测值）：
+* **本格结构**（由本 demo 的 `.spring`/`.nonInv_beam` 读出，与 `main.py` 头部打印一致）：
 
   ```
   structure    : 59 markers, 42 springs (k=1.6e+08, alpha=1..1), 37 non-invariant beams (kb=1.02e+09), 12 target points (k=2.5e+06)
@@ -49,15 +49,23 @@ IB2d 官方算例（`matIB2d/Examples/Examples_Education/Convergence/Jellyfish/S
 | 64 | 42 | 39–42 | 39–42 | **恰好正确**（钟形只有 38 根） |
 | 96 | 65 | 59–65 | 39–65 | 多改 20 根钟形弹簧 |
 | 192 | 132 | 119–132 | 39–132 | 多改 80 根 |
-| 1024 | 715 | 637–715 | 39–715 | 多改 636 根 |
+| 256 | 177 | 159–177 | 39–177 | 多改 120 根 |
+| 1024 | 715 | 637–715 | 39–715 | 多改 598 根 |
 
 **本格**：`Res_64`，弹簧 42 根，肌肉块 = 第 39–42 行，
 而 `39:end` 命中 `39–42`。
 
-钟形弹簧的静长等于标记间距 `ds`，被改写成 `|cos| ≤ 1` 后相当于拉伸
-`1/ds` 倍。用**逐字**规则实测（demo_521，`JELLY_MUSCLE_ROWS=verbatim`）：
-AFSI 在 `t = 6e-3` 变 NaN、pyIB2d 在 `t = 8e-3` 变 NaN —— 两边都炸，
-比较无意义，所以逐字规则不能作为 demo 的默认行为。
+钟形弹簧的静长等于标记间距 `ds`，被改写成 `|cos| ≤ 1` 后相当于把它拉伸
+`1/ds` 倍。用**逐字**规则实测（`JELLY_MUSCLE_ROWS=verbatim`、上游 `dt = 1e-5`、
+36×120）：
+
+* demo_521（Res_192，`39:end` 多改 80 根钟形弹簧）：AFSI 在 `t = 6e-3` 变 NaN，
+  pyIB2d 在 `t = 8e-3` 变 NaN；
+* demo_526（Res_96，多改 20 根）：1001 步内没有 NaN，但 `max|u|` 已经涨到
+  **1632 m/s**（修正规则下同一步是 ~0.8 m/s，即放大了 2000 倍）。
+
+也就是说，按上游这一行跑，**任何一格都不是可用的物理设置**（要么不动、要么炸），
+所以逐字规则不能作为 demo 的默认行为。
 
 另外，上游这份骨架**从未跑通过**：`Res_1024_1280x384/job.96511.out` 里
 2018-08-31 的作业日志是
@@ -144,17 +152,27 @@ springs          : mean length AFSI 0.145579 / IB2d 0.146321 (5.07e-03 relative)
 （表中 `h = Lx/NX = 1/12` 是 AFSI 网格间距，`dXmax/h` 是标记点最大偏差除以 `h`；
 `max|u| a/r` = AFSI / IB2d；`relL2` 是窄带外速度场的相对 `L_2` 误差。）
 
-**能验证**：肌肉驱动的"收缩—回弹"运动学——标记点轨迹、弹簧（轮廓 + 肌肉）的长度、
-目标点约束、流场峰值速度量级都在同一条轨迹上。
+**能验证**（同一份 `update_Springs.py` 被两个代码共用，下面是逐项对照）：
+
+| 量 | AFSI / IB2d | 相对差 |
+|---|---|---|
+| 标记点最大偏差（59 点） | 5.53e-02 `h` | — |
+| 弹簧平均长度（42 根） | 0.145579 / 0.146321（0.51%） | 见左 |
+| 速度峰值 `max|u|` | 7.1350e-01 / 6.6850e-01（6.7%） | 见左 |
+
+即：**肌肉驱动的"收缩—回弹"运动学被验证**（标记点轨迹、弹簧长度分布、目标点约束、
+峰值速度量级）；本格结构间距 `ds_struct = 0.125`，公共网格的
+`ds_code/ds_struct = 0.33`，即结构比公共网格**粗** 3.00 倍（过分辨）：结构的 `ds` 权重被缩小 3.00 倍，耦合被削弱（两个代码同样如此）。
 
 **不能验证（如实记录）**：
 
+* **流场小尺度结构**：窄带外速度场相对 $L_2$ 误差 = 2.417e-01，
+  `max|du|` 见上表；这是尾涡/剪切层在两种离散下的差异（公共网格与结构间距不匹配时
+  更明显）；
 * **上游那一格的真实解**：本 demo 用 36×120/`dt = 1e-4`/`T = 0.25 s`，
   与上游 24×80/`dt = 1e-5`/`T = 5 s` 不同；且上游那一格**从未跑通过**
   （见 §1），因此没有可比对的"官方结果"；
-* **流场小尺度结构**（`relL2`、`max|du|` 那一列）：公共网格与结构间距不匹配，
-  对高 Res 的结构（本格 64，间距 0.125 m）**欠分辨**；尾流涡结构本身
-  在两个离散下也只能定性一致；
+
 * **收敛阶**：收敛性研究需要同一 Re 下逐格跑上游网格，本 demo 只是其中一格。
 
 ## 运行
@@ -175,7 +193,8 @@ python compare.py
 ```bash
 python run_reference.py --nx 24 --tend 5.0 --dt 1e-5 --print-dump 5000
 TFINAL=5.0 PRINT_DUMP=5000 NX=24 NY=80 DT=1e-5 python main.py
-# 复现上游 `39:end` 的爆炸行为（两边一致地 NaN）：
-JELLY_MUSCLE_ROWS=verbatim python run_reference.py --nx 36 --tend 0.02 --dt 1e-4 --print-dump 100
-JELLY_MUSCLE_ROWS=verbatim TFINAL=0.02 PRINT_DUMP=100 NX=36 NY=120 DT=1e-4 python main.py
+# 用上游规则 `39:end`（`JELLY_MUSCLE_ROWS=verbatim`）、上游 dt = 1e-5：
+复现上游 `39:end` 的行为：本格 `39:end` 恰好等于肌肉块 ⇒ 与默认行为逐位相同
+JELLY_MUSCLE_ROWS=verbatim python run_reference.py --nx 36 --tend 0.02 --print-dump 100
+JELLY_MUSCLE_ROWS=verbatim TFINAL=0.02 PRINT_DUMP=100 NX=36 NY=120 python main.py
 ```
