@@ -562,6 +562,8 @@ if springs_info is not None or beams_info is not None \
         for aa, bb, kk, LL, al in springs_info:
             aa, bb = int(aa), int(bb)
             d = Xp[bb] - Xp[aa]
+            d[0] = _min_image(np.array([d[0]]), Lx)[0]
+            d[1] = _min_image(np.array([d[1]]), Ly)[0]
             L = np.hypot(*d)
             sF = 0.5 * (al + 1.0) * kk * (L - LL) ** al / L
             Fl[aa] += sF * d
