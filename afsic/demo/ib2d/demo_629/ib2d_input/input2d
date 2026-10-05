@@ -6,7 +6,7 @@
 % FLUID PARAMETER VALUES %
 %
 Fluid_Parameters {
-mu = 0.05               % Dynamic Viscosity (N*s/m^2) 
+mu = 0.01               % Dynamic Viscosity (N*s/m^2) 
 rho = 1                 % Density (kg/m^3)
 }
 
@@ -16,15 +16,15 @@ rho = 1                 % Density (kg/m^3)
 %
 Temporal_Information {
 Tfinal = 1.25           % Final time of simulation (s)
-dt = 2.5e-5             % Time-step (s)
+dt = 5.0e-5             % Time-step (s)
 }
 
 %
 % GRID PARAMETERS %
 %
 Grid_Parameters {
-Nx =  512                % # of Eulerian Grid Pts. in x-Direction (MUST BE EVEN!!!)
-Ny =  128                % # of Eulerian Grid Pts. in y-Direction (MUST BE EVEN!!!)
+Nx =  64                % # of Eulerian Grid Pts. in x-Direction (MUST BE EVEN!!!)
+Ny =  16                % # of Eulerian Grid Pts. in y-Direction (MUST BE EVEN!!!)
 Lx = 1.0                % Length of Eulerian Grid in x-Direction (m)
 Ly = 0.25                % Length of Eulerian Grid in y-Direction (m)
 supp = 4                % Choose dirac-delta support (KEEP IT EVEN!!!)
@@ -64,11 +64,11 @@ coagulation = 0         % 0 (for no) or 1 (for yes)
 % PRINTING INFORMATION
 %
 Output_Info {
-print_dump = 200         % How often to print (PLOT) to screen
-save_Vorticity = 1;      % Save Vorticity Scalar Data to .vtk format
+print_dump = 200          % How often to print (PLOT) to screen
+save_Vorticity = 0;      % Save Vorticity Scalar Data to .vtk format
 save_Pressure = 0;       % Save Pressure Scalar Data to .vtk format
 save_uVec = 0;           % Save u-Vector Data to .vtk format
-save_uMag = 0;           % Save uMagnitude Scalar Data to .vtk format
+save_uMag = 1;           % Save uMagnitude Scalar Data to .vtk format
 save_uX = 0;             % Save uX Scalar Data to .vtk format
 save_uY = 0;             % Save uY Scalar Data to .vtk format
 save_fMag = 0;           % Save Force Magnitude Scalar Data to .vtk format
