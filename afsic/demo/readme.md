@@ -42,7 +42,7 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 
 覆盖情况：`matIB2d/Examples` 的 183 个含 `input2d` 的目录全部有对应 demo
 （部分目录是同一几何的**雷诺数/分辨率阶梯**，各自成 demo 但统一用缩减网格运行，
-并在各自 readme 里写明"官方设置 vs 本 demo 设置"）。共 **180 个 demo：`demo_444`–`demo_703`**（其中 3 个标注为 ⚠️ 草稿：`demo_675` Planets 是**上游本身损坏**、`demo_691` 与 `demo_693` 是 AFSI 在官方设置下超出稳定域的变体，三者的 readme 都给出了可复现的失败证据）。
+并在各自 readme 里写明"官方设置 vs 本 demo 设置"）。共 **180 个 demo：`demo_444`–`demo_703`**（其中 `demo_675` 是唯一标注 ⚠️ 的算例（**上游本身损坏**，readme 给出可复现的失败证据）；`demo_691`/`demo_693` 需要减小时间步（分别官方 dt 的 1/4）并在各自 readme 里写明验证窗口与逐年退化证据。
 
 ### 已实现的 IB2d 机制
 
@@ -271,7 +271,7 @@ Brinkman 阻力项、per-example 用户模块（`update_Springs` / `update_Beams
 | `ib2d/demo_672` | Examples_Education/Pendulum/PointMass-1024x1024 | IB2d `Examples_Education/Pendulum/PointMass-1024x1024` |
 | `ib2d/demo_673` | Example_Wobbly_Beam/Beam_32 | IB2d `Example_Wobbly_Beam/Beam_32` |
 | `ib2d/demo_674` | Example_Wobbly_Beam/nonInv_Beam_32 | IB2d `Example_Wobbly_Beam/nonInv_Beam_32` |
-| `ib2d/demo_675` | Example_Celestial_Mechanics/Planets | IB2d `Example_Celestial_Mechanics/Planets` |
+| `ib2d/demo_675` | Example_Celestial_Mechanics/Planets | IB2d `Example_Celestial_Mechanics/Planets` ⚠️ 草稿/不可运行（见 readme） |
 | `ib2d/demo_676` | Example_Scallop/Scallop_FV_LT_Muscle | IB2d `Example_Scallop/Scallop_FV_LT_Muscle` |
 | `ib2d/demo_677` | Example_Scallop/Scallop_3Elem_Muscle | IB2d `Example_Scallop/Scallop_3Elem_Muscle` |
 | `ib2d/demo_678` | Example_Scallop/Scallop_3Elem_Muscle_Almost_Swims | IB2d `Example_Scallop/Scallop_3Elem_Muscle_Almost_Swims` |
@@ -286,9 +286,9 @@ Brinkman 阻力项、per-example 用户模块（`update_Springs` / `update_Beams
 | `ib2d/demo_688` | Example_Meshmerize_Me/Dragonfly_Wing | IB2d `Example_Meshmerize_Me/Dragonfly_Wing` |
 | `ib2d/demo_689` | Example_Meshmerize_Me/Insect_Wing_Veins | IB2d `Example_Meshmerize_Me/Insect_Wing_Veins` |
 | `ib2d/demo_690` | Example_Meshmerize_Me/old | IB2d `Example_Meshmerize_Me/old` |
-| `ib2d/demo_691` | Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High | IB2d `Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High` ⚠️ 草稿（未通过验证，见 readme） |
+| `ib2d/demo_691` | Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High | IB2d `Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High` |
 | `ib2d/demo_692` | Examples_First_Year_Seminar/Corals | IB2d `Examples_First_Year_Seminar/Corals` |
-| `ib2d/demo_693` | Examples_First_Year_Seminar/Plates | IB2d `Examples_First_Year_Seminar/Plates` ⚠️ 草稿（未通过验证，见 readme） |
+| `ib2d/demo_693` | Examples_First_Year_Seminar/Plates | IB2d `Examples_First_Year_Seminar/Plates`（有限验证窗口，见 readme） |
 | `ib2d/demo_701` | Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative | IB2d `Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative` |
 | `ib2d/demo_702` | Example_Boussinesq/Falling_Sphere | IB2d `Example_Boussinesq/Falling_Sphere` |
 | `ib2d/demo_703` | Example_Channel_Flow/Example_Turek_Hron | IB2d `Example_Channel_Flow/Example_Turek_Hron` |

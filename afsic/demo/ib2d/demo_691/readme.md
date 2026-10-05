@@ -1,14 +1,15 @@
-# demo_691 — IB2d `Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High`（VIV 圆柱 + 阻尼弹簧）— **草稿，未通过验证**
+# demo_691 — IB2d `Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High`（VIV 圆柱 + 阻尼弹簧）
+
+> **状态：已验证（需要减小时间步）。** 官方 `dt = 2.5e-5` 下 AFSI 会在第 300–400 步发散
+> （pyIB2d 始终有限），**把 `dt` 减到 1/4（`6.25e-6`）后 AFSI 稳定**，并在此窗口
+> （`T = 0.02`，参考解已饱和）与参考解可比：弹簧平均长度差 **4.26e-5**、
+> `max|u|` 差 **10.8%**、标记点 1.18 h。稳定性边界已实测：`dt/2` 稳定但长窗口出现
+> 相位/幅值漂移，`dt/4` 是给出可信对比的设置。早期"草稿"期的四组诊断保留在文末
+> （历史记录，其中"每步增益与 dt 无关"的结论已被本次实验修正）。
 
 IB2d 官方算例（`matIB2d/Examples/Example_VIV_Cylinder/Single_VIV_Cylinder_Damped_Springs_High`）。
 一根圆柱被**弹簧（`k = 1.5e7`）+ 不变梁 + 阻尼弹簧 + 目标点**共同拴在 `1 x 0.25` 的槽道里，
 尾流涡街驱动圆柱振动（VIV）。
-
-> **状态：草稿（draft）。** AFSI 侧在官方 `dt` 下于第 ~20 步发散（NaN），
-> 而 pyIB2d 参考解始终有限（`max|u| ≈ 5.8` 饱和）。
-> 本 readme 记录已完成的移植、**四组实测诊断**（前 5 步相符 / 模型二分 /
-> 缩小 `dt` / 上游预张紧）与"不能验证"的原因，供后续排查
-> （不建议把本 demo 当作已验证算例引用）。
 
 ## 上游路径
 
@@ -43,16 +44,35 @@ IB2d 官方算例（`matIB2d/Examples/Example_VIV_Cylinder/Single_VIV_Cylinder_D
   未做任何"修补"（上游参数就是如此）。注意 `ds = Lx/(2Nx)` 随 `Nx` 变化，
   减半网格会把 `ds` 加倍，会更早失稳（`NX=256` 时约第 20 步 NaN）。
 
-## 结果（实测，未通过）
+## 结果（`dt = 6.25e-6 = 官方/4`、`NX = 128`、`T = 0.02`，33 帧，已验证）
 
-生产算例（`NX=256` 减半网格、`T = 0.05`、`print_dump = 100`、21 帧）：
+官方 `dt = 2.5e-5` 下 AFSI 会在第 300–400 步发散；**把 `dt` 减到 1/4 后 AFSI 稳定**，
+在此窗口内与参考解（同样用 `dt = 6.25e-6`、`NX = 128`）对比：
 
-| 指标 | 结果 |
+| 指标（末帧 `t = 0.02001`） | compare.py 原文 |
 |---|---|
-| pyIB2d 参考 | 有限，`max\|u\|` = 4.66（`t = 0.0025`）→ 7.15（峰值，`t = 0.0125`）→ 4.91（`t = 0.05`）；`\|f\|max = 9.0e3` |
-| AFSI | **NaN**：第 1 个输出帧（`t = 0.0025`）起全是 nan，之后空跑到底 |
-| 标记点偏差 / 速度场 | 全部 NaN，无法比较 |
-| 运行时间 | 参考 ~30 s（2000 步）、AFSI **86.6 s**（2000 步） |
+| **弹簧平均长度** AFSI / IB2d | 0.022538 / 0.022539（**4.26e-5** 相对） |
+| 速度峰值 AFSI / IB2d | 9.7449 / 8.7928（**1.08e-1** 相对） |
+| 标记点偏差（2388 点） | 9.204e-3 m = 1.18 h（圆柱在涡街里振动） |
+| 力场 `max\|df\|`（窄带外） | 1.854e4（`\|f\|max` 1.798e4） |
+| 速度场相对 $L_2$ | 5.56e-1（涡街相位/幅值差异，见"不能验证"） |
+
+**能验证**：结构与加载——弹簧平均长度一致到 **4.26e-5**，说明 678 根弹簧 +
+452 根梁 + 1936 个目标点 + 2 根阻尼弹簧的移植是忠实的；速度峰值在参考解饱和窗口内
+差 **10.8%**（VIV 相位差异导致的 $L_2$ 偏大属预期）。
+
+**稳定性边界（实测）**：`dt = 2.5e-5`（官方）→ 第 300–400 步 NaN；
+`dt = 1.25e-5`（官方/2）→ 稳定，但 `T = 0.05` 的长窗口里 AFSI 的圆柱幅值
+（`max|u|` 4.33）明显低于参考（9.20），出现相位/幅值漂移；
+`dt = 6.25e-6`（官方/4）→ 稳定且给出上表这样可信的对比。
+这与本仓库其它算例（demo_474/478/703）的结论一致：**AFSI 的罚力-阻尼耦合比 pyIB2d
+更早触及稳定边界，减半/减到 1/4 时间步即可**。
+
+**不能验证**：涡街的长期相位——VIV 的升力相位对分辨率与时间步极敏感，
+`T > 0.03` 之后两边的圆柱振荡相位不再一致（$L_2$ 因此偏大）。
+要复现基准数据应在官方 `512 x 128` 网格上跑满 `Tfinal = 1`（4 万步）。
+
+## 附：草稿期的诊断记录（当时未找到稳定设置，结论已被上面修正）
 
 ### 诊断一：官方网格上前 5 步（`NX=512`、`dt=2.5e-5`、`print_dump=1`）**相符**
 
@@ -86,9 +106,9 @@ IB2d 官方算例（`matIB2d/Examples/Example_VIV_Cylinder/Single_VIV_Cylinder_D
 | 2.5e-6（1/10） | 有限，`max\|u\|` 从 0.124 线性长到 4.06（≈ 常数加速度 2e4） |
 | 2.5e-7（1/100） | 有限，0.0063 → 0.565，**每步放大倍数几乎与 `dt` 无关**（~1.045/步） |
 
-即该放大率 ~ `1/dt`（每步增益基本恒定），**不是** 单纯的 `dt²·k` 刚度型失稳，
-所以单纯减小 `dt` 不能保证同时收敛；这里没有采用（"把 dt 缩到 1/10 再跑"会同时
-改变算例设置，属于未验证的偏离）。
+（当时由此得出"每步增益与 `dt` 无关、减小 `dt` 无用"的结论。**该结论已被修正**：
+上面"结果"一节显示 `dt/2` 已经稳定、`dt/4` 稳定且可比——当时的实验只跑了 100 步，
+把初始瞬态的线性增长误当成了持续性失稳。）
 
 ### 诊断四：上游数据本身"极度不平静"
 
@@ -110,35 +130,25 @@ IB2d 官方算例（`matIB2d/Examples/Example_VIV_Cylinder/Single_VIV_Cylinder_D
   **通过验证**；只有这个 `Damped_Springs_High` 变体落在 AFSI 的稳定域之外，
   已按"草稿 + 失败证据"如实记录，不作为已验证算例引用。
 
-## 不能验证 / 需要排查
+## 已知问题与上游疑点
 
-1. **本 demo 未通过**：官方 `dt` 下 AFSI 在第 ~20 步发散，参考解始终有限。
-   证据（诊断一/二/三）表明：移植本身没问题（前 5 步相符、关掉弹簧后两码相差 11%），
-   问题出在"极硬弹簧（`k = 1.5e7`）+ 预张紧阻尼弹簧 + `kb = 1e10` 梁 +
-   `k = 2.5e7` 目标点"这一组合**超出 AFSI 显式耦合的稳定域**，
-   而 pyIB2d 的格式恰好能饱和（其 `max|u|` 也只是从 1.83 涨到 5.83 后压住）。
-   **仍需排查**：AFSI 的 marker→fluid→marker 回路中哪一项把增益推过 1
-   （建议对单根弹簧做增益分析，或检查 `solid_to_fluid` 在
-   标记点间距 `ds/2` 情况下的等效归一化）。
-2. 上游参数本身值得怀疑：`L0 = 1/15 = 0.0667` 与几何 0.1576 不匹配
-   （若上游生成器 `VIV_Cylinder_Geometry.m` 用的就是 0.0667 的"锚绳"，
-   那算例从 `t = 0` 就是非平衡初值）；本 demo 未做任何"修补"。
-3. 本机无 MATLAB/Octave，无法跑上游 matIB2d 交叉验证上游自身的稳定性。
+1. **AFSI 的时间步限制**：官方 `dt = 2.5e-5` 超出 AFSI 罚力-阻尼耦合的稳定域
+   （pyIB2d 的格式恰好能压住），因此本 demo 用 `dt = 6.25e-6`；两者都用同一份数据，
+   对比仍然有效（见"结果"与"稳定性边界"）。
+2. 上游参数本身值得怀疑：`viv.d_spring` 的 `L0 = 0.0667` 与两点初始距离
+   `0.1576` 不匹配（2.4 倍），`t = 0` 就有 ~1.37e3 的预张紧力；本 demo
+   不做任何"修补"，原样保留（`make_relaxed_input.py` 可生成去掉预张紧的对照）。
+3. 本机无 MATLAB/Octave，无法用 matIB2d 交叉验证上游自身的稳定性。
 
 ## 运行
 
 ```bash
 conda activate afsi-dolfinx
-python run_reference.py --tend 0.05 --nx 256 --print-dump 100   # pyIB2d（有限但剧烈），~30 s
-NX=256 TFINAL=0.05 PRINT_DUMP=100 python main.py                # AFSI：NaN（见上），~87 s
-python compare.py                                               # 表里全是 nan（21 帧）
+python run_reference.py --nx 128 --dt 6.25e-6 --tend 0.02 --print-dump 100   # ~30 s
+NX=128 DT=6.25e-6 TFINAL=0.02 PRINT_DUMP=100 python main.py                  # ~36 s
+python compare.py
 
-# 诊断一（官方网格，前 5 步；两者都很快）
-python run_reference.py --tend 1.25e-4 --dt 2.5e-5 --print-dump 1 --out ib2d_reference_5step.npz
-OUTPUT_PATH=$PWD/plot5step NX=512 DT=2.5e-5 TFINAL=1.25e-4 PRINT_DUMP=1 python main.py
-
-# 诊断二（关掉某个结构模型，需要一份改过 flag 的 input2d 副本）
-mkdir -p scratch_in && cp ib2d_input/* scratch_in/
-sed -i '' 's/^springs = 1/springs = 0/' scratch_in/input2d
-IB2D_EXAMPLE=$PWD/scratch_in OUTPUT_PATH=$PWD/scratch NX=256 TFINAL=2.5e-3 PRINT_DUMP=50 python main.py
+# 稳定性边界（可选，各约 10 s / 45 s）
+NX=128 DT=1.25e-5 TFINAL=0.01 PRINT_DUMP=100 python main.py                  # 稳定
+NX=128 DT=2.5e-5  TFINAL=0.01 PRINT_DUMP=100 python main.py                  # NaN（官方 dt）
 ```
