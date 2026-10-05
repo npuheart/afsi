@@ -1,0 +1,10 @@
+plot/
+plot_restart/
+plot_restart_seg1/
+plot_restart_cont/
+plot_restart_cont2/
+plot_probe/
+ib2d_run/
+ib2d_run_probe/
+figures/
+__pycache__/
