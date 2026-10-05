@@ -141,6 +141,11 @@ BOUSSINESQ=1 AFSI_NPZ=plot_boussinesq/afsi_result.npz python compare.py \
 * 主运行 `boussinesq = 0`，所以 §4 的数字**不能**用来验证浮力项；浮力项的验证在
   demo_577/578（以及 §5 的对照实验）。
 
+
+> 注意：`ib2d_input/` 里的 `boussinesq.vertex/.concentration` 是 `make_input.py` **为 `NX = 256` 生成**的
+> （官方 `1024 x 1024`，字段形状随网格变化）。若用别的网格运行，`main.py` 会先给出带修复命令的
+> 断言提示（`python make_input.py --nx <N>`），而不是 numpy 广播错误。
+
 ## 7. 运行（实测耗时，机器负载 ~100，比空载慢数倍）
 
 ```bash
