@@ -1,6 +1,6 @@
 # afsic Demo 算例集
 
-本目录为 afsic 的演示算例集合，统一采用**浸没边界流固耦合（IB-FSI）**架构：
+本目录为 afsic 的演示算例集合。绝大多数算例采用**浸没边界流固耦合（IB-FSI）**架构：
 固定笛卡尔流体网格（Chorin 投影求解 NS）+ 拉格朗日固体网格（Neo-Hookean / FRH /
 SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IBInterpolation3D`）
 双向耦合（流体速度插值到固体、固体力插值回流体）。
@@ -292,6 +292,22 @@ Brinkman 阻力项、per-example 用户模块（`update_Springs` / `update_Beams
 | `ib2d/demo_701` | Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative_2 | IB2d `Example_Boussinesq/Kelvin_Helmholtz_Instability/Kelvin_Helmholtz_Qualitative_2` |
 | `ib2d/demo_702` | Example_Boussinesq/Falling_Sphere | IB2d `Example_Boussinesq/Falling_Sphere` |
 | `ib2d/demo_703` | Example_Channel_Flow/Example_Turek_Hron | IB2d `Example_Channel_Flow/Example_Turek_Hron` |
+## 多相流算例（`multiphase/`）
+
+AFSI 原有求解器（`ChorinSolver` / `IPCSSolver` / `PeskinRK2Solver`）只有单一密度/黏度，
+IB2d 上游也没有任何真正的多相流算例。`multiphase/` 补上这一能力：一个自包含的
+**扩散界面两相流求解器**（Allen–Cahn 相场 + 变 `rho(phi)`/`mu(phi)` 投影 + CSF 表面张力
++ 可选重力浮力），配 4 个验证算例。
+
+| Demo | 名称 | 验证对象与结论 |
+|---|---|---|
+| `multiphase/demo_801_laplace` | 静液滴 Laplace 定律 | `dp = sigma/R`：`NX=128` 误差 **0.89%**，一阶收敛 ✅ |
+| `multiphase/demo_802_shear_droplet` | 剪切流液滴形变 | Taylor `D`：偏大 1.5~2 倍（界面厚度 + 域约束），只作定性 ⚠️ |
+| `multiphase/demo_803_relaxation` | 变形液滴松弛时间 | Maffettone–Minale `tau`：三个 `lambda` 都在 **6~18%** ✅ |
+| `multiphase/demo_804_rayleigh_taylor` | 密度分层 RT 失稳 | 增长率 1.02（黏性理论 1.65）；两层静水 `dp/dy` 精确 ◐ |
+
+详见 [`multiphase/readme.md`](multiphase/readme.md)（含求解器实现细节、已知局限与运行命令）。
+
 ### 说明
 
 上表按 demo 编号排序；每个 demo 目录内的 `readme.md` 给出该算例的官方设置与本 demo 设置、
