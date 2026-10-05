@@ -67,6 +67,7 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_475` | IB2d Brinkman 阻力项 | `Example_Channel_Flow/Example_Brinkman_Channel`：1×0.25 条带内 1844 点 $k=5\times10^6$ 钉死双壁，**新机制：Brinkman 阻力** $F -= \mu\,Brink(x)\,u^n$（`.brinkman` 给出 $1/k=0$ 或 $10^5$ 的逐节点阻抗图，右侧 $x\in[0.25,0.90]$ 为多孔区），左侧 $\tanh(4t)$ 归一化抛物射流把流体推入多孔区（$k=10^4$、$\mu=2$、$\rho=1000$、512×128、dt=5e-5、T=0.05=1000 步）。**本族吻合最好**：窗口 `max|u|` **0.62%**、$L_2$ **1.56e-2**、流量 **0.31%**、标记点 **5.9e-4 h**、罚力核对 0.02%。**发现 pyIB2d 两个上游 bug**：`read_In_Brinkman_Info` 返回未定义名（所有 brinkman 算例 `NameError`）、driver 在 Brinkman 分支里重复 `chdir('viz_IB2d')` 直接崩——run_reference 均已打补丁 |
 | `ib2d/demo_476` | IB2d 纯扩散基准（被动标量） | `Example_Channel_Flow/Example_Concentration_Gradients/Pure_Diffusion`：1×1 盒、64²、dt=1e-4、**官方完整设置 T=0.5**（5000 步）、496 点 $k=10^7$ 钉死方腔、中心 3×3 单位浓度方块以 $kDiff=0.025$ 纯扩散。**新机制：逐字复刻 IB2d 的被动标量差分推进**（`Supp.perform_Time_Split_Upwind`：x 子步 → 在更新场上求 y 子步；周期 upwind 对流 + 中心扩散；用 $u^{n+1}$）。流场恒为零（无外力、结构钉死），因此这是标量算子的**干净基准**：`max|ΔC|` **4.9e-13**、相对 $L_2$ **1.8e-11**、峰值/总量相对差 4e-12，即**逐位一致**。踩到的坑：驱动调用的是**分裂**格式（`noSplit` 版本在源码里被注释掉），按 no-split 写会差 6e-4；另外上游 `give_Necessary_Derivative` 的 `range(1,n-2)` 使次末行导数恒为 0，已逐字复现并注释 |
 | `ib2d/demo_477` | IB2d 分叉动脉 + 被动标量 | `Example_Channel_Flow/Example_Concentration_Gradients/Bifurcating_Artery`：demo_474 的同一条 Y 形分叉动脉（1144 点 $k=1.25\times10^7$ 钉死软壁、3 对重合点需 1e-6 h 偏移）加**被动标量**：入口射流正下游 19×19 方块（$kDiff=5\times10^{-5}$），2×2 盒、128²、dt=5e-5、本 demo T=0.1（2000 步）。与 demo_474 相同的两项标定照旧适用：**γ=1.0 必修**（γ=0 时射流大 1.5 倍，γ=1.0 → 窗口 **2.66%**，与 demo_474 的 2.7% 完全一致，互为交叉验证）。浓度相对 $L_2$ **4.8%**、峰值 **4.9e-4**；与 demo_476 对比可知这 4.8% 完全来自速度场差异（窄带外 $L_2$ 0.55 的已知渗漏差异），标量算子本身已被 demo_476 验证到 1e-11 |
+| `ib2d/demo_478` | IB2d 阻抗泵 + 被动标量 | `Example_Channel_Flow/Example_Concentration_Gradients/Impedance_Pumping_Tube`：5×5 盒内 412 点弹性管（616 弹簧 k=1e4–1e6、408 不变梁 kb=100、4 钉死目标点）+ 管内 336 节点浓度方块（kDiff=5e-5），128²、dt=1e-3、**官方 T=0.5 完整跑**。**新泵送律**：`update_Springs.m` 把 16 根跨径弹簧静长按 `RL = d - |0.9 d sin(2π·10t)|` 捏紧（每周期两次）。**能验证**：管直径 **1.14%**、被捏弹簧长度 2.7%、浓度总量 **0.29%**；**不能验证**瞬时速度/浓度场（浓度 L2 1.8e-1）：dt 减半**不改善**（0.190）、`GRAD_DIV=1` 也**不改善**（0.187）⇒ 与分叉动脉一族同源（剧烈运动的高速管壁在 FFT 投影 + 罚力 vs Taylor–Hood + 插值力下的耦合差异，CFL≈0.9 时被放大），readme 完整记录两次收敛性判别 |
 
 `pyIB2d/Examples` 已全部移植完毕；`matIB2d/Examples` 的差异部分已在本批移植
 （demo_457–466，见上表）：移动/指定运动的目标点（`Moving_Rubberband`、`Pulsing_Heart`、
@@ -93,8 +94,9 @@ IB 机制之差。已覆盖：空槽道射流（467）、单壁 + 圆柱（468�
 （demo_467 的边际罚力增益窄带尖峰、demo_468 的不可分辨圆柱、demo_471 的时间步敏感自由补片、
 demo_472 的不可分辨高 Re 剪切层）。
 
-`Example_Channel_Flow/*` 剩余：`Example_Poroelastic_Channel_Flow`（poroelastic 多孔弹性壁）、
-`Example_Concentration_Gradients/Impedance_Pumping_Tube`（浓度 + 弹簧/梁/移动目标点泵）、`Example_Turek_Hron`（1024×128 × 16 万步 + **质量点**自由刚体，
+`Example_Channel_Flow/*` 剩余：`Example_Poroelastic_Channel_Flow`（poroelastic 多孔弹性壁）。
+已完成：`Example_Brinkman_Channel`（demo_475）、`Example_Concentration_Gradients` 全部三个（demo_476/477/478）、
+`Example_Turek_Hron`（1024×128 × 16 万步 + **质量点**自由刚体，
 需新增 `mass_pts` 机制）。
 
 其余仍需新机制的 `matIB2d` 算例：`Example_Boussinesq/*`（`boussinesq` + 浓度耦合）、
