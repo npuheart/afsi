@@ -1,0 +1,7 @@
+plot*/
+ib2d_run*/
+figures/
+figures_boussinesq/
+__pycache__/
+*.log
+reduced_input/
