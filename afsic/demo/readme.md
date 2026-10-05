@@ -99,6 +99,18 @@ demo_472 的不可分辨高 Re 剪切层）。
 `Example_Turek_Hron`（1024×128 × 16 万步 + **质量点**自由刚体，
 需新增 `mass_pts` 机制）。
 
+**下一步优先级（`mass_pts` —— 剩余机制里解锁面最大的一个）**：`Example_Mass_Points/*`
+（5 个，均为 64² / dt=5e-5 / T=0.35，除一个 256²）与 `Example_Channel_Flow/Example_Turek_Hron`
+等都需要它。算法骨架已在 `pyIB2d/IBM_Blackbox/{IBM_Driver.py:685-745, Supp.py:330-410}`
+读完：质量点是**幽灵粒子**（`mass_info` = [标记点 id, x, y, k, M]），标记点随流体走，
+幽灵点满足 `M dv/dt = -F_mass + M g`；每步顺序为
+(1) 幽灵点先以 `dt/2` 走半步（`please_Move_Massive_Boundary`），
+(2) 在 X_h 处算力时同时返回幽灵-标记之间的弹簧力 `F_Mass_Bnd`，
+(3) `please_Update_Massive_Boundary_Velocity(dt/2, …)` 半更新速度，
+(4) 位置复位后以 `dt` 走整步、再整步更新速度。
+尚需确认的一处：`F_Mass_Bnd` 的**产生者**（`please_Find_Lagrangian_Forces_On_Eulerian_grid`
+内部，需定位到具体文件/函数）与其符号约定。
+
 其余仍需新机制的 `matIB2d` 算例：`Example_Boussinesq/*`（`boussinesq` + 浓度耦合）、
 `Example_HeartTube/Electromechanical_*`、`Example_HeartTube/*` 的 3 元件肌肉
 （`3_element_muscle`）、`Example_Coagulation/*`（`coagulation`）、
