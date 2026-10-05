@@ -63,12 +63,37 @@ def periodic_master_map(V, box):
     x0, x1, y0, y1 = box
     Lx, Ly = x1 - x0, y1 - y0
     X = V.tabulate_dof_coordinates()[:, :2]
-    h = 1e-8 * min(Lx, Ly)
-    nLx, nLy = int(round(Lx / h)), int(round(Ly / h))
-    kx = np.mod(np.round((X[:, 0] - x0) / h).astype(np.int64), nLx)
-    ky = np.mod(np.round((X[:, 1] - y0) / h).astype(np.int64), nLy)
+
+    def _lines(v, L):
+        """Index of the lattice line every coordinate sits on, top folded down.
+
+        The coordinate tables carry round-off noise (``|d| ~ 1e-18``: the same
+        lattice position may appear as ``-0.0`` and ``+0.0``, or as two values
+        differing in the last bit), so positions whose distance is below
+        ``1e-9 * L`` -- orders of magnitude above the noise, orders of
+        magnitude below any lattice spacing -- are merged into one line
+        (single-linkage clustering of the sorted coordinates).
+
+        (The previous implementation binned the coordinates on a fixed
+        ``1e-8 * min(Lx, Ly)`` grid instead, which is coarser than the spacing
+        of the Q2 mid-cell nodes as soon as ``Nx >= 256`` -- ``3/(2*256)`` has
+        more decimals -- and the lookup below then raised a KeyError.  On the
+        grids it did handle, this map is identical to the one it produced.)
+        """
+        order = np.argsort(v, kind="stable")
+        sv = v[order]
+        starts = np.empty(sv.size, dtype=bool)
+        starts[0] = True
+        starts[1:] = (sv[1:] - sv[:-1]) > 1e-9 * L
+        cid = np.cumsum(starts) - 1                  # cluster of every sorted dof
+        k = cid[np.argsort(order, kind="stable")]    # ... back in dof order
+        k[k == cid[-1]] = 0            # x = x1 / y = y1 fold back on x0 / y0
+        return k
+
+    kx = _lines(X[:, 0] - x0, Lx)
+    ky = _lines(X[:, 1] - y0, Ly)
     slave = np.isclose(X[:, 0], x1) | np.isclose(X[:, 1], y1)
-    key = kx * (nLy + 1) + ky
+    key = kx * (int(ky.max()) + 1) + ky
     lookup = dict(zip(key[~slave].tolist(), np.flatnonzero(~slave).tolist()))
     master = np.arange(len(X))
     master[slave] = [lookup[k] for k in key[slave].tolist()]

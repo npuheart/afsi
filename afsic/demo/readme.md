@@ -68,6 +68,12 @@ SVK 等本构），通过 `IBMesh` / `IBInterpolation`（3D 用 `IBMesh3D` / `IB
 | `ib2d/demo_476` | IB2d 纯扩散基准（被动标量） | `Example_Channel_Flow/Example_Concentration_Gradients/Pure_Diffusion`：1×1 盒、64²、dt=1e-4、**官方完整设置 T=0.5**（5000 步）、496 点 $k=10^7$ 钉死方腔、中心 3×3 单位浓度方块以 $kDiff=0.025$ 纯扩散。**新机制：逐字复刻 IB2d 的被动标量差分推进**（`Supp.perform_Time_Split_Upwind`：x 子步 → 在更新场上求 y 子步；周期 upwind 对流 + 中心扩散；用 $u^{n+1}$）。流场恒为零（无外力、结构钉死），因此这是标量算子的**干净基准**：`max|ΔC|` **4.9e-13**、相对 $L_2$ **1.8e-11**、峰值/总量相对差 4e-12，即**逐位一致**。踩到的坑：驱动调用的是**分裂**格式（`noSplit` 版本在源码里被注释掉），按 no-split 写会差 6e-4；另外上游 `give_Necessary_Derivative` 的 `range(1,n-2)` 使次末行导数恒为 0，已逐字复现并注释 |
 | `ib2d/demo_477` | IB2d 分叉动脉 + 被动标量 | `Example_Channel_Flow/Example_Concentration_Gradients/Bifurcating_Artery`：demo_474 的同一条 Y 形分叉动脉（1144 点 $k=1.25\times10^7$ 钉死软壁、3 对重合点需 1e-6 h 偏移）加**被动标量**：入口射流正下游 19×19 方块（$kDiff=5\times10^{-5}$），2×2 盒、128²、dt=5e-5、本 demo T=0.1（2000 步）。与 demo_474 相同的两项标定照旧适用：**γ=1.0 必修**（γ=0 时射流大 1.5 倍，γ=1.0 → 窗口 **2.66%**，与 demo_474 的 2.7% 完全一致，互为交叉验证）。浓度相对 $L_2$ **4.8%**、峰值 **4.9e-4**；与 demo_476 对比可知这 4.8% 完全来自速度场差异（窄带外 $L_2$ 0.55 的已知渗漏差异），标量算子本身已被 demo_476 验证到 1e-11 |
 | `ib2d/demo_478` | IB2d 阻抗泵 + 被动标量 | `Example_Channel_Flow/Example_Concentration_Gradients/Impedance_Pumping_Tube`：5×5 盒内 412 点弹性管（616 弹簧 k=1e4–1e6、408 不变梁 kb=100、4 钉死目标点）+ 管内 336 节点浓度方块（kDiff=5e-5），128²、dt=1e-3、**官方 T=0.5 完整跑**。**新泵送律**：`update_Springs.m` 把 16 根跨径弹簧静长按 `RL = d - |0.9 d sin(2π·10t)|` 捏紧（每周期两次）。**能验证**：管直径 **1.14%**、被捏弹簧长度 2.7%、浓度总量 **0.29%**；**不能验证**瞬时速度/浓度场（浓度 L2 1.8e-1）：dt 减半**不改善**（0.190）、`GRAD_DIV=1` 也**不改善**（0.187）⇒ 与分叉动脉一族同源（剧烈运动的高速管壁在 FFT 投影 + 罚力 vs Taylor–Hood + 插值力下的耦合差异，CFL≈0.9 时被放大），readme 完整记录两次收敛性判别 |
+| `ib2d/demo_587` | IB2d 电生理（FitzHugh–Nagumo）驱动的心管泵 | `Example_HeartTube/Electromechanical_Pumping`：5×5 盒 156 点心管（232 弹簧 k=1e7、152 不变梁、4 目标点）；**新机制 `electro_phys`**：驱动在 IBM 循环前一次性解一维 FHN（D=10、a=0.3、eps=1e-3、10 脉冲/T、非周期 Laplacian、前向 Euler），每步把 `springs_info(155:232,3)=(16v)^4` 写进**跨管弹簧刚度**（上游 `update_Springs.m` 注释说第 4 列是静长，实际写的是刚度——已考证）。pyIB2d **未实现** `electro_phys`，故参考侧用其 `update_springs` 钩子注入**同一份** FHN 模块；耦合值两侧**逐位相同**，管径收缩 1.0→0.35（相位一致）、标记点 0.35 h、速度场不可逐帧比 |
+| `ib2d/demo_588` | IB2d 钙动力学驱动的电生理泵 | `Example_HeartTube/Electromechanical_Pumping_w_Ca_Dynamics`：与 demo_587 同几何同耦合，**电流改为钙信号** `I=0.5 Caf`（Williams 2008 质量作用定律，`Calcium_Dynamics.m`，物理周期 0.5 s，与 T_final 无关 → TFINAL 可安全截断）。`Calcium_Dynamics.py` 与 MATLAB 逐行转写逐位一致；耦合值两侧逐位相同（峰值 1.65e5），管径 0.32/0.34 |
+| `ib2d/demo_589` | IB2d 钙电生理直接驱动 FV_LT 肌肉 | `Example_HeartTube/EM_Pump_w_Calcium_and_Muscles`：156 点心管 + 76 条 FV_LT 肌肉带；`electro_phys=1 且 FV_LT_muscle=1` 时驱动**跳过**弹簧刚度调制，改用 `give_Ca_ElectroPhys_Muscle_Activation.m` 的 `a_f = 10 v(t, leader node)` 作激活系数（移植为 pyIB2d 可调用的 `give_Muscle_Activation.py`，两侧共用） |
+| `ib2d/demo_612` | IB2d `Muscle_Model`（FV_LT 肌肉心管） | `Example_HeartTube/Muscle_Model`：310 点心管（308 弹簧 k=1e7、306 不变梁、153 条 FV_LT 肌肉带，等效于 demo_448 的 matIB2d 孪生版）。**注意**：官方 `dt=5e-4` 下 AFSI 显式耦合 4 步内发散（demo_448 已记录同一现象），故双侧统一 `dt=1e-4` |
+| `ib2d/demo_613` | IB2d `3_Element_Muscle_Model` | `Example_HeartTube/3_Element_Muscle_Model`：与 demo_612 同数据、`mu=1`，开关换成 `3_element_muscle=1`。**上游不一致（已考证）**：示例自带的 `give_3_Element_Muscle_Activation.m` 是 9 参 1 输出、肌肉文件只有 7 列，而 matIB2d blackbox 要求 10 参 4 输出 + 第 8/9 列（kSpr/alpha）→ **该示例按原样无法在随附 MATLAB blackbox 下运行**；pyIB2d 走的是与示例数据自洽的旧版（7 列、FV_LT 力律），但它的 3 元件分支**忘了 import 该模块**（`NameError`），本 demo 在 `run_reference.py` 里注入一行修正（已记录） |
+| `ib2d/demo_614` | IB2d 高分辨率电生理泵（钙驱动） | `Example_HeartTube/128x128_Electromechanical_Pumping_w_Ca_Dynamics`：310 点心管、463 弹簧（第 309–463 行是跨管弹簧）、`5×2.5` 盒、`dt=1e-5`、`numFHN=1`、155 个电生理管点；机制同 demo_588，仅分辨率不同（官方 400000 步 → 已截断并记录） |
 
 `pyIB2d/Examples` 已全部移植完毕；`matIB2d/Examples` 的差异部分已在本批移植
 （demo_457–466，见上表）：移动/指定运动的目标点（`Moving_Rubberband`、`Pulsing_Heart`、
@@ -112,9 +118,9 @@ demo_472 的不可分辨高 Re 剪切层）。
 内部，需定位到具体文件/函数）与其符号约定。
 
 其余仍需新机制的 `matIB2d` 算例：`Example_Boussinesq/*`（`boussinesq` + 浓度耦合）、
-`Example_HeartTube/Electromechanical_*`、`Example_HeartTube/*` 的 3 元件肌肉
-（`3_element_muscle`）、`Example_Coagulation/*`（`coagulation`）、
-`Example_Scallop/*`（`3_element_muscle`）、`Example_Test_Restart_Protocol/*`（restart）、
+`Example_Coagulation/*`（`coagulation`）、
+`Example_Scallop/*`（`3_element_muscle`，注意其 blackbox 版本要求 9 列肌肉文件）、
+`Example_Test_Restart_Protocol/*`（restart）、
 `Example_Mass_Points/*`（`mass_pts`）、`Example_VIV_Cylinder/*`、`Example_Meshmerize_Me/*`、
 `Example_Tracers/*`、`Example_Baby_Spider_Shower`、`Example_Insect_Flight`、
 `Example_Sawtooth`、`Example_KC/*`、`Examples_First_Year_Seminar/*`、
