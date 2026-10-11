@@ -18,6 +18,19 @@ Description
 AFSI is a automated fluid-structure interaction solver based on the immersed boundary method and developed within the FEniCS framework. Leveraging FEniCS’s support for automated solution of partial differential equations, AFSI offers out-of-the-box high-performance capabilities, making it a practical tool for research groups and individual researchers to investigate complex FSI problems—including those involving nonlinear solids with large deformations and large displacements.
 
 
+Experimental three-phase FSI
+----------------------------
+
+The `feature/three-phase-fsi` implementation adds a serial 2D gas-liquid-elastic
+solid backend (`afsic.multiphase`): conservative variable-density MAC flow,
+dual level sets, and a FEniCSx TRI3 solid with adjoint nodal coupling. The existing
+single-phase solvers are unchanged. This first-order research baseline is not a
+validated reproduction of the multiphase TS-IFED paper and does not yet include
+AMR, 3D, or structural subcycling.
+
+See [the runnable example and limitations](afsic/demo/three_phase/README.md)
+and [numerical verification](afsic/demo/three_phase/VALIDATION.md).
+
 Authors
 -------
 AFSI is developed by:
