@@ -86,3 +86,8 @@ AFSI_OFFLINE=1 python -m pytest afsic/tests/test_multiphase.py afsic/tests/test_
 此结果展示下落、自由面变形及下沉减速，但仍有明显的局部固体体积误差和密度表示
 差异。没有网格/时间收敛或实验对比验证，不能用于可靠的冲击峰值或加速度预测。
 当前也不处理三维、刚体约束、表面张力、气体压缩和固体碰壁接触。
+
+## 加密网格
+
+已完成 `128×128` 流体网格及同步固体网格加密，运行至 `0.25 s`。
+复现命令、粗细网格对比及精度限制见 [REFINEMENT.md](REFINEMENT.md)。
