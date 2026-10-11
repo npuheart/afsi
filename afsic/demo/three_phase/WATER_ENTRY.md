@@ -91,3 +91,26 @@ AFSI_OFFLINE=1 python -m pytest afsic/tests/test_multiphase.py afsic/tests/test_
 
 已完成 `128×128` 流体网格及同步固体网格加密，运行至 `0.25 s`。
 复现命令、粗细网格对比及精度限制见 [REFINEMENT.md](REFINEMENT.md)。
+
+## 延长已有计算
+
+`extend_entry.py` 将已有检查点复制到新目录，保留原始结果与参数来源记录，
+只修改终止时间；`main.py` 的材料、网格和求解器源代码校验仍然有效。
+
+```bash
+python afsic/demo/three_phase/extend_entry.py \
+  afsic/demo/three_phase/results/water_entry_128 \
+  afsic/demo/three_phase/results/water_entry_128_2s --time 2.0
+```
+
+脚本自动以 45 秒计算段续算、保存检查点，并在结束后生成时序图及动画。
+每段开始前检查固体距四壁的最小距离；距离小于等于 3 个网格间距时，
+以 `wall_proximity` 停止，不把未实现的固体碰壁过程继续算下去。
+这只是分段检查，不是接触力模型或每步碰撞检测。
+`status.json` 的 `complete: true` 才表示达到目标时间；
+`max_seconds` 表示段落结束、后续仍会自动续算，`error` 表示求解失败。
+进程意外中断后，可用 `main.py`、相同新终止时间和 `--resume` 手动恢复。
+
+2026-10-11 已从 `0.25 s` 启动 `2.00 s` 计算，结果目录如上；此启动记录不代表
+已经完成。日志为 `results/water_entry_128_2s.log`，PID 文件为
+`results/water_entry_128_2s.pid`。按前段性能，预计额外耗时约两小时。
