@@ -18,7 +18,7 @@ from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction, in
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from dolfinx.fem import form, assemble_scalar
 
-from afsic import ChorinSolver, TimeManager
+from afsic import ChorinSolver, IPCSSolver, TimeManager
 from afsic import swanlab_init, swanlab_upload
 from dolfinx.fem.petsc import create_vector, assemble_vector
 from dolfinx.geometry import bb_tree, compute_colliding_cells, compute_collisions_points
@@ -146,7 +146,22 @@ bcp = [bcp_outlet]
 
 
 # Define Solver
-ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'])
+# SOLVER=chorin（默认）| ipcs
+# IB_DIRECT_LOAD=1：对偶铺展（载荷 b = |dx| f_spread 直接进动量右端）；0：旧 dof-to-dof 路径
+# GRAD_DIV=gamma：预测步 grad-div 稳定化系数（0 = 不加）
+SOLVER = os.environ.get("SOLVER", "chorin").lower()
+IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "0").lower() not in ("0", "", "false", "no")
+GRAD_DIV = float(os.environ.get("GRAD_DIV", "0"))
+_Solver = IPCSSolver if SOLVER.startswith("ipcs") else ChorinSolver
+ns_solver = _Solver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'],
+                    ib_body_force=not IB_DIRECT_LOAD, grad_div=GRAD_DIV)
+if IB_DIRECT_LOAD:
+    _Vh = ((config["Lx"] / (config["velocity_order"] * config["Nx"]))
+           * (config["Ly"] / (config["velocity_order"] * config["Ny"])))
+    _b_direct = create_vector(V)
+    ns_solver.ib_load = _b_direct
+if MPI.COMM_WORLD.rank == 0:
+    print(f"solver={SOLVER}, IB_DIRECT_LOAD={int(IB_DIRECT_LOAD)}, GRAD_DIV={GRAD_DIV:g}")
 
 ###########################################################################################################
 ##########################################  Structure  ####################################################
@@ -206,8 +221,10 @@ f2_u = ufl.as_vector((0.50000000000000000, -0.8660254037844386)) # 60
 f3_d = ufl.as_vector((0.25881904510252074, 0.9659258262890682)) # 75
 f3_u = ufl.as_vector((0.25881904510252074, -0.9659258262890682)) # 75
 
-material_up = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f1_u)
-material_down = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f1_d)
+# FIBER_ANGLE=45（默认）| 60 | 75 选择纤维方向（与 plot/plot_2.py 的三组一致）
+_fiber = {"45": (f1_u, f1_d), "60": (f2_u, f2_d), "75": (f3_u, f3_d)}[os.environ.get("FIBER_ANGLE", "45")]
+material_up = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = _fiber[0])
+material_down = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = _fiber[1])
 # material_up = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f2_u)
 # material_down = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f2_d)
 # material_up = FRHMaterial(C0 = config["C0"], C1 = config["C1"], kappa_s = config["kappa"], f1 = f3_u)
@@ -223,6 +240,11 @@ L_hat -= inner(PK1_down, grad(dVs))*dxx(1) # Bottom valve
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(4)
 L_hat -= config["beta"]*ufl.inner(circum_constraint, dVs)*dss(15)
 L_hat = form(L_hat)
+# 能量（论文对偶 vs dof-to-dof 消融）：弹性能 W_h 与边界罚能
+_FFe = ufl.grad(solid_coords)
+form_W = form(material_up.strain_energy(structure, _FFe) * dxx(11)
+              + material_down.strain_energy(structure, _FFe) * dxx(1)
+              + 0.5 * config["beta"] * ufl.inner(circum_constraint, circum_constraint) * (dss(4) + dss(15)))
 b1 = create_vector(Vs)  # dolfinx 0.10.0: create_vector 需函数空间而非 Form
 
 ###########################################################################################################
@@ -300,6 +322,10 @@ for step in range(config['num_steps']):
         solid_force.x.array[:len(arr)] = arr[:]
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object, solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
+    if IB_DIRECT_LOAD:
+        # 对偶铺展：b_ib = |dx| * f_spread = J^T L
+        ns_solver.f.x.petsc_vec.copy(result=_b_direct)
+        _b_direct.scale(_Vh)
 
     us = []
     for point in [[2.0-0.0106,0.91+1e-4]]:
@@ -311,6 +337,15 @@ for step in range(config['num_steps']):
     comm = MPI.COMM_WORLD
     comm.Reduce(us, global_sum, op=MPI.MAX, root=0)
 
+    # 每步能量与叶尖位移（HISTORY 指定 csv 路径）：t, KE, W, KE+W, x_tip, y_tip, u_max
+    if os.environ.get("HISTORY"):
+        _W = mesh.comm.allreduce(assemble_scalar(form_W), op=MPI.SUM)
+        if comm.rank == 0:
+            _KE = 0.5 * config["rho"] * u_L2
+            with open(os.environ["HISTORY"], "a") as _fh:
+                _fh.write(f"{current_time + config['dt']:.8f},{_KE:.10e},{_W:.10e},{_KE + _W:.10e},"
+                          f"{global_sum[0][0] - (2.0-0.0106):.10e},{global_sum[0][1] - (0.91+1e-4):.10e},"
+                          f"{u_max:.6e}\n")
     # 每步探针轨迹（供后处理对比文献/历史数据；PROBE_TRACE 指定 csv 路径）
     if comm.rank == 0 and os.environ.get("PROBE_TRACE"):
         with open(os.environ["PROBE_TRACE"], "a") as _fh:

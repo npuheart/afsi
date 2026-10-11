@@ -41,6 +41,7 @@ from dolfinx.fem.petsc import create_vector, assemble_vector
 from ufl import (Measure, TestFunction, SpatialCoordinate,
                  as_vector, conditional, And, Or, lt, gt, dot, dx, inner,
                  grad, sqrt, pi)
+from ufl import det as ufl_det
 
 from afsic import ChorinSolver, IPCSSolver, TimeManager, IBMesh, IBInterpolation
 from materials import CircumferentialMaterial
@@ -52,6 +53,12 @@ N = int(os.environ.get("N", "32"))        # fluid elements along one side
 STEPS = int(os.environ.get("STEPS", "100"))
 DT = float(os.environ.get("DT", "1.0e-4"))
 SOLVER = os.environ.get("SOLVER", "chorin").lower()
+# IB_DIRECT_LOAD=1（默认）：对偶铺展——载荷 b = V_h * f_spread 直接加到动量右端，
+#   与插值算子精确互为伴随（论文 Sec. 3.1）。IB_DIRECT_LOAD=0：旧的 dof-to-dof 路径
+#   （铺展值存为 V_h 中的函数，再经 -∫f·v 组装，即经过质量矩阵）。
+IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "1").lower() not in ("0", "", "false", "no")
+# GRAD_DIV = gamma >= 0：预测步的 grad-div 稳定化系数（0 = 不加）。
+GRAD_DIV = float(os.environ.get("GRAD_DIV", "0"))
 # Both solvers carry -∫f·v in the momentum form (same convention), so the
 # assembled physical force b1 is stored as-is; no force_scale compensation.
 
@@ -144,9 +151,16 @@ bcp = [dirichletbc(PETSc.ScalarType(0.0),
                    locate_dofs_topological(Q, 0, point_loc), Q)]
 
 if SOLVER == "ipcs":
-    ns_solver = IPCSSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu"])
+    ns_solver = IPCSSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu"],
+                           ib_body_force=not IB_DIRECT_LOAD, grad_div=GRAD_DIV)
 else:
-    ns_solver = ChorinSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu"])
+    ns_solver = ChorinSolver(V, Q, bcu, bcp, config["dt"], config["rho"], config["mu"],
+                             ib_body_force=not IB_DIRECT_LOAD, grad_div=GRAD_DIV)
+if IB_DIRECT_LOAD:
+    # Q2 速度节点格点的单元面积 |Δx| = (Lx/2N)(Ly/2N)
+    _Vh = (Lx / (config["velocity_order"] * N)) * (Ly / (config["velocity_order"] * N))
+    _b_direct = create_vector(V)
+    ns_solver.ib_load = _b_direct
 
 # ---------------------------------------------------------------------------
 # Solid structure
@@ -254,6 +268,10 @@ for step in range(config["num_steps"]):
     ib_interpolation.solid_to_fluid(ns_solver.f._cpp_object,
                                     solid_force._cpp_object)
     ns_solver.f.x.scatter_forward()
+    if IB_DIRECT_LOAD:
+        # 对偶铺展：b_ib = |Δx| * f_spread = J^T L（直接进入动量右端）
+        ns_solver.f.x.petsc_vec.copy(result=_b_direct)
+        _b_direct.scale(_Vh)
 
     if time_manager.should_output(step):
         u_io.interpolate(ns_solver.u_)
@@ -340,8 +358,15 @@ rms_band = e_p_band / sqrt(area_band)
 rms_outer = e_p_outer / sqrt(area_outer)
 mean_p_shift = assemble_scalar(form(p_shift * dx_fluid)) / area
 
+_area_ref = MPI.COMM_WORLD.allreduce(
+    assemble_scalar(form(Constant(structure, PETSc.ScalarType(1.0)) * dx(domain=structure))), op=MPI.SUM)
+_area_cur = MPI.COMM_WORLD.allreduce(
+    assemble_scalar(form(ufl_det(grad(solid_coords)) * dx(domain=structure))), op=MPI.SUM)
+
 if MPI.COMM_WORLD.rank == 0:
     print("=" * 60)
+    print(f"solver={SOLVER}, IB_DIRECT_LOAD={int(IB_DIRECT_LOAD)}, GRAD_DIV={GRAD_DIV:g}")
+    print(f"area_ratio = {_area_cur / _area_ref:.10e}")
     print(f"N={N}, M={2 * N // 16}")
     print(f"Steps={config['num_steps']}, dt={config['dt']}, "
           f"T={config['T']}")

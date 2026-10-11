@@ -43,8 +43,17 @@ class TimeManager:
         return False
 
 
+# AFSI_OFFLINE=1：完全不连网（swanlab、实验计数器都跳过）。联网失败时也自动降级，
+# 避免 rank 0 异常而其余 MPI 进程无限等待。
+_SWANLAB_ON = os.environ.get("AFSI_OFFLINE", "0").lower() in ("0", "", "false", "no")
+
+
 def swanlab_init(project_name, experiment_name, config, api_key="VBxEp1UBe2606KHDM9264", host='https://swanlab.cn'):
+    global _SWANLAB_ON
+    if not _SWANLAB_ON:
+        return
     if (MPI.COMM_WORLD.rank == 0):
+      try:
         swanlab.login(api_key=api_key, host=host, save=True)
         swanlab.init(
             project=project_name,
@@ -55,6 +64,9 @@ def swanlab_init(project_name, experiment_name, config, api_key="VBxEp1UBe2606KH
             tags=["dolfinx", "dynamic", "hyperelastic", "swanlab"],
             config=config,
         )
+      except Exception as exc:  # 无网络 / 服务不可用：降级为不记录
+        print(f"[afsic] swanlab disabled: {exc.__class__.__name__}")
+        _SWANLAB_ON = False
 
 
 
@@ -65,10 +77,13 @@ def swanlab_upload(current_time, data_log_1, **params):
     params = params or {}
     data_log.update(params)
     data_log.update(data_log_1)
-    if (MPI.COMM_WORLD.rank == 0):
-        swanlab.log(
-            data_log, step = int(1+current_time/_timer.dt_minimum)
-        )
+    if _SWANLAB_ON and (MPI.COMM_WORLD.rank == 0):
+        try:
+            swanlab.log(
+                data_log, step = int(1+current_time/_timer.dt_minimum)
+            )
+        except Exception:
+            pass
 
 
 home_dir = os.path.expanduser("~")
@@ -100,7 +115,12 @@ def get_project_name(project_name):
         "X-API-Key": "B6IPZQJW5K3TRB9L7ABIMC3UOJR0AY3H"
     }
     params = {"project": project_name}
-    response = requests.get(url, headers=headers, params=params)
+    if not _SWANLAB_ON:
+        return f"{project_name}-offline"
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+    except Exception:
+        return f"{project_name}-offline"
     if response.status_code == 200:
         data = response.json()["experiment"]
         return data

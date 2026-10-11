@@ -42,9 +42,16 @@ config = {"nssolver": "chorinsolver",
           "mu_s": 0.1,  # Solid elasticity
           }
 
-config["num_steps"] = int(config['T']/config['dt'])
+# 环境变量覆盖（便于短程测试 / 网格加密）
+config["T"] = float(os.environ.get("T_END", config["T"]))
+config["Nx"] = config["Ny"] = int(os.environ.get("NX", config["Nx"]))
+config["dt"] = float(os.environ.get("DT", config["dt"]))
+config["num_steps"] = int(round(config['T']/config['dt']))
 config["output_path"] = unique_filename(config['project_name'], config['tag']) if MPI.COMM_WORLD.rank == 0 else None
 config["output_path"] = MPI.COMM_WORLD.bcast(config["output_path"], root=0)
+if os.environ.get("OUTPUT_PATH"):
+    config["output_path"] = os.environ["OUTPUT_PATH"].rstrip("/") + "/"
+    os.makedirs(config["output_path"], exist_ok=True)
 config["experiment_name"] = get_project_name(config['project_name']) if MPI.COMM_WORLD.rank == 0 else None
 config["experiment_name"] = MPI.COMM_WORLD.bcast(config["experiment_name"], root=0)
 swanlab_init(config['project_name'], config['experiment_name'], config)
@@ -137,12 +144,14 @@ bcp = [bcp_point]
 # （b_ib = V_h * f_stored，不再经弱式质量矩阵；与 demo_402 的验证一致）。
 SOLVER = os.environ.get("SOLVER", "chorin").lower()
 IB_DIRECT_LOAD = os.environ.get("IB_DIRECT_LOAD", "0").lower() not in ("0", "", "false", "no")
+# GRAD_DIV = gamma >= 0：预测步 grad-div 稳定化系数（0 = 不加）
+GRAD_DIV = float(os.environ.get("GRAD_DIV", "0"))
 if SOLVER.startswith("ipcs"):
     ns_solver = IPCSSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'],
-                           ib_body_force=not IB_DIRECT_LOAD)
+                           ib_body_force=not IB_DIRECT_LOAD, grad_div=GRAD_DIV)
 else:
     ns_solver = ChorinSolver(V, Q, bcu, bcp, config['dt'], config['rho'], config['mu'],
-                             ib_body_force=not IB_DIRECT_LOAD)
+                             ib_body_force=not IB_DIRECT_LOAD, grad_div=GRAD_DIV)
 if IB_DIRECT_LOAD:
     _b_direct = create_vector(V)
     ns_solver.ib_load = _b_direct
@@ -153,7 +162,13 @@ if IB_DIRECT_LOAD:
 ##########################################  Structure  ####################################################
 ###########################################################################################################
 home_dir = os.path.expanduser("~")
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{home_dir}/afsi-data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf", "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
+# MESH_PATH 覆盖默认网格；默认网格不存在时可用同目录 generate_mesh.py 生成
+# （圆心 (0.6, 0.5)，半径 0.2）
+_mesh_path = os.environ.get(
+    "MESH_PATH", f"{home_dir}/afsi-data/336-lid-driven-disk/mesh/circle_{config['Nl']}.xdmf")
+if not os.path.exists(_mesh_path):
+    raise FileNotFoundError(f"{_mesh_path} not found; run `python generate_mesh.py` and set MESH_PATH")
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, _mesh_path, "r", encoding=dolfinx.io.XDMFFile.Encoding.HDF5) as file:
     structure = file.read_mesh()
 
 v_cg2 = element("Lagrange", structure.topology.cell_name(),
@@ -211,6 +226,14 @@ form_u_L2 = form(dot(ns_solver.u_, ns_solver.u_) * dx)
 form_p_L2 = form(dot(ns_solver.p_, ns_solver.p_) * dx)
 form_F_L2 = form(dot(solid_coords, solid_coords) * dx)
 form_volume = form(det(grad(solid_coords)) * dx)
+# 圆盘面积守恒与质心轨迹（论文 Sec. 4.2：|Omega_s(t)|/|Omega_s(0)| 与 grad-div 对比）
+from dolfinx.fem import Constant as _Const
+_area0 = mesh.comm.allreduce(assemble_scalar(form(
+    _Const(structure, PETSc.ScalarType(1.0)) * dx(domain=structure))), op=MPI.SUM)
+form_cx = form(solid_coords[0] * dx)
+form_cy = form(solid_coords[1] * dx)
+_history = []
+_hist_path = config["output_path"] + f"disk_history_{SOLVER}_direct{int(IB_DIRECT_LOAD)}_g{GRAD_DIV:g}.csv"
 
 log.set_log_level(log.LogLevel.INFO)
 for step in range(config['num_steps']):
@@ -225,6 +248,13 @@ for step in range(config['num_steps']):
     p_L2 = mesh.comm.allreduce(assemble_scalar(form_p_L2), op=MPI.SUM)
     F_L2 = mesh.comm.allreduce(assemble_scalar(form_F_L2), op=MPI.SUM)
     volume = mesh.comm.allreduce(assemble_scalar(form_volume), op=MPI.SUM)
+    _cx = mesh.comm.allreduce(assemble_scalar(form_cx), op=MPI.SUM) / _area0
+    _cy = mesh.comm.allreduce(assemble_scalar(form_cy), op=MPI.SUM) / _area0
+    if MPI.COMM_WORLD.rank == 0:
+        _history.append((current_time + config['dt'], volume / _area0, _cx, _cy, u_L2, p_L2))
+        if (step + 1) % 200 == 0 or step + 1 == config['num_steps']:
+            np.savetxt(_hist_path, np.array(_history), delimiter=",",
+                       header="t,area_ratio,cx,cy,u_L2sq,p_L2sq", comments="")
 
     ib_interpolation.evaluate_current_points(solid_coords._cpp_object)
     with b1.localForm() as loc_2:

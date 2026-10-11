@@ -23,7 +23,8 @@ _NO_LAG = os.environ.get("IPCS_NO_LAG", "0").lower() not in ("0", "", "false", "
 
 class IPCSSolver:
     def __init__(self, V, Q, bcu, bcp, dt_raw, rho_raw, mu_raw,
-                 ds_p=None, p_traction=None, drag=None, ib_body_force=True):
+                 ds_p=None, p_traction=None, drag=None, ib_body_force=True,
+                 grad_div=0.0):
         """Incremental pressure-correction solver.
 
         Parameters
@@ -41,10 +42,16 @@ class IPCSSolver:
         p_traction : dolfinx.fem.Function or Constant, optional
             Known pressure datum ``p_bc(t)`` on the ``ds_p`` facets.  The
             caller must update its value every time step.
+        grad_div : float, default 0.0
+            Grad-div 稳定化系数 gamma >= 0：> 0 时预测步弱式增加一致的
+            gamma (div u, div v) 项（隐式，进 A1）。默认 0 = 原格式。
         """
         self.bcu = bcu
         self.bcp = bcp
         self.p_traction = p_traction
+        self.grad_div = grad_div
+        # 第一步取 u^{-1} = u^0（AB2 外推在第一步退化为 u^0）
+        self._first_step = True
         
         self.V = V
         self.Q = Q
@@ -71,11 +78,15 @@ class IPCSSolver:
         f = Function(V)
         F1 = rho / k * dot(u - u_n, v) * dx
         if not _NO_CONVECTION:
-            F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
+            # 对流项乘 rho（原实现漏了 rho；rho = 1 的算例结果不变）
+            F1 += rho * inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
         if _VISC_BE:
             F1 += mu * inner(grad(u), grad(v)) * dx
         else:
             F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx
+        if grad_div:
+            # grad-div 稳定化：gamma (div u, div v)（只含试探函数 u，进 A1）
+            F1 += Constant(mesh, PETSc.ScalarType(grad_div)) * div(u) * div(v) * dx
         if not _NO_LAG:
             F1 -= dot(p_, div(v)) * dx
         if ib_body_force:
@@ -143,6 +154,16 @@ class IPCSSolver:
             pc2.setType(PETSc.PC.Type.HYPRE)
             pc2.setHYPREType("boomeramg")
 
+        # MOMENTUM_LU=1：动量预测步改用直接法（preonly + LU，优先 MUMPS）。
+        # grad-div 项使迭代法收敛很慢，2D 算例建议开启。
+        if os.environ.get("MOMENTUM_LU", "0").lower() not in ("0", "", "false", "no"):
+            solver1.setType(PETSc.KSP.Type.PREONLY)
+            pc1.setType(PETSc.PC.Type.LU)
+            try:
+                pc1.setFactorSolverType("mumps")
+            except Exception:
+                pass
+
         if _KSP_STRICT:
             for _ksp in (solver1, solver2, solver3):
                 _ksp.setErrorIfNotConverged(True)
@@ -176,6 +197,11 @@ class IPCSSolver:
         self.ib_load = None
 
     def solve_one_step(self):
+        if self._first_step:
+            # u^{-1} := u^0，使第一步的 AB2 外推速度等于 u^0（非零初速时才有影响）
+            self.u_n1.x.array[:] = self.u_n.x.array
+            self.u_n1.x.scatter_forward()
+            self._first_step = False
         # Step 1: Tentative velocity step
         self.A1.zeroEntries()
         assemble_matrix(self.A1, self.a1, bcs=self.bcu)

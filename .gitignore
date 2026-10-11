@@ -63,3 +63,4 @@ afsic/demo/demo_402/plot/smoke_chorin/history.csv
 
 *.csv
 *.npz
+afsic/demo/ib2d/demo_4*/ib2d_run
