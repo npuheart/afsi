@@ -1,7 +1,7 @@
 # AV2D：一个心动周期的压力回放试算
 
 本目录把 WholeLVHeartModelling/AV2D 的固体网格、当前启用的材料与支撑力移植到
-AFSI 单相 Chorin + IB 耦合。目标时间 0.8512 s，dt=5e-6 s，共 170240 步。
+AFSI 单相混合 Q2/Q1 流体 + IB 耦合。目标时间 0.8512 s，dt=5e-6 s，共 170240 步。
 流体先用 120×120 个 Q2/Q1 单元（原程序为 240×240 MAC 单元；两者并不等价），
 固体保持原来的 590 个瓣叶和 3112 个主动脉 TRI3 单元。串行运行。
 
@@ -17,8 +17,7 @@ python afsic/demo/av2d/run_cycle.py \
 # 同一命令加 --resume 可从最后检查点恢复。
 ```
 
-输入为两个 Exodus 网格及 bc_data.txt，保持原始文件不变；运行元数据记录输入和
-main.py 的 SHA256。输出每 1000 步保存，status.json 的 complete=true 才表示整周期
+输入为两个 Exodus 网格及 bc_data.txt，保持原始文件不变；运行元数据记录输入、main.py、coupled.py 和 ChorinSolver.py 的 SHA256。每 200 步保存检查点与进度，每 2000 步保存动画帧，status.json 的 complete=true 才表示整周期
 完成。错误会保留最后一次保存的检查点。plot.py 可随时绘制已保存部分，run_cycle.py
 在正常结束或求解报错后自动生成 sequence.png、history.png 和 motion.gif。
 
@@ -35,8 +34,9 @@ main.py 的 SHA256。输出每 1000 步保存，status.json 的 complete=true �
 - 主动脉采用原 2*C1*(F-F^-T) 和体弹簧。为避免开口端节点移出 AFSI 插值区域，
   恰好位于箱体上下边界的主动脉端节点固定在参考位置；这是相对原弹簧处理的额外约束。
 - 上下压力开口的中心和半宽取原 CirculationModel/input2d 参数，侧壁及开口以外为
-  无滑移，开口切向速度为零。压力通过 AFSI Chorin 压力投影指定，未复制原
-  IBAMR traction 离散和 FeedbackForcer；开口端的离散位置由流体网格决定。
+  无滑移，开口切向速度为零。默认联立求解速度和压力，以压力牵引施加两端波形，并加能量回流稳定项；
+  不再使用最初失败的 Chorin 压力投影。原 IBAMR 的 FeedbackForcer 离散未照搬；
+  开口端的离散位置由流体网格决定。
 - 耦合采用 AFSI 原有插值/分布，装配固体载荷直接加入流体右端。核函数和时间格式
   与原 IBAMR 不同；不修改原始材料刚度来掩盖不稳定。
 - 无瓣叶接触算法。最小节点间距只是诊断，不保证闭合密封或阻止网格穿透。
@@ -64,3 +64,26 @@ metrics.csv 记录流速(cm/s)、两套固体的 J 极值和位移(cm)、入口/
 
 已启动 results/cycle_120/，日志 results/cycle_120.log，PID 记录
 results/cycle_120.pid。本段仅记录启动，不宣称完成；请以 status.json 为准。
+
+
+## 2026-10-13 数值修正
+
+最初的 Chorin 版本在第 821 步（0.004105 s）发生主动脉单元翻转。
+减半时间步仍在 0.004035 s 失败。现默认使用 `coupled.py`：联立 Q2/Q1
+速度–压力方程、隐式黏性、显式斜对称对流形式和牵引开口的能量回流耗散项。
+矩阵采用串行 MUMPS 直接求解；流体连续性通过同一混合系统施加。
+原 Chorin 可通过 main.py 的 `--solver chorin` 保留作诊断对照。
+
+检查命令：
+
+```bash
+python afsic/demo/av2d/check_flow.py
+python afsic/demo/av2d/check_restart.py /Users/pengfei/Documents/GitHub/WholeLVHeartModelling/AV2D
+```
+
+均匀压力平衡检查要求零速度和正确常压力；新解法重启检查在舍入误差范围内一致，
+不要求 MUMPS 重新分解后的结果逐位相同。status.json 现在包含 PID、UTC 更新时间、
+失败的确切时间步与固体编号，检查点每 200 步保存。源代码变化后必须开新结果目录。
+
+调参实验、数值指标和结果目录见 [TUNING.md](TUNING.md)。新整周期输出使用
+`results/cycle_120_coupled/`，保留旧失败结果。

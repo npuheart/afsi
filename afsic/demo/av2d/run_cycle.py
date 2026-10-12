@@ -1,4 +1,4 @@
-"""Run the AV2D pilot and plot its saved trajectory on completion or failure."""
+"""Run an AV2D pressure-replay cycle, then plot its saved trajectory."""
 import argparse
 from pathlib import Path
 import subprocess
@@ -7,9 +7,12 @@ p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--source',type=Path,required=True)
 p.add_argument('--output',type=Path,required=True)
 p.add_argument('--resume',action='store_true')
+p.add_argument('--nx',type=int,default=120)
+p.add_argument('--dt',type=float,default=5e-6)
+p.add_argument('--time',type=float,default=.8512)
 a=p.parse_args()
 demo=Path(__file__).resolve().parent
-cmd=[sys.executable,'-u',str(demo/'main.py'),'--source',str(a.source),'--output',str(a.output),'--nx','120','--dt','0.000005','--time','0.8512','--output-every','1000']
+cmd=[sys.executable,'-u',str(demo/'main.py'),'--source',str(a.source),'--output',str(a.output),'--nx',str(a.nx),'--dt',str(a.dt),'--time',str(a.time),'--solver','coupled','--output-every','200','--snapshot-every','2000','--log-every','200']
 if a.resume:cmd.append('--resume')
 r=subprocess.run(cmd)
 if (a.output/'checkpoint.npz').exists():

@@ -15,6 +15,13 @@ p.add_argument('output',type=Path)
 p.add_argument('--gif',action='store_true')
 a=p.parse_args()
 paths=sorted(a.output.glob('snapshot_*.npz'))
+checkpoint=a.output/'checkpoint.npz'
+if checkpoint.exists():
+    with np.load(checkpoint) as current:
+        last_step=-1
+        if paths:
+            with np.load(paths[-1]) as previous:last_step=int(previous['step'])
+        if int(current['step'])>last_step:paths.append(checkpoint)
 states=[]
 for path in paths:
     with np.load(path) as d:states.append({k:d[k].copy() for k in ['time','x0','x1','cells0','cells1','ref0','ref1']})
@@ -48,3 +55,19 @@ if a.gif:
     fig,ax=plt.subplots(figsize=(5,5),constrained_layout=True)
     anim=FuncAnimation(fig,lambda i:panel(ax,states[i]),frames=len(states),interval=120)
     anim.save(a.output/'motion.gif',writer=PillowWriter(fps=8));plt.close(fig)
+
+# New checkpoints include the actual velocity dof coordinates for either solver.
+checkpoint=a.output/'checkpoint.npz'
+with np.load(checkpoint) as d:
+    if 'velocity_xy' in d:
+        points=d['velocity_xy']-3.84
+        velocity=d['u'].reshape(-1,2)
+        speed=np.linalg.norm(velocity,axis=1)
+        fig,ax=plt.subplots(figsize=(7,7),constrained_layout=True)
+        scat=ax.scatter(points[:,0],points[:,1],c=speed,s=3,cmap='viridis',rasterized=True)
+        fig.colorbar(scat,ax=ax,label='Speed (cm/s)')
+        for i in [0,1]:
+            nodes=d[f'x{i}'].reshape(-1,2)-3.84
+            ax.add_collection(PolyCollection(nodes[d[f'cells{i}']],facecolor='#ca6633' if i==0 else '#dddddd',edgecolor='none'))
+        ax.set(xlim=(-3.84,3.84),ylim=(-3.84,3.84),aspect='equal',xlabel='x (cm)',ylabel='y (cm)',title=f"AFSI velocity at t={float(d['time']):.5f} s")
+        fig.savefig(a.output/'velocity.png',dpi=180);plt.close(fig)

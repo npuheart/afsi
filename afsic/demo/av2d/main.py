@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 import time
+import os
+from datetime import datetime, timezone
 import numpy as np
 from scipy.io import netcdf_file
 from scipy.spatial import cKDTree
@@ -14,7 +16,8 @@ from mpi4py import MPI
 from petsc4py import PETSc
 from dolfinx import fem, mesh
 from dolfinx.fem.petsc import create_vector, assemble_vector
-from basix.ufl import element
+from basix.ufl import element, mixed_element
+from coupled import CoupledFlow
 import ufl
 from afsic import ChorinSolver, IBMesh, IBInterpolation
 
@@ -122,7 +125,7 @@ class Solid:
     def assemble(self):
         j = self.jacobians()
         if not np.isfinite(j).all() or j.min() <= 0:
-            raise RuntimeError('Solid inversion/nonfinite Jacobian')
+            raise RuntimeError(f'Solid inversion/nonfinite Jacobian before force assembly: Jmin={j.min()}, Jmax={j.max()}')
         with self.b.localForm() as local:
             local.set(0)
         assemble_vector(self.b,self.load_form)
@@ -139,17 +142,20 @@ def main():
     p.add_argument('--dt',type=float,default=5e-6)
     p.add_argument('--time',type=float,default=PERIOD)
     p.add_argument('--max-steps',type=int,default=200000)
-    p.add_argument('--output-every',type=int,default=1000)
+    p.add_argument('--output-every',type=int,default=200)
+    p.add_argument('--snapshot-every',type=int,default=2000)
     p.add_argument('--resume',action='store_true')
+    p.add_argument('--log-every',type=int,default=200)
+    p.add_argument('--solver',choices=['chorin','coupled'],default='coupled')
     a=p.parse_args()
-    if MPI.COMM_WORLD.size != 1 or a.nx<8 or not 0<a.time<=PERIOD or a.dt<=0:
+    if MPI.COMM_WORLD.size != 1 or a.nx<8 or not 0<a.time<=PERIOD or a.dt<=0 or min(a.max_steps,a.output_every,a.log_every,a.snapshot_every)<=0:
         p.error('Serial pilot, nx>=8, positive dt, time within one cycle required')
     if abs(a.time/a.dt-round(a.time/a.dt)) > 1e-6:
         p.error('End time must be an integer number of steps')
     a.output.mkdir(parents=True,exist_ok=True)
     files=[a.source/n for n in ['2d_leaflets_sideset.e','2d_aorta_sideset.e','bc_data.txt']]
-    meta=dict(nx=a.nx,dt=a.dt,time=a.time,source=str(a.source.resolve()),
-              sha256={f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in files+[Path(__file__)]})
+    meta=dict(nx=a.nx,dt=a.dt,time=a.time,solver=a.solver,source=str(a.source.resolve()),
+              sha256={f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in files+[Path(__file__),Path(__file__).with_name('coupled.py'),Path(__import__('afsic.euler.ChorinSolver',fromlist=['__file__']).__file__)]})
     metadata=a.output/'parameters.json'
     if a.resume:
         if json.loads(metadata.read_text())!=meta: raise ValueError('Resume parameter/source mismatch')
@@ -159,6 +165,9 @@ def main():
     bg=mesh.create_rectangle(MPI.COMM_SELF,[[0.,0.],[L,L]],[a.nx,a.nx],cell_type=mesh.CellType.quadrilateral)
     V=fem.functionspace(bg,element('Lagrange','quadrilateral',2,shape=(2,)))
     Q=fem.functionspace(bg,element('Lagrange','quadrilateral',1))
+    if a.solver=='coupled':
+        W=fem.functionspace(bg,mixed_element([element('Lagrange','quadrilateral',2,shape=(2,)),element('Lagrange','quadrilateral',1)]))
+        V,vm=W.sub(0).collapse(); Q,pm=W.sub(1).collapse()
     bg.topology.create_connectivity(1,2)
     walls=mesh.locate_entities_boundary(bg,1,lambda x:np.isclose(x[0],0)|np.isclose(x[0],L))
     ends=mesh.locate_entities_boundary(bg,1,lambda x:np.isclose(x[1],0)|np.isclose(x[1],L))
@@ -176,7 +185,13 @@ def main():
     order=np.argsort(boundary_facets)
     tags=mesh.meshtags(bg,1,boundary_facets[order],boundary_values[order])
     ds_flow=ufl.Measure('ds',domain=bg,subdomain_data=tags)
-    solver=ChorinSolver(V,Q,bcu,pressure_bc(0),a.dt,1.,.035,ib_body_force=False)
+    traction=fem.Function(Q)
+    if a.solver=='coupled':
+        zero=fem.Function(V)
+        wbcs=[fem.dirichletbc(zero,fem.locate_dofs_topological((W.sub(0),V),1,walls),W.sub(0)),fem.dirichletbc(PETSc.ScalarType(0),fem.locate_dofs_topological(W.sub(0).sub(0),1,ends),W.sub(0).sub(0)),fem.dirichletbc(PETSc.ScalarType(0),fem.locate_dofs_topological(W.sub(0).sub(1),1,closed),W.sub(0).sub(1))]
+        solver=CoupledFlow(W,V,Q,(vm,pm),wbcs,a.dt,traction,ds_flow)
+    elif a.solver=='chorin':
+        solver=ChorinSolver(V,Q,bcu,pressure_bc(0),a.dt,1.,.035,ib_body_force=False)
     for ksp in [solver.solver1,solver.solver2,solver.solver3]: ksp.setTolerances(rtol=1e-9,atol=1e-11)
     solids=[Solid(files[0],True),Solid(files[1],False)]
     ib=IBMesh(0.,L,0.,L,a.nx,a.nx,2)
@@ -189,13 +204,27 @@ def main():
         with np.load(a.output/'checkpoint.npz') as state:
             step=int(state['step']); solver.u_n.x.array[:]=state['u']; solver.p_.x.array[:]=state['p']
             for i,s in enumerate(solids): s.chi.x.array[:]=state[f'x{i}']
-    def save():
-        state=dict(step=step,time=step*a.dt,u=solver.u_n.x.array,p=solver.p_.x.array)
+    if a.resume and (a.output/'metrics.csv').exists():
+        with (a.output/'metrics.csv').open() as stream:
+            reader=csv.DictReader(stream); names=reader.fieldnames
+            kept=[row for row in reader if int(row['step'])<step]
+        with (a.output/'metrics.csv').open('w') as stream:
+            writer=csv.DictWriter(stream,fieldnames=names);writer.writeheader();writer.writerows(kept)
+
+    def write_status(values):
+        values.update(pid=os.getpid(),updated_utc=datetime.now(timezone.utc).isoformat())
+        temporary=a.output/'status.tmp'
+        temporary.write_text(json.dumps(values,indent=2)+'\n')
+        temporary.replace(a.output/'status.json')
+
+    def save(snapshot=False):
+        state=dict(step=step,time=step*a.dt,u=solver.u_n.x.array,p=solver.p_.x.array,velocity_xy=V.tabulate_dof_coordinates()[:,:2])
         for i,s in enumerate(solids): state.update({f'x{i}':s.chi.x.array,f'ref{i}':s.ref,f'cells{i}':s.cells})
         with (a.output/'checkpoint.tmp').open('wb') as stream: np.savez_compressed(stream,**state)
         (a.output/'checkpoint.tmp').replace(a.output/'checkpoint.npz')
-        (a.output/'status.json').write_text(json.dumps(dict(complete=False,reason='running',step=step,time=step*a.dt),indent=2))
-        with (a.output/f'snapshot_{step:08d}.npz').open('wb') as stream: np.savez_compressed(stream,**state)
+        write_status(dict(complete=False,reason='running',step=step,time=step*a.dt))
+        if snapshot or step%a.snapshot_every==0:
+            with (a.output/f'snapshot_{step:08d}.npz').open('wb') as stream: np.savez_compressed(stream,**state)
     def log():
         row=dict(step=step,time=step*a.dt,max_speed=float(np.linalg.norm(solver.u_n.x.array.reshape(-1,2),axis=1).max()))
         row.update(Q_in_cm2_s=float(fem.assemble_scalar(flow_forms[0])),Q_out_cm2_s=float(fem.assemble_scalar(flow_forms[1])))
@@ -203,7 +232,8 @@ def main():
         if len(np.unique(leaf.components))==2:
             row['leaflet_gap_cm']=float(cKDTree(nodes[leaf.components==0]).query(nodes[leaf.components==1])[0].min())
         for i,s in enumerate(solids):
-            j=s.jacobians(); row.update({f'Jmin{i}':float(j.min()),f'Jmax{i}':float(j.max()),f'displacement{i}':float(np.linalg.norm((s.chi.x.array-s.ref).reshape(-1,2),axis=1).max())})
+            j=s.jacobians(); row.update({f'Jmin{i}':float(j.min()),f'Jmax{i}':float(j.max()),f'load_max{i}':float(np.abs(s.force.x.array).max()),f'velocity_max{i}':float(np.abs(s.velocity.x.array).max()),f'displacement{i}':float(np.linalg.norm((s.chi.x.array-s.ref).reshape(-1,2),axis=1).max())})
+        row['flow_imbalance_relative']=abs(row['Q_in_cm2_s']-row['Q_out_cm2_s'])/max(abs(row['Q_in_cm2_s']),abs(row['Q_out_cm2_s']),1e-14)
         path=a.output/'metrics.csv'; exists=path.exists()
         with path.open('a') as stream:
             w=csv.DictWriter(stream,fieldnames=row.keys())
@@ -220,26 +250,31 @@ def main():
                 s.assemble(); ip.evaluate_current_points(s.chi._cpp_object)
                 ip.solid_to_fluid(solver.f._cpp_object,s.force._cpp_object)
                 solver.ib_load.axpy((L/(2*a.nx))**2,solver.f.x.petsc_vec)
-            solver.bcp=pressure_bc((step+1)*a.dt)
+            if a.solver=='coupled':
+                target=[np.interp((step+1)*a.dt,data[:,0],data[:,i]) for i in [1,2]]
+                traction.interpolate(lambda x:target[0]+(target[1]-target[0])*x[1]/L)
+            elif a.solver=='chorin':
+                solver.bcp=pressure_bc((step+1)*a.dt)
             solver.solve_one_step()
             if any(k.getConvergedReason()<0 for k in [solver.solver1,solver.solver2,solver.solver3]):raise RuntimeError('Fluid linear solve failed')
             if not np.isfinite(solver.u_n.x.array).all():raise RuntimeError('Nonfinite fluid velocity')
-            for s,ip in zip(solids,interps):
+            for part,(s,ip) in enumerate(zip(solids,interps)):
                 ip.fluid_to_solid(solver.u_._cpp_object,s.velocity._cpp_object)
                 s.chi.x.array[:]+=a.dt*s.velocity.x.array
                 xy=s.chi.x.array.reshape(-1,2)
                 xy[s.end_nodes]=s.ref.reshape(-1,2)[s.end_nodes]
                 if xy.min() < -1e-9 or xy.max() > L+1e-9:raise RuntimeError(f'Solid left fluid domain: {xy.min()}, {xy.max()}')
                 j=s.jacobians()
-                if not np.isfinite(j).all() or j.min()<=0:raise RuntimeError('Solid inversion/nonfinite Jacobian')
+                if not np.isfinite(j).all() or j.min()<=0:raise RuntimeError(f'Solid inversion/nonfinite Jacobian: part={part}, Jmin={j.min()}, Jmax={j.max()}')
             step+=1
-            if step%a.output_every==0:log();save()
+            if step%a.log_every==0:log()
+            if step%a.output_every==0:save()
         if step>=round(a.time/a.dt):reason='complete'
-        log();save()
+        log();save(snapshot=True)
     except Exception as exc:
         reason='error'; print(repr(exc),flush=True)
-        (a.output/'status.json').write_text(json.dumps(dict(complete=False,reason=reason,error=str(exc),last_good_checkpoint='checkpoint.npz'),indent=2))
+        write_status(dict(complete=False,reason=reason,error=str(exc),failed_step=step+1,failed_time=(step+1)*a.dt,last_good_checkpoint='checkpoint.npz'))
         raise
-    (a.output/'status.json').write_text(json.dumps(dict(complete=reason=='complete',reason=reason,step=step,time=step*a.dt,wall_seconds=time.monotonic()-start),indent=2))
+    write_status(dict(complete=reason=='complete',reason=reason,step=step,time=step*a.dt,wall_seconds=time.monotonic()-start))
 
 if __name__=='__main__':main()
