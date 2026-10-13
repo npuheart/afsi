@@ -40,6 +40,24 @@ def read_exodus(path):
     return np.clip(x+L/2,0,L), cells, sides
 
 
+def refine_triangles(points, cells, sides, levels):
+    """Uniform red refinement; preserve each Exodus boundary side set."""
+    for _ in range(levels):
+        edges = np.concatenate([cells[:, [0,1]], cells[:, [1,2]], cells[:, [2,0]]])
+        unique, inverse = np.unique(np.sort(edges, axis=1), axis=0, return_inverse=True)
+        midpoint = np.arange(len(unique)) + len(points)
+        lookup = {tuple(e): int(m) for e, m in zip(unique, midpoint)}
+        points = np.vstack([points, points[unique].mean(axis=1)])
+        ab, bc, ca = (midpoint[inverse].reshape(3, -1))
+        aa, bb, cc = cells.T
+        cells = np.vstack([np.column_stack([aa,ab,ca]), np.column_stack([ab,bb,bc]),
+                           np.column_stack([ca,bc,cc]), np.column_stack([ab,bc,ca])])
+        sides = {tag: np.array([half for a,b in pairs for half in
+                 [(a,lookup[tuple(sorted((a,b)))]), (lookup[tuple(sorted((a,b)))],b)]], dtype=np.int64)
+                 for tag,pairs in sides.items()}
+    return points, cells, sides
+
+
 def pressures(path):
     rows = [(0.,0.,0.)]
     with path.open() as stream:
@@ -57,8 +75,8 @@ def pressures(path):
 
 
 class Solid:
-    def __init__(self, path, leaflet):
-        points, cells, sides = read_exodus(path)
+    def __init__(self, path, leaflet, refinement=0):
+        points, cells, sides = refine_triangles(*read_exodus(path), refinement)
         domain = mesh.create_mesh(MPI.COMM_SELF, cells,
             ufl.Mesh(element('Lagrange','triangle',1,shape=(2,))), points)
         self.domain = domain
@@ -70,6 +88,9 @@ class Solid:
         self.velocity = fem.Function(self.V)
         self.force = fem.Function(self.V)
         self.cells = np.array([self.V.dofmap.cell_dofs(i) for i in range(domain.topology.index_map(2).size_local)])
+        all_edges = np.sort(np.concatenate([self.cells[:,[0,1]], self.cells[:,[1,2]], self.cells[:,[2,0]]]),axis=1)
+        unique_edges, counts = np.unique(all_edges,axis=0,return_counts=True)
+        self.boundary_edges = unique_edges[counts==1]
         v = ufl.TestFunction(self.V)
         X = ufl.SpatialCoordinate(domain)
         F = ufl.variable(ufl.grad(self.chi))
@@ -139,26 +160,35 @@ def main():
     p.add_argument('--source',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--nx',type=int,default=120)
+    p.add_argument('--solid-refinement',type=int,choices=[0,1,2],default=0)
     p.add_argument('--dt',type=float,default=5e-6)
     p.add_argument('--time',type=float,default=PERIOD)
     p.add_argument('--max-steps',type=int,default=200000)
     p.add_argument('--output-every',type=int,default=200)
     p.add_argument('--snapshot-every',type=int,default=2000)
     p.add_argument('--resume',action='store_true')
+    p.add_argument('--start-from',type=Path,help='Seed a new experiment from a compatible checkpoint; geometry must match')
+    p.add_argument('--convection',choices=['explicit','implicit'],default='explicit')
+    p.add_argument('--advection-refresh',type=int,default=20)
     p.add_argument('--log-every',type=int,default=200)
     p.add_argument('--solver',choices=['chorin','coupled'],default='coupled')
     a=p.parse_args()
-    if MPI.COMM_WORLD.size != 1 or a.nx<8 or not 0<a.time<=PERIOD or a.dt<=0 or min(a.max_steps,a.output_every,a.log_every,a.snapshot_every)<=0:
+    if MPI.COMM_WORLD.size != 1 or a.nx<8 or not 0<a.time<=PERIOD or a.dt<=0 or min(a.max_steps,a.output_every,a.log_every,a.snapshot_every,a.advection_refresh)<=0:
         p.error('Serial pilot, nx>=8, positive dt, time within one cycle required')
     if abs(a.time/a.dt-round(a.time/a.dt)) > 1e-6:
         p.error('End time must be an integer number of steps')
+    if a.resume and a.start_from:p.error('--resume and --start-from are mutually exclusive')
+    if a.solver!='coupled' and a.convection=='implicit':p.error('Implicit convection requires coupled solver')
     a.output.mkdir(parents=True,exist_ok=True)
     files=[a.source/n for n in ['2d_leaflets_sideset.e','2d_aorta_sideset.e','bc_data.txt']]
-    meta=dict(nx=a.nx,dt=a.dt,time=a.time,solver=a.solver,source=str(a.source.resolve()),
+    meta=dict(nx=a.nx,dt=a.dt,time=a.time,solver=a.solver,solid_refinement=a.solid_refinement,convection=a.convection,advection_refresh=a.advection_refresh,
+              start_from=str(a.start_from.resolve()) if a.start_from else None,start_sha256=hashlib.sha256(a.start_from.read_bytes()).hexdigest() if a.start_from else None,source=str(a.source.resolve()),
               sha256={f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in files+[Path(__file__),Path(__file__).with_name('coupled.py'),Path(__import__('afsic.euler.ChorinSolver',fromlist=['__file__']).__file__)]})
     metadata=a.output/'parameters.json'
     if a.resume:
-        if json.loads(metadata.read_text())!=meta: raise ValueError('Resume parameter/source mismatch')
+        previous=json.loads(metadata.read_text())
+        for key in ['start_from','start_sha256']:meta[key]=previous.get(key)
+        if previous!=meta: raise ValueError('Resume parameter/source mismatch')
     elif metadata.exists(): raise ValueError('Output exists; use --resume')
     else: metadata.write_text(json.dumps(meta,indent=2)+'\n')
     data=pressures(files[2])
@@ -189,21 +219,35 @@ def main():
     if a.solver=='coupled':
         zero=fem.Function(V)
         wbcs=[fem.dirichletbc(zero,fem.locate_dofs_topological((W.sub(0),V),1,walls),W.sub(0)),fem.dirichletbc(PETSc.ScalarType(0),fem.locate_dofs_topological(W.sub(0).sub(0),1,ends),W.sub(0).sub(0)),fem.dirichletbc(PETSc.ScalarType(0),fem.locate_dofs_topological(W.sub(0).sub(1),1,closed),W.sub(0).sub(1))]
-        solver=CoupledFlow(W,V,Q,(vm,pm),wbcs,a.dt,traction,ds_flow)
+        solver=CoupledFlow(W,V,Q,(vm,pm),wbcs,a.dt,traction,ds_flow,a.convection=='implicit',a.advection_refresh)
     elif a.solver=='chorin':
         solver=ChorinSolver(V,Q,bcu,pressure_bc(0),a.dt,1.,.035,ib_body_force=False)
     for ksp in [solver.solver1,solver.solver2,solver.solver3]: ksp.setTolerances(rtol=1e-9,atol=1e-11)
-    solids=[Solid(files[0],True),Solid(files[1],False)]
+    solids=[Solid(files[0],True,a.solid_refinement),Solid(files[1],False,a.solid_refinement)]
     ib=IBMesh(0.,L,0.,L,a.nx,a.nx,2)
     coord=fem.Function(V); coord.interpolate(lambda x:x[:2]); ib.build_map(coord._cpp_object)
     interps=[IBInterpolation(ib),IBInterpolation(ib)]
     solver.ib_load=create_vector(V)
     flow_forms=[fem.form(solver.u_n[1]*ds_flow(i)) for i in [1,2]]
     step=0
-    if a.resume:
-        with np.load(a.output/'checkpoint.npz') as state:
+    if a.resume or a.start_from:
+        with np.load(a.output/'checkpoint.npz' if a.resume else a.start_from) as state:
+            np.testing.assert_allclose(state['velocity_xy'],V.tabulate_dof_coordinates()[:,:2],atol=1e-12,rtol=0)
+            for i,s in enumerate(solids):
+                np.testing.assert_allclose(state[f'ref{i}'],s.ref,atol=1e-12,rtol=0)
+                np.testing.assert_array_equal(state[f'cells{i}'],s.cells)
             step=int(state['step']); solver.u_n.x.array[:]=state['u']; solver.p_.x.array[:]=state['p']
             for i,s in enumerate(solids): s.chi.x.array[:]=state[f'x{i}']
+            if a.start_from:
+                step=round(float(state['time'])/a.dt)
+                if abs(step*a.dt-float(state['time']))>1e-12 or step*a.dt>=a.time:
+                    raise ValueError('Seed time must align with dt and precede target time')
+            elif a.convection=='implicit':
+                solver.advector.x.array[:]=state['advector']; solver.advection_age=int(state['advection_age'])
+                solver.A.zeroEntries()
+                from dolfinx.fem.petsc import assemble_matrix
+                assemble_matrix(solver.A,solver.a,bcs=solver.bcs);solver.A.assemble()
+                solver.solver1.setOperators(solver.A)
     if a.resume and (a.output/'metrics.csv').exists():
         with (a.output/'metrics.csv').open() as stream:
             reader=csv.DictReader(stream); names=reader.fieldnames
@@ -219,6 +263,7 @@ def main():
 
     def save(snapshot=False):
         state=dict(step=step,time=step*a.dt,u=solver.u_n.x.array,p=solver.p_.x.array,velocity_xy=V.tabulate_dof_coordinates()[:,:2])
+        if a.convection=='implicit':state.update(advector=solver.advector.x.array,advection_age=solver.advection_age)
         for i,s in enumerate(solids): state.update({f'x{i}':s.chi.x.array,f'ref{i}':s.ref,f'cells{i}':s.cells})
         with (a.output/'checkpoint.tmp').open('wb') as stream: np.savez_compressed(stream,**state)
         (a.output/'checkpoint.tmp').replace(a.output/'checkpoint.npz')
@@ -227,11 +272,15 @@ def main():
             with (a.output/f'snapshot_{step:08d}.npz').open('wb') as stream: np.savez_compressed(stream,**state)
     def log():
         row=dict(step=step,time=step*a.dt,max_speed=float(np.linalg.norm(solver.u_n.x.array.reshape(-1,2),axis=1).max()))
+        row['CFL_IB']=row['max_speed']*a.dt/(L/(2*a.nx))
         row.update(Q_in_cm2_s=float(fem.assemble_scalar(flow_forms[0])),Q_out_cm2_s=float(fem.assemble_scalar(flow_forms[1])))
         leaf=solids[0]; nodes=leaf.chi.x.array.reshape(-1,2)
         if len(np.unique(leaf.components))==2:
             row['leaflet_gap_cm']=float(cKDTree(nodes[leaf.components==0]).query(nodes[leaf.components==1])[0].min())
         for i,s in enumerate(solids):
+            xy=s.chi.x.array.reshape(-1,2)
+            spacing=np.linalg.norm(xy[s.boundary_edges[:,0]]-xy[s.boundary_edges[:,1]],axis=1)/(L/(2*a.nx))
+            row.update({f'MFAC_boundary_max{i}':float(spacing.max()),f'MFAC_boundary_median{i}':float(np.median(spacing))})
             j=s.jacobians(); row.update({f'Jmin{i}':float(j.min()),f'Jmax{i}':float(j.max()),f'load_max{i}':float(np.abs(s.force.x.array).max()),f'velocity_max{i}':float(np.abs(s.velocity.x.array).max()),f'displacement{i}':float(np.linalg.norm((s.chi.x.array-s.ref).reshape(-1,2),axis=1).max())})
         row['flow_imbalance_relative']=abs(row['Q_in_cm2_s']-row['Q_out_cm2_s'])/max(abs(row['Q_in_cm2_s']),abs(row['Q_out_cm2_s']),1e-14)
         path=a.output/'metrics.csv'; exists=path.exists()

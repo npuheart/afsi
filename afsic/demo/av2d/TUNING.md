@@ -66,3 +66,42 @@ AFSI_OFFLINE=1 python afsic/demo/av2d/main.py \
   --output /tmp/av2d-stabilized-test --nx 120 --dt 5e-6 --time .05 --solver coupled
 python afsic/demo/av2d/plot.py /tmp/av2d-stabilized-test --gif
 ```
+
+## Streamlines, structural refinement and late-time convection test
+
+The original coupled full-cycle attempt ultimately failed at step 112624, t=0.563120 s:
+aorta Jmin=-2.483. At its last checkpoint (0.563000 s), peak speed was 3839.52 cm/s
+at (x,y)=(0.768,1.696) cm. Aorta displacement was only 0.00450 cm.
+Thus the observed inversion alone does not establish insufficient structural node density as its cause.
+
+Every saved-frame animation now includes masked instantaneous streamlines and a fixed-scale speed background.
+The old failed trajectory remains in `results/cycle_120_coupled/` with its updated `motion.gif`.
+
+New controls from exactly that last checkpoint, unchanged original solid meshes and dt=2.5e-6:
+
+| Convection | Result |
+| --- | --- |
+| Explicit | Failed at 0.563195 s, aorta Jmin=-101.183 |
+| Frozen implicit Oseen, refreshed every 20 steps | Completed diagnostic target 0.565 s |
+
+At 0.565 s the implicit diagnostic had peak speed 969.686 cm/s, leaflet J=[0.971412,1.025860],
+aorta J=[0.730165,1.211903]. This demonstrates passage through the old failure time, not long-time validity.
+The inherited checkpoint already contains large oscillations; it is not a clean full-cycle solution.
+Output folders: `results/tuning/late_explicit120_halfdt/`, `results/tuning/late_implicit120/`.
+
+Uniform solid refinement halves typical boundary MFAC from about 1 to 0.5 on the 120 Q2 grid.
+Initial boundary maxima: leaflets 0.604358, aorta 0.563279. Reference J and near-zero force checks passed;
+leaflet root side-set facets doubled from 10 to 20. A refined explicit half-dt smoke test completed 0.01 s
+(4000 steps), leaflet J=[0.994305,1.005599], aorta J=[0.980823,1.029972].
+Output: `results/tuning/refined120_halfdt_smoke/`.
+
+Implicit uniform-pressure equilibrium passed (max velocity 3.28e-17 cm/s). Continuous 40 versus 19+21
+restart steps passed, with max velocity/pressure differences 1.44e-16 / 2.05e-12; the test splits inside
+an advector refresh interval and checks its saved state as well.
+
+A fresh full-cycle experiment starts from t=0 in `results/cycle_120_refined_implicit/`:
+fluid 120², solids uniformly refined once, dt=2.5e-6, implicit convection, refresh interval 20.
+It requires 340480 steps. This version refactors a mixed matrix every 20 steps, so allow several hours;
+check `status.json` rather than assuming completion. The launcher now derives its maximum step count
+from the target time, avoiding the old 200000-step cap at half dt. This is a candidate configuration,
+not an established converged or impermeable valve solution.
