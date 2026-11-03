@@ -71,6 +71,32 @@ Cost: Q2 velocity on a hexahedral box is heavy. At H = 0.2 (20×20×91 cells, 0.
 DOFs) one step takes about 40 s on one core and 10 GB of memory; use MPI. H = 0.1 has 8× the
 cells.
 
+## Moved leaflets with a matching vessel (`VALVE_SHIFT`)
+
+`VALVE_SHIFT=d` (cm) moves each leaflet rigidly by d along the horizontal direction from the vessel
+axis to its centroid, together with its attachment extension, and deforms the vessel to follow:
+displacement a(z) Σ_j w_j(θ) t_j, where t_j is leaflet j's translation, w_j(θ) are von Mises
+weights about the leaflet centroid angles (1 inside a sector, a smooth change at the commissures),
+and a(z) is 1 over the root (z ∈ [−0.2, 1.7] cm) and goes smoothly to 0 within 1 cm, so the straight
+inlet and outlet tubes are unchanged. The moved surface is then extruded to the wall as usual. Meshes
+go to `data/mesh_h<H>_shift<d>/`; `meta.json` records where the attachment line and the extension sit
+relative to the moved wall.
+
+```bash
+VALVE_SHIFT=0.1 python generate_mesh.py     # 1 mm; then VALVE_SHIFT=0.1 python main.py
+```
+
+At H = 0.2 (signed distance to the moved wall, negative = in the lumen):
+
+| d | attachment line, median | share deeper than 0.2 mm in the lumen | extension tips inside the wall |
+|---|---:|---:|---:|
+| 1 mm | −0.08 mm | 3 % | 98.7 % |
+| 2 mm | −0.10 mm | 4 % | 98.7 % |
+| 4 mm | −0.11 mm | 26 % | 98.7 % |
+
+The deepest points (up to ≈ 0.7 mm in the lumen) are at the commissures, where the translations of
+two neighbouring leaflets are averaged; no extension tip leaves the wall.
+
 ## Checkpoint and restart
 
 Every `CHECKPOINT_EVERY` steps (default: `OUTPUT_EVERY`) `main.py` writes `checkpoint.npz` atomically

@@ -24,6 +24,7 @@ HALF_WIDTH = _env("HALF_WIDTH", 2.0)  # fluid box |x|, |y| <= HALF_WIDTH (wall o
 WALL_T = _env("WALL_T", 0.2)          # vessel wall thickness (paper: rigid vessel, no thickness)
 LEAFLET_T = 0.015                     # paper
 EXT = 0.10                            # leaflet attachment extension into the wall
+VALVE_SHIFT = _env("VALVE_SHIFT", 0.0)  # (env) cm: move each leaflet outwards, the root follows
 
 # ---- fluid grid ------------------------------------------------------------------------------------
 H = _env("H", 0.2)                    # (env) fluid cell size; production 0.05 or finer
@@ -76,7 +77,7 @@ def q_inlet(t):
 # ---- paths -------------------------------------------------------------------------------------------
 LSDYNA_URL = "https://lsdyna.ansys.com/wp-content/uploads/2022/12/ICFD_example_heartvalve.zip"
 LSDYNA_DIR = os.environ.get("LSDYNA_DIR", os.path.join(_here, "data", "lsdyna"))
-MESH_DIR = os.environ.get("MESH_DIR", os.path.join(_here, "data", f"mesh_h{H:g}"))
+MESH_DIR = os.environ.get("MESH_DIR", os.path.join(_here, "data", f"mesh_h{H:g}" + (f"_shift{VALVE_SHIFT:g}" if VALVE_SHIFT else "")))
 
 
 def output_path():

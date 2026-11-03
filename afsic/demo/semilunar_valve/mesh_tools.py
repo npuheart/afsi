@@ -332,3 +332,56 @@ def valve_mesh(dyna_dir, thickness, layers, refine, ext, ext_rows, wall_Y, wall_
     tets, vol = orient(P, tets)
     return P, tets, tet_part, dict(attachment_edges=len(att_edges), min_volume=float(vol.min()),
                                    volume=float(vol.sum()))
+
+
+# ---------------------------------------------------------------------------------------------------
+# moved leaflets and a vessel that follows them (VALVE_SHIFT)
+# ---------------------------------------------------------------------------------------------------
+def components(X, cells):
+    """Connected components of a mesh (node labels); cells: list/array of node-index lists."""
+    parent = np.arange(len(X))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+    for c in cells:
+        r0 = find(c[0])
+        for v in c[1:]:
+            rv = find(v)
+            if rv != r0:
+                parent[rv] = r0
+    roots = np.array([find(i) for i in range(len(X))])
+    _, lab = np.unique(roots, return_inverse=True)
+    return lab
+
+
+def leaflet_translations(X, lab, shift):
+    """Rigid translation of each leaflet: `shift` along the horizontal direction from the vessel axis
+    to the leaflet centroid. Returns (translations (k, 3), centroid angles (k,))."""
+    t, ang = [], []
+    for j in range(lab.max() + 1):
+        c = X[lab == j].mean(0)
+        e = np.array([c[0], c[1], 0.0])
+        e /= np.linalg.norm(e)
+        t.append(shift * e)
+        ang.append(np.arctan2(c[1], c[0]))
+    return np.array(t), np.array(ang)
+
+
+def vessel_morph(Y, trans, ang, z_root=(-0.2, 1.7), blend=1.0, kappa=12.0):
+    """Displacement of vessel points following the leaflet translations: sum_j w_j(theta) t_j times an
+    axial weight that is 1 over the root (z_root) and goes smoothly to 0 within `blend` cm on either
+    side, so the straight inlet/outlet tubes keep their shape. w_j are von Mises weights about the
+    leaflet centroid angles (kappa sets how sharp the change at a commissure is); they sum to one."""
+    th = np.arctan2(Y[:, 1], Y[:, 0])
+    w = np.exp(kappa * np.cos(th[:, None] - ang[None, :]))
+    w /= w.sum(1, keepdims=True)
+
+    def smooth(s):
+        s = np.clip(s, 0, 1)
+        return s * s * (3 - 2 * s)
+    z = Y[:, 2]
+    a = smooth((z - (z_root[0] - blend)) / blend) * smooth(((z_root[1] + blend) - z) / blend)
+    return a[:, None] * (w @ trans)
