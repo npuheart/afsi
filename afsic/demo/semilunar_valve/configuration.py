@@ -23,7 +23,6 @@ Z_IN, Z_OUT = -4.0, 14.2            # inlet 4 cm upstream of the root, total len
 HALF_WIDTH = _env("HALF_WIDTH", 2.0)  # fluid box |x|, |y| <= HALF_WIDTH (wall outer radius <= 1.83)
 WALL_T = _env("WALL_T", 0.2)          # vessel wall thickness (paper: rigid vessel, no thickness)
 LEAFLET_T = 0.015                     # paper
-EXT = 0.10                            # leaflet attachment extension into the wall
 VALVE_SHIFT = _env("VALVE_SHIFT", 0.0)  # (env) cm: move each leaflet outwards, the root follows
 
 # ---- fluid grid ------------------------------------------------------------------------------------
@@ -32,6 +31,13 @@ NX = NY = int(round(2 * HALF_WIDTH / H))
 NZ = int(round((Z_OUT - Z_IN) / H))
 VELOCITY_ORDER, PRESSURE_ORDER = 2, 1
 FORCE_ORDER = _env("FORCE_ORDER", 1, int)   # (env) Lagrange order of the solid force/position fields
+DELTA_IB = H / VELOCITY_ORDER                # spacing of the IB grid (the Q2 velocity nodes)
+
+# ---- leaflet attachment: how deep the leaflet edge is embedded in the wall -------------------------
+# The leaflet and the wall are separate immersed solids; the embedded strip closes the gap between
+# them (their kernel supports overlap) and anchors the leaflet. Default 2 IB grid spacings (= H); it
+# must stay at least one IB spacing inside the wall's outer surface, checked by generate_mesh.py.
+EXT = _env("EXT", 2 * DELTA_IB)             # (env) cm
 
 # ---- solid meshes (sizes follow the fluid grid: marker spacing about half a fluid cell) -----------
 H_SOLID = _env("H_SOLID", H / 2)            # (env) wall surface element size near the root

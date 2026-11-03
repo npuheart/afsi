@@ -17,7 +17,7 @@ Units: CGS (cm, g, s; pressure dyn/cm²). Flow along +z.
 | blood | ρ = 1.1 g/cm³, μ = 0.036 dyn·s/cm² (paper) |
 | vessel wall | immersed solid, 0.2 cm thick, **rigid: tether only**, f = β (X_ref − x), β = 2×10⁷ dyn/cm⁴ |
 | leaflets | immersed solid, 0.015 cm thick, 4 elements across, compressible neo-Hookean ψ = μ/2 (I₁−3) − μ ln J + λ/2 (ln J)², E = 2×10⁶ dyn/cm², ν = 0.4 (paper) |
-| leaflet attachment | attachment edges extended 0.10 cm into the wall; that extension (part 5) is tethered too (`VALVE_TETHER=1`) |
+| leaflet attachment | attachment edges extended `EXT` into the wall, default 2 IB grid spacings = H (the IB grid is the Q2 velocity grid, spacing H/2); that extension (part 5) is tethered too (`VALVE_TETHER=1`) |
 | inlet z = −4 | plug inflow v = Q(t)/A e_z inside the lumen (r < 1.15), zero outside the lumen |
 | outlet z = 14.2 | p = 0, zero traction |
 | box sides | no-slip |
@@ -56,8 +56,8 @@ affected; subtracting (x0, y0, z0) in `IBMesh3D` would remove the restriction.
 conda activate afsi-dolfinx
 cd afsic/demo/semilunar_valve
 
-python generate_mesh.py                    # H=0.2: smoke-test grid and matching solids
-STEPS=300 OUTPUT_EVERY=50 mpiexec -n 4 python main.py
+EXT=0.1 python generate_mesh.py            # H=0.2 smoke test (the default EXT = 0.2 would reach the wall's outside)
+EXT=0.1 STEPS=300 OUTPUT_EVERY=50 mpiexec -n 4 python main.py
 
 H=0.1 python generate_mesh.py              # finer: solids follow H (marker spacing H/2)
 H=0.1 mpiexec -n 16 python main.py
@@ -70,6 +70,24 @@ Environment overrides (see `configuration.py`): `H`, `H_SOLID`, `WALL_T`, `WALL_
 Cost: Q2 velocity on a hexahedral box is heavy. At H = 0.2 (20×20×91 cells, 0.92 M velocity
 DOFs) one step takes about 40 s on one core and 10 GB of memory; use MPI. H = 0.1 has 8× the
 cells.
+
+## Embedding depth of the leaflets (`EXT`)
+
+The wall and the leaflets are separate immersed solids that interact only through the fluid. The
+strip of each leaflet embedded in the wall closes the gap between the two (their kernel supports
+overlap, so no flow passes between leaflet root and wall) and, held by the rigid wall and its own
+tether, anchors the leaflet. With the IB grid spacing Δ = H/2 (Q2 velocity nodes; the 4-point kernel
+reaches 2Δ), the default is `EXT = 2Δ = H`, and `generate_mesh.py` stops if the strip would come
+within Δ of the wall's outer surface (`EXT > WALL_T − Δ`), because the fluid outside the wall moves:
+
+| H | Δ | default EXT | limit WALL_T − Δ (WALL_T = 0.2) |
+|---|---|---|---|
+| 0.2 | 0.1 | 0.2 | 0.1 → stops: use `WALL_T=0.3` or `EXT=0.1` |
+| 0.1 | 0.05 | 0.1 | 0.15 |
+| 0.05 | 0.025 | 0.05 | 0.175 |
+
+With `VALVE_SHIFT` the commissures come off the wall by up to ≈ 0.7 mm; at fine grids that exceeds
+the kernel reach 2Δ, so lengthen `EXT` there.
 
 ## Moved leaflets with a matching vessel (`VALVE_SHIFT`)
 
@@ -86,7 +104,7 @@ relative to the moved wall.
 VALVE_SHIFT=0.1 python generate_mesh.py     # 1 mm; then VALVE_SHIFT=0.1 python main.py
 ```
 
-At H = 0.2 (signed distance to the moved wall, negative = in the lumen):
+At H = 0.2 with EXT = 0.1 (signed distance to the moved wall, negative = in the lumen):
 
 | d | attachment line, median | share deeper than 0.2 mm in the lumen | extension tips inside the wall |
 |---|---:|---:|---:|

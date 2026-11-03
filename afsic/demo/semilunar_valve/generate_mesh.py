@@ -60,6 +60,11 @@ def attachment_check(Pv, tv, part, Y, T, Y0):
 
 
 def main():
+    if cfg.EXT > cfg.WALL_T - cfg.DELTA_IB + 1e-12:
+        raise SystemExit(f"EXT = {cfg.EXT:g} cm reaches within one IB grid spacing ({cfg.DELTA_IB:g}) of the wall's "
+                         f"outer surface (WALL_T = {cfg.WALL_T:g}); refine H, thicken the wall (WALL_T) or set EXT")
+    if cfg.EXT < cfg.DELTA_IB:
+        print(f"warning: EXT = {cfg.EXT:g} cm is less than one IB grid spacing ({cfg.DELTA_IB:g})")
     fetch_lsdyna()
     os.makedirs(cfg.MESH_DIR, exist_ok=True)
     h_root, h_far = cfg.H_SOLID, 2 * cfg.H_SOLID
@@ -91,7 +96,7 @@ def main():
     # lumen radius at the inlet plane (for A in the plug inflow v = Q/A)
     ring = Y[np.abs(Y[:, 2] - cfg.Z_IN) < 1e-9]
     r_in = float(np.hypot(ring[:, 0], ring[:, 1]).mean())
-    meta = dict(valve_shift=shift_info, H=cfg.H, H_SOLID=cfg.H_SOLID, wall_layers=cfg.WALL_LAYERS, valve_refine=cfg.VALVE_REFINE,
+    meta = dict(valve_shift=shift_info, EXT=cfg.EXT, WALL_T=cfg.WALL_T, H=cfg.H, H_SOLID=cfg.H_SOLID, wall_layers=cfg.WALL_LAYERS, valve_refine=cfg.VALVE_REFINE,
                 r_inlet=r_in, wall_nodes=len(P), wall_tets=len(tets), valve_nodes=len(Pv), valve_tets=len(tv),
                 wall_quality=wq, valve_quality={k: (int(v) if isinstance(v, (int, np.integer)) else v)
                                                 for k, v in vq.items()})
