@@ -168,29 +168,114 @@ for _name, _s in (("wall", wall), ("valve", valve)):
 # =================================================================================================
 # diagnostics
 # =================================================================================================
+# =================================================================================================
+# checkpoint / restart and readable snapshots (same scheme as demo_444 and av2d: atomic .npz)
+# =================================================================================================
+def gather(f):
+    """Owned values of f on every rank -> the full array (global dof order) on rank 0."""
+    imap, bs = f.function_space.dofmap.index_map, f.function_space.dofmap.index_map_bs
+    n = imap.size_local
+    gi = imap.local_to_global(np.arange(n, dtype=np.int32))
+    parts = comm.gather((gi, f.x.array[:n * bs].reshape(n, bs).copy()), root=0)
+    if rank != 0:
+        return None
+    full = np.zeros((imap.size_global, bs))
+    for g, v in parts:
+        full[g] = v
+    return full
+
+
+def scatter(f, full):
+    """Inverse of gather(): set the owned values of f from the full array, update ghosts."""
+    full = comm.bcast(full, root=0)
+    imap, bs = f.function_space.dofmap.index_map, f.function_space.dofmap.index_map_bs
+    n = imap.size_local
+    gi = imap.local_to_global(np.arange(n, dtype=np.int32))
+    f.x.array[:n * bs] = full[gi].ravel()
+    f.x.scatter_forward()
+
+
+def dof_coords(Vsp):
+    """Coordinates of the owned dofs of a scalar/vector P1 space, gathered like gather()."""
+    imap = Vsp.dofmap.index_map
+    n = imap.size_local
+    gi = imap.local_to_global(np.arange(n, dtype=np.int32))
+    parts = comm.gather((gi, Vsp.tabulate_dof_coordinates()[:n].copy()), root=0)
+    if rank != 0:
+        return None
+    full = np.zeros((imap.size_global, 3))
+    for g, v in parts:
+        full[g] = v
+    return full
+
+
+STATE = {"u": ns.u_, "u_n": ns.u_n, "p": ns.p_, "f": ns.f, "wall_x": wall.x, "valve_x": valve.x}
+CKPT = OUT + "checkpoint.npz"
+
+
+def save_checkpoint(step):
+    data = {k: gather(v) for k, v in STATE.items()}
+    if rank == 0:
+        with open(OUT + "checkpoint.tmp", "wb") as fh:
+            np.savez(fh, step=step, nprocs=comm.size, h=cfg.H, dt=cfg.DT, **data)
+        os.replace(OUT + "checkpoint.tmp", CKPT)
+
+
+start = 0
+if os.environ.get("RESUME", "0") == "1" and os.path.exists(CKPT):
+    ck = np.load(CKPT) if rank == 0 else None
+    meta_ck = comm.bcast((int(ck["step"]), int(ck["nprocs"]), float(ck["h"]), float(ck["dt"])) if rank == 0 else None, root=0)
+    if meta_ck[1:] != (comm.size, cfg.H, cfg.DT):
+        raise RuntimeError(f"checkpoint was written with (nprocs, H, DT) = {meta_ck[1:]}, "
+                           f"this run has {(comm.size, cfg.H, cfg.DT)}")
+    for k, v in STATE.items():
+        scatter(v, ck[k] if rank == 0 else None)
+    for sld in (wall, valve):
+        sld.ib.evaluate_current_points(sld.x._cpp_object)
+    start = meta_ck[0]
+    if rank == 0:
+        print(f"resumed from {CKPT} at step {start} (t = {start * cfg.DT:.4f} s)", flush=True)
+
+suffix = f"_from{start:06d}" if start else ""
 u_io = Function(V_io, name="velocity")
-fu = XDMFFile(comm, OUT + "velocity.xdmf", "w")
+fu = XDMFFile(comm, OUT + f"velocity{suffix}.xdmf", "w")
 fu.write_mesh(mesh)
-fp = XDMFFile(comm, OUT + "pressure.xdmf", "w")
+fp = XDMFFile(comm, OUT + f"pressure{suffix}.xdmf", "w")
 fp.write_mesh(mesh)
-fw = XDMFFile(comm, OUT + "wall.xdmf", "w")
+fw = XDMFFile(comm, OUT + f"wall{suffix}.xdmf", "w")
 fw.write_mesh(wall.mesh)
-fv = XDMFFile(comm, OUT + "valve.xdmf", "w")
+fv = XDMFFile(comm, OUT + f"valve{suffix}.xdmf", "w")
 fv.write_mesh(valve.mesh)
 Vw_io = functionspace(wall.mesh, element("Lagrange", wall.mesh.topology.cell_name(), 1, shape=(gdim,)))
 Vv_io = functionspace(valve.mesh, element("Lagrange", valve.mesh.topology.cell_name(), 1, shape=(gdim,)))
 dw_io, dv_io = Function(Vw_io, name="displacement"), Function(Vv_io, name="displacement")
 disp_w, disp_v = Function(wall.V), Function(valve.V)
+Q_io = functionspace(mesh, element("Lagrange", mesh.topology.cell_name(), 1))
+p_io = Function(Q_io)
+SNAP_XYZ = {"fluid": dof_coords(V_io), "fluid_p": dof_coords(Q_io), "wall": dof_coords(Vw_io), "valve": dof_coords(Vv_io)}
 
-hist = open(OUT + "history.csv", "w") if rank == 0 else None
+
+def save_snapshot(step, t):
+    """Readable at any time: points + values of velocity, pressure and both solids' displacement."""
+    u_io.interpolate(ns.u_)
+    p_io.interpolate(ns.p_)
+    d = {"u": gather(u_io), "p": gather(p_io), "wall_d": gather(dw_io), "valve_d": gather(dv_io)}
+    if rank == 0:
+        with open(OUT + "snapshot.tmp", "wb") as fh:
+            np.savez(fh, step=step, t=t, fluid_xyz=SNAP_XYZ["fluid"], fluid_p_xyz=SNAP_XYZ["fluid_p"], wall_xyz=SNAP_XYZ["wall"],
+                     valve_xyz=SNAP_XYZ["valve"], **d)
+        os.replace(OUT + "snapshot.tmp", OUT + f"snapshot_{step:06d}.npz")
+
+hist = open(OUT + "history.csv", "a" if start else "w") if rank == 0 else None
 if rank == 0:
-    hist.write("step,t,Q_in,max_u,max_p,wall_max_disp,valve_max_disp,wall_force_norm,valve_force_norm\n")
+    if not start:
+        hist.write("step,t,Q_in,max_u,max_p,wall_max_disp,valve_max_disp,wall_force_norm,valve_force_norm\n")
     print(f"semilunar valve: grid {cfg.NX}x{cfg.NY}x{cfg.NZ} (h={cfg.H}), dt={cfg.DT}, steps={cfg.NSTEPS}, "
           f"wall {meta['wall_tets']} tets, valve {meta['valve_tets']} tets, r_in={R_IN:.4f}, out={OUT}", flush=True)
 
 log.set_log_level(log.LogLevel.WARNING)
 t0 = time.time()
-for step in range(cfg.NSTEPS):
+for step in range(start, cfg.NSTEPS):
     t = (step + 1) * cfg.DT
     u_in.x.array[:] = plug * (cfg.q_inlet(t) / A_IN)
     ns.solve_one_step()
@@ -226,6 +311,9 @@ for step in range(cfg.NSTEPS):
         dv_io.interpolate(disp_v)
         fw.write_function(dw_io, t)
         fv.write_function(dv_io, t)
+        save_snapshot(step + 1, t)
+    if (step + 1) % cfg.CHECKPOINT_EVERY == 0 or step == cfg.NSTEPS - 1:
+        save_checkpoint(step + 1)
 
 for fx in (fu, fp, fw, fv):
     fx.close()

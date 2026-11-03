@@ -55,6 +55,7 @@ DT = _env("DT", 1.0e-4)               # paper
 T_END = _env("T_END", 1.0)            # one heartbeat (paper)
 NSTEPS = _env("STEPS", int(round(T_END / DT)), int)
 OUTPUT_EVERY = _env("OUTPUT_EVERY", max(NSTEPS // 50, 1), int)
+CHECKPOINT_EVERY = _env("CHECKPOINT_EVERY", OUTPUT_EVERY, int)   # (env) atomic checkpoint.npz; RESUME=1 continues
 
 # ---- inflow ------------------------------------------------------------------------------------------
 # Paper: plug flow v = -(Q/A) n at the inlet, Q(t) from Oks et al. (2022), shown only as a figure.

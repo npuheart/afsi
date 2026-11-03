@@ -71,6 +71,28 @@ Cost: Q2 velocity on a hexahedral box is heavy. At H = 0.2 (20×20×91 cells, 0.
 DOFs) one step takes about 40 s on one core and 10 GB of memory; use MPI. H = 0.1 has 8× the
 cells.
 
+## Checkpoint and restart
+
+Every `CHECKPOINT_EVERY` steps (default: `OUTPUT_EVERY`) `main.py` writes `checkpoint.npz` atomically
+(temporary file, then rename; the scheme of `demo_444` and `av2d`): the Chorin solver state `u_`,
+`u_n`, `p_`, `f`, the current positions of the wall and the leaflets, the step, the number of MPI
+ranks, `H` and `DT`. Fields are gathered in global dof order, so a restart needs the same number of
+ranks, `H` and `DT` (checked on reading).
+
+```bash
+RESUME=1 mpiexec -n 4 python main.py        # continues from OUTPUT_PATH/checkpoint.npz
+```
+
+`history.csv` is appended; the XDMF files of the continuation are written with the suffix
+`_from<step>` so the earlier ones are kept.
+
+Each output also writes `snapshot_<step>.npz` (points and values of velocity, pressure and both
+solids' displacement), closed immediately, so results can be read while a run is going. The XDMF/HDF5
+files are only readable after the run ends: HDF5 metadata is flushed when the file is closed.
+
+*Not yet tested:* checkpoint, restart and snapshots were added after the last run and have not been
+exercised.
+
 ## Output (`data/run_h<H>_dt<DT>/` or `OUTPUT_PATH`)
 
 `velocity.xdmf`, `pressure.xdmf`, `wall.xdmf` and `valve.xdmf` (displacements), and
