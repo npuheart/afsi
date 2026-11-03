@@ -13,7 +13,7 @@ Units: CGS (cm, g, s; pressure dyn/cm²). Flow along +z.
 
 | | |
 |---|---|
-| fluid | Cartesian box \|x\|,\|y\| ≤ 2.0, z ∈ [−4.0, 14.2] (inlet 4 cm upstream of the root, length 18.2 cm), Q2/Q1, Chorin projection |
+| fluid | Cartesian box \|x\|,\|y\| ≤ 2.0, z ∈ [−4.0, 14.2] (inlet 4 cm upstream of the root, length 18.2 cm), Q2/Q1, Chorin projection; computed shifted to the origin (see below) |
 | blood | ρ = 1.1 g/cm³, μ = 0.036 dyn·s/cm² (paper) |
 | vessel wall | immersed solid, 0.2 cm thick, **rigid: tether only**, f = β (X_ref − x), β = 2×10⁷ dyn/cm⁴ |
 | leaflets | immersed solid, 0.015 cm thick, 4 elements across, compressible neo-Hookean ψ = μ/2 (I₁−3) − μ ln J + λ/2 (ln J)², E = 2×10⁶ dyn/cm², ν = 0.4 (paper) |
@@ -29,6 +29,18 @@ zero in diastole). Supply the digitised curve as a two-column CSV `t,Q` via `INF
 
 **Coupling.** `IBInterpolation3D.solid_to_fluid` overwrites the fluid force, so each solid spreads
 into its own fluid function and `main.py` sums the two before the next fluid step.
+
+**Box at the origin.** The IB kernels in `IBMesh3D` (`interpolation`, `distribution`) are built from
+the absolute particle coordinates, `LKernel({particle.x, particle.y, particle.z}, {dx, dy, dz})`,
+without subtracting the box origin (x0, y0, z0). With a box that does not start at the origin,
+points with negative coordinates map to out-of-range nodes and are skipped (zero velocity, no force)
+and the others are shifted. In a first run with the box [−2, 2]² × [−4, 14.2], 76 % of the wall
+points and 62 % of the leaflet points received no velocity. `main.py` therefore computes in
+shifted coordinates (box [0, 4] × [0, 4] × [0, 18.2], solids moved by (2, 2, 4) on reading, axis at
+(2, 2)) and checks at start-up that a uniform fluid velocity reaches at least 95 % of each solid's
+points (99.2 % of the wall: the rest are the end-plane rings, whose kernels leave the grid; 100 % of
+the leaflets). Output is in the shifted frame. The other demos use boxes at the origin and are not
+affected; subtracting (x0, y0, z0) in `IBMesh3D` would remove the restriction.
 
 ## Differences from the paper
 

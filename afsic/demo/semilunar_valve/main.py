@@ -1,6 +1,9 @@
 """Semilunar (aortic) valve FSI with a rigid, tethered vessel wall.
 
-Fluid: Cartesian box [-W, W]^2 x [Z_IN, Z_OUT], Q2/Q1, Chorin projection.
+Fluid: Cartesian box, Q2/Q1, Chorin projection. The IB kernels of IBMesh3D assume that the box starts
+at the origin (the kernel is built from absolute coordinates), so the computation runs in shifted
+coordinates: box [0, 2W] x [0, 2W] x [0, Z_OUT - Z_IN], solids moved by OFFSET = (W, W, -Z_IN) on
+reading, vessel axis at (W, W). All output is in these shifted coordinates.
   inlet  z = Z_IN : plug inflow v = Q(t)/A e_z inside the lumen (r < r_inlet), zero outside
   outlet z = Z_OUT: p = 0, zero traction (natural)
   sides           : no-slip
@@ -44,24 +47,27 @@ R_IN = meta["r_inlet"]
 A_IN = np.pi * R_IN ** 2
 OUT = cfg.output_path()
 W = cfg.HALF_WIDTH
+L = cfg.Z_OUT - cfg.Z_IN
+OFFSET = np.array([W, W, -cfg.Z_IN])
 
 # =================================================================================================
 # fluid
 # =================================================================================================
-mesh = dolfinx.mesh.create_box(comm, ((-W, -W, cfg.Z_IN), (W, W, cfg.Z_OUT)), (cfg.NX, cfg.NY, cfg.NZ),
+mesh = dolfinx.mesh.create_box(comm, ((0.0, 0.0, 0.0), (2 * W, 2 * W, L)), (cfg.NX, cfg.NY, cfg.NZ),
                                cell_type=CellType.hexahedron, ghost_mode=GhostMode.shared_facet)
 gdim, fdim = 3, 2
 V = functionspace(mesh, element("Lagrange", mesh.topology.cell_name(), cfg.VELOCITY_ORDER, shape=(gdim,)))
 Q = functionspace(mesh, element("Lagrange", mesh.topology.cell_name(), cfg.PRESSURE_ORDER))
 V_io = functionspace(mesh, element("Lagrange", mesh.topology.cell_name(), 1, shape=(gdim,)))
 
-f_in = locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[2], cfg.Z_IN))
-f_out = locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[2], cfg.Z_OUT))
-f_side = locate_entities_boundary(mesh, fdim, lambda x: np.isclose(np.abs(x[0]), W) | np.isclose(np.abs(x[1]), W))
+f_in = locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[2], 0.0))
+f_out = locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[2], L))
+f_side = locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[0], 0.0) | np.isclose(x[0], 2 * W)
+                                  | np.isclose(x[1], 0.0) | np.isclose(x[1], 2 * W))
 
 # plug profile with unit mean velocity in the lumen; scaled by Q(t)/A every step
 u_in = Function(V)
-u_in.interpolate(lambda x: np.vstack([0 * x[0], 0 * x[0], (np.hypot(x[0], x[1]) < R_IN).astype(float)]))
+u_in.interpolate(lambda x: np.vstack([0 * x[0], 0 * x[0], (np.hypot(x[0] - W, x[1] - W) < R_IN).astype(float)]))
 plug = u_in.x.array.copy()
 u_zero = np.zeros(gdim, dtype=PETSc.ScalarType)
 bcu = [dirichletbc(u_in, locate_dofs_topological(V, fdim, f_in)),
@@ -75,6 +81,7 @@ ns = ChorinSolver(V, Q, bcu, bcp, cfg.DT, cfg.RHO, cfg.MU)
 def read_solid(name):
     with XDMFFile(comm, os.path.join(cfg.MESH_DIR, name), "r") as fx:
         s = fx.read_mesh(name="Grid")
+    s.geometry.x[:] += OFFSET                               # into the shifted frame (see above)
     Vs = functionspace(s, element("Lagrange", s.topology.cell_name(), cfg.FORCE_ORDER, shape=(gdim,)))
     return s, Vs
 
@@ -114,7 +121,7 @@ class Solid:
         return comm.allreduce(local, op=MPI.MAX)
 
 
-ibmesh = IBMesh3D(-W, W, -W, W, cfg.Z_IN, cfg.Z_OUT, cfg.NX, cfg.NY, cfg.NZ, cfg.VELOCITY_ORDER)
+ibmesh = IBMesh3D(0.0, 2 * W, 0.0, 2 * W, 0.0, L, cfg.NX, cfg.NY, cfg.NZ, cfg.VELOCITY_ORDER)
 coords_bg = Function(V)
 coords_bg.interpolate(lambda x: np.vstack([x[0], x[1], x[2]]))
 ibmesh.build_map(coords_bg._cpp_object)
@@ -143,6 +150,20 @@ Xv = SpatialCoordinate(valve.mesh)
 dv = TestFunction(valve.V)
 dxv = dx(domain=valve.mesh)
 valve.set_form(-inner(P, grad(dv)) * dxv - cfg.BETA * chi_ext * inner(valve.x - Xv, dv) * dxv)
+
+# coupling self-check: a uniform fluid velocity must reach (almost) every solid point; points whose
+# kernel leaves the grid (end planes) get a partial weight
+_u1 = Function(V)
+_u1.interpolate(lambda x: np.vstack([1.0 + 0 * x[0], 0 * x[0], 0 * x[0]]))
+for _name, _s in (("wall", wall), ("valve", valve)):
+    _s.ib.fluid_to_solid(_u1._cpp_object, _s.v._cpp_object)
+    _n = _s.V.dofmap.index_map.size_local                       # owned nodes only (ghosts are not written)
+    _ok = np.isclose(_s.v.x.array.reshape(-1, 3)[:_n, 0], 1.0)
+    _frac = comm.allreduce(int(_ok.sum()), op=MPI.SUM) / comm.allreduce(len(_ok), op=MPI.SUM)
+    if rank == 0:
+        print(f"coupling check: {_name}: {_frac * 100:.1f}% of points interpolate a uniform field exactly", flush=True)
+    assert _frac > 0.95, f"IB coupling check failed for the {_name} ({_frac:.3f}); is the box at the origin?"
+    _s.v.x.array[:] = 0.0
 
 # =================================================================================================
 # diagnostics
