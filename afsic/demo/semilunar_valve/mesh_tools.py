@@ -213,7 +213,7 @@ def wall_mesh(Y, T, thickness, layers, smooth=300, z_ends=()):
 PART_ROOT, PART_BODY, PART_EXT = 3, 4, 5
 
 
-def valve_mesh(dyna_dir, thickness, layers, refine, ext, ext_rows, wall_Y, wall_T):
+def valve_mesh(dyna_dir, thickness, layers, refine, ext, ext_rows, wall_Y, wall_T, return_shell=False):
     """Leaflet solid: LS-DYNA shells (mid-surface) refined, attachment edges extended outwards by `ext`,
     extruded to `thickness` in `layers` layers -> tetrahedra. Parts: 3 root strip (LS-DYNA LF_root),
     4 leaflet body (LF_top), 5 attachment extension."""
@@ -308,6 +308,8 @@ def valve_mesh(dyna_dir, thickness, layers, refine, ext, ext_rows, wall_Y, wall_
             part.append(PART_EXT)
     X, attach = np.array(Xl), np.array(att)
 
+    if return_shell:                                     # mid-surface shell (before the extrusion)
+        return X, faces, np.array(part)
     # extrusion through the thickness (shell = mid-surface), conforming tetrahedra
     nrm = np.zeros_like(X)
     for c in faces:
